@@ -1,0 +1,7 @@
+{
+  "name": "Tiancuji",
+  "description": "An interactive pixel room and dynamic emotional dialogue engine for roleplay with lifelike custom characters.",
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
