@@ -18,7 +18,7 @@ import {
 } from '../engine';
 import { callLlm, buildSystemPrompt, isLlmConfigured, type LlmConfig } from '../lib/llm';
 import { parseSegments } from '../engine/postprocess';
-import { checkSensitiveWords, loadUserPromptProfile } from '../lib/customStore';
+import { checkSensitiveWords, loadUserPromptProfile, hardResetAllLocalData } from '../lib/customStore';
 
 
 const STORAGE_KEY = '__rp_engine_state';
@@ -295,6 +295,69 @@ export function useEngine() {
     rerender();
   }, [persist, rerender]);
 
+  /**
+   * 修改某条用户消息的内容，并从该条消息开始截断后续内容。
+   * （调用方在之后调用 sendMessage 即可重新生成新的角色回复，
+   *  或者直接用 editAndResend 一次性完成）
+   */
+  const editMessage = useCallback((messageId: string, newContent: string) => {
+    const s = stateRef.current;
+    const msgIndex = s.messages.findIndex((m) => m.id === messageId);
+    if (msgIndex === -1) return;
+
+    const targetMsg = s.messages[msgIndex];
+    if (targetMsg.role !== 'user') return;
+
+    // 1. 用这条消息的快照回到"发送之前"的状态
+    if (targetMsg.snapshot) {
+      s.emotion = { ...targetMsg.snapshot.emotion };
+      s.backgroundThreads = targetMsg.snapshot.backgroundThreads.map((t) => ({ ...t }));
+      s.triggeredAnchors = targetMsg.snapshot.triggeredAnchors.map((a) => ({ ...a }));
+    }
+    // 2. 截断到这条消息之前（不含这条）
+    s.messages = s.messages.slice(0, msgIndex);
+
+    previousEmotionRef.current = null;
+    emotionConfirmedRef.current = true;
+    lastIntentRef.current = null;
+
+    persist(s);
+    rerender();
+  }, [persist, rerender]);
+
+  /**
+   * 修改某条用户消息并立即重新发送（从该点开始重新走完整的流程）
+   */
+  const editAndResendMessage = useCallback(
+    async (messageId: string, newContent: string, llmConfig?: LlmConfig) => {
+      editMessage(messageId, newContent);
+      // 在 editMessage 截断和重置状态后，用同样的 sendMessage 流程发送新内容
+      await sendMessage(newContent, llmConfig);
+    },
+    [editMessage, sendMessage],
+  );
+
+  /**
+   * 一键硬重置：清空所有 localStorage（引擎状态、人设、词典、CSS、LLM配置），
+   * 并恢复到默认初始状态。解决"设备卡死、关掉再开还是旧数据"的问题。
+   */
+  const hardReset = useCallback(() => {
+    // 1. 清空所有本地存储
+    hardResetAllLocalData();
+    // 2. 重置内存状态到默认角色
+    const defaultChar = MOCK_CHARACTERS[0];
+    const defaultState = createSessionState(defaultChar);
+    stateRef.current = defaultState;
+    previousEmotionRef.current = null;
+    emotionConfirmedRef.current = true;
+    lastIntentRef.current = null;
+    lastFallbackRef.current = false;
+    // 3. 保存干净的初始状态（不依赖 saved.current 旧值）
+    saved.current = null;
+    persist(defaultState);
+    rerender();
+  }, [persist, rerender]);
+
   const controller = {
     ready: readyRef.current,
     getCharacter: (): Character => getCharacterById(stateRef.current.characterId) ?? MOCK_CHARACTERS[0],
@@ -314,6 +377,8 @@ export function useEngine() {
     resetEmotion,
     confirmEmotion,
     rollbackToMessage,
+    editAndResendMessage,
+    hardReset,
     reload: () => {
       const freshChar = getCharacterById(stateRef.current.characterId);
       if (freshChar) {

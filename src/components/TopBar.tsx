@@ -7,6 +7,7 @@ import {
   RotateCcw,
   Trash2,
   X,
+  AlertTriangle,
 } from 'lucide-react';
 import type { Character } from '../data/types';
 
@@ -19,6 +20,7 @@ interface Props {
   onClearHistory: () => void;
   onResetEmotion: () => void;
   onOpenSettings: () => void;
+  onHardReset?: () => void;
   llmReady: boolean;
 }
 
@@ -39,6 +41,7 @@ export default function TopBar({
   onClearHistory,
   onResetEmotion,
   onOpenSettings,
+  onHardReset,
   llmReady,
 }: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -110,8 +113,18 @@ export default function TopBar({
           </div>
         </div>
 
-        {/* Right: settings + sidebar toggle */}
+        {/* Right: settings + hard reset + sidebar toggle */}
         <div className="flex items-center gap-1">
+          {onHardReset && (
+            <button
+              onClick={onHardReset}
+              className="size-9 flex items-center justify-center rounded-lg hover:bg-red-500/15 text-white/40 hover:text-red-400 transition-colors"
+              aria-label="完全清除所有缓存（解除设备卡死）"
+              title="⚠️ 完全重置：清除所有本地数据（对话、人设、CSS、LLM配置等），解决关闭网页再开还是旧数据的问题"
+            >
+              <AlertTriangle className="size-4" />
+            </button>
+          )}
           <button
             onClick={onOpenSettings}
             className="size-9 flex items-center justify-center rounded-lg hover:bg-white/5 text-white/60 hover:text-white transition-colors"

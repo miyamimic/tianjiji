@@ -208,3 +208,42 @@ export function saveUserPromptProfile(profile: string): void {
   }
 }
 
+// -------------------------------------------------------------
+// 5. Hard Reset / Purge All Cache (解除设备锁定感)
+// -------------------------------------------------------------
+
+const ALL_KNOWN_KEYS = [
+  CSS_STORAGE_KEY,
+  WORDS_STORAGE_KEY,
+  CHARS_STORAGE_KEY,
+  USER_PROFILE_KEY,
+  '__rp_engine_state',
+  '__rp_engine_llm_config',
+];
+
+/**
+ * 清除所有本地缓存数据，解决"设备卡死"、"关掉再开还是旧数据"的问题。
+ * 包含：引擎状态、角色编辑、敏感词、CSS、主控档案、LLM配置
+ */
+export function hardResetAllLocalData(): void {
+  try {
+    for (const key of ALL_KNOWN_KEYS) {
+      localStorage.removeItem(key);
+    }
+    // 兜底：扫一下所有 key，清掉带 __rp_engine_ 前缀的
+    const prefix = '__rp_engine_';
+    const toRemove: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(prefix)) {
+        toRemove.push(k);
+      }
+    }
+    for (const k of toRemove) {
+      localStorage.removeItem(k);
+    }
+  } catch {
+    // ignore
+  }
+}
+

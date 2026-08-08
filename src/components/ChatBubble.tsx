@@ -1,10 +1,12 @@
 import type { MessageSegment, ChatMessage } from '../data/types';
-import { History, Clock, ArrowLeftRight } from 'lucide-react';
+import { History, Pencil, X, Check } from 'lucide-react';
+import { useState } from 'react';
 
 interface Props {
   message: ChatMessage;
   characterName?: string;
   onRollback?: (id: string) => void;
+  onEdit?: (id: string, newContent: string) => void;
 }
 
 const EMOTION_SHORT: Record<string, string> = {
@@ -15,11 +17,6 @@ const EMOTION_SHORT: Record<string, string> = {
   desire: '欲',
   warmth: '温',
 };
-
-function formatTime(ts: number) {
-  const d = new Date(ts);
-  return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
-}
 
 function SpeechSegment({ text }: { text: string }) {
   return <p className="whitespace-pre-wrap leading-relaxed text-white/90 text-[14px]">{text}</p>;
@@ -54,57 +51,101 @@ function renderSegment(seg: MessageSegment, idx: number) {
   }
 }
 
-export default function ChatBubble({ message, characterName, onRollback }: Props) {
+export default function ChatBubble({ message, characterName, onRollback, onEdit }: Props) {
   const isUser = message.role === 'user';
+  const [isEditing, setIsEditing] = useState(false);
+  const [editText, setEditText] = useState(message.content);
+
+  const handleSaveEdit = () => {
+    const trimmed = editText.trim();
+    if (trimmed && trimmed !== message.content && onEdit) {
+      onEdit(message.id, trimmed);
+    }
+    setIsEditing(false);
+  };
+
+  const handleCancelEdit = () => {
+    setEditText(message.content);
+    setIsEditing(false);
+  };
 
   if (isUser) {
     return (
-      <div className="flex flex-col items-end gap-1 px-2 group">
+      <div className="flex flex-col items-end gap-2 px-2">
         <div className="flex justify-end gap-3 w-full">
-          {/* Main Bubble Content */}
-          <div className="max-w-[78%] space-y-1">
-            <div className="rounded-2xl rounded-tr-sm px-4 py-3 bg-gradient-to-l from-[hsl(28_85%_62%/0.15)] to-[hsl(28_85%_62%/0.06)] border border-[hsl(28_85%_62%/0.25)] backdrop-blur-md shadow-lg shadow-black/10 transition-all duration-300 hover:border-[hsl(28_85%_62%/0.4)]">
-              <div className="space-y-1.5">
-                {message.segments.map((s, i) => renderSegment(s, i))}
-              </div>
+          {/* Main Bubble Content - 宽度从 78% 调整到 65% */}
+          <div className="max-w-[65%] space-y-1">
+            <div className="rounded-2xl rounded-tr-sm px-4 py-3 bg-gradient-to-l from-[hsl(28_85%_62%/0.2)] to-[hsl(28_85%_62%/0.08)] border border-[hsl(28_85%_62%/0.35)] backdrop-blur-md shadow-lg shadow-black/10 transition-all duration-300">
+              {isEditing ? (
+                <div className="space-y-2">
+                  <textarea
+                    value={editText}
+                    onChange={(e) => setEditText(e.target.value)}
+                    className="w-full bg-black/30 border border-[hsl(28_85%_62%/0.4)] rounded-lg px-3 py-2 text-[14px] text-white focus:outline-none focus:border-[hsl(28_85%_62%)] resize-none min-h-[80px]"
+                    autoFocus
+                  />
+                  <div className="flex justify-end gap-2">
+                    <button
+                      onClick={handleCancelEdit}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white/70 text-xs transition-colors"
+                    >
+                      <X className="size-3" /> 取消
+                    </button>
+                    <button
+                      onClick={handleSaveEdit}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-[hsl(28_85%_62%)] hover:bg-[hsl(28_85%_62%/0.9)] text-[hsl(28_30%_10%)] text-xs font-medium transition-colors"
+                    >
+                      <Check className="size-3" /> 保存并重算
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  {message.segments.map((s, i) => renderSegment(s, i))}
+                </div>
+              )}
             </div>
+
+            {/* Action Bar - 紧贴气泡，按钮清晰可见，无需hover */}
+            {!isEditing && (
+              <div className="flex items-center gap-1.5 justify-end mt-1">
+                {onEdit && (
+                  <button
+                    onClick={() => setIsEditing(true)}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 hover:bg-[hsl(28_85%_62%/0.3)] hover:text-white border border-white/15 hover:border-[hsl(28_85%_62%/0.5)] text-[11px] text-white/70 transition-all shadow-md cursor-pointer"
+                    title="修改此条消息（保存后将从该条开始重新计算后续对话）"
+                  >
+                    <Pencil className="size-3.5" />
+                    <span>修改</span>
+                  </button>
+                )}
+
+                {onRollback && (
+                  <button
+                    onClick={() => onRollback(message.id)}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 hover:bg-[hsl(28_85%_62%/0.3)] hover:text-white border border-white/15 hover:border-[hsl(28_85%_62%/0.5)] text-[11px] text-white/70 transition-all shadow-md cursor-pointer"
+                    title="回溯引擎到此消息时的情绪、线程和快照状态"
+                  >
+                    <History className="size-3.5" />
+                    <span>回溯至此</span>
+                    {message.snapshot && (
+                      <span className="text-[10px] text-white/50 pl-1 border-l border-white/20 ml-1">
+                        {Object.entries(message.snapshot.emotion)
+                          .map(([k, v]) => `${EMOTION_SHORT[k]}${Math.round(v * 100)}`)
+                          .slice(0, 2)
+                          .join(' ')}
+                      </span>
+                    )}
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* User Avatar */}
           <div className="size-9 shrink-0 rounded-full flex items-center justify-center bg-[hsl(217_18%_18%)] text-white/80 text-xs font-semibold border border-white/10 shadow-md">
             我
           </div>
-        </div>
-
-        {/* Action/Meta Bar */}
-        <div className="flex items-center gap-3 pr-12 text-[10px] text-white/30 h-5 mt-0.5 select-none">
-          <span className="flex items-center gap-1">
-            <Clock className="size-3 text-white/20" />
-            {formatTime(message.timestamp)}
-          </span>
-
-          {onRollback && (
-            <button
-              onClick={() => onRollback(message.id)}
-              className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/5 hover:bg-[hsl(28_85%_62%/0.25)] hover:text-white border border-white/5 hover:border-[hsl(28_85%_62%/0.5)] text-[10px] text-white/50 transition-all shadow-md group/btn cursor-pointer"
-              title="回溯引擎到此消息时的情绪、线程和快照状态"
-            >
-              <History className="size-3 text-white/40 group-hover/btn:text-[hsl(28_85%_62%)] group-hover/btn:rotate-[-45deg] transition-all duration-300" />
-              <span>回溯至此</span>
-              {message.snapshot ? (
-                <span className="text-[9px] text-white/25 group-hover/btn:text-white/60 pl-1 border-l border-white/10 ml-1">
-                  {Object.entries(message.snapshot.emotion)
-                    .map(([k, v]) => `${EMOTION_SHORT[k]}${Math.round(v * 100)}`)
-                    .slice(0, 3)
-                    .join(' ')}
-                </span>
-              ) : (
-                <span className="text-[9px] text-white/25 group-hover/btn:text-white/60 pl-1 border-l border-white/10 ml-1">
-                  初始基准
-                </span>
-              )}
-            </button>
-          )}
         </div>
       </div>
     );
@@ -114,58 +155,49 @@ export default function ChatBubble({ message, characterName, onRollback }: Props
   const isWarning = message.content.includes('⚠️') || message.content.includes('拦截');
 
   return (
-    <div className="flex flex-col items-start gap-1 px-2 group">
+    <div className="flex flex-col items-start gap-2 px-2">
       <div className="flex justify-start gap-3 w-full">
         {/* Avatar */}
         <div className={`size-9 shrink-0 rounded-full bg-gradient-to-br ${isWarning ? 'from-red-500 to-red-600 text-white' : 'from-[hsl(28_85%_62%)] to-[hsl(28_85%_62%/0.6)] text-[hsl(28_30%_10%)]'} flex items-center justify-center text-sm font-bold ring-2 ring-[hsl(28_85%_62%/0.3)] shadow-lg shadow-[hsl(28_85%_62%/0.15)]`}>
           {isWarning ? '警' : (characterName || '?').charAt(0)}
         </div>
 
-        {/* Content Bubble */}
-        <div className="max-w-[78%] space-y-1">
+        {/* Content Bubble - 宽度从 78% 调整到 65% */}
+        <div className="max-w-[65%] space-y-1">
           {characterName && !isWarning && (
-            <div className="text-[11px] text-white/40 pl-1 font-medium tracking-wide select-none">{characterName}</div>
+            <div className="text-[11px] text-white/60 pl-1 font-medium tracking-wide select-none">{characterName}</div>
           )}
-          <div className={`rounded-2xl rounded-tl-sm px-4 py-3 bg-gradient-to-r ${isWarning ? 'from-red-500/10 to-red-500/5 border-red-500/30' : 'from-[hsl(220_22%_13%/0.7)] to-[hsl(220_22%_13%/0.45)] border-white/10'} border backdrop-blur-md text-white shadow-lg shadow-black/10 transition-all duration-300 hover:border-white/20`}>
+          <div className={`rounded-2xl rounded-tl-sm px-4 py-3 bg-gradient-to-r ${isWarning ? 'from-red-500/10 to-red-500/5 border-red-500/30' : 'from-[hsl(220_22%_13%/0.85)] to-[hsl(220_22%_13%/0.6)] border-white/15'} border backdrop-blur-md text-white shadow-lg shadow-black/10 transition-all duration-300`}>
             <div className="space-y-1.5">
               {message.segments.map((s, i) => renderSegment(s, i))}
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* Action/Meta Bar */}
-      {!isWarning && (
-        <div className="flex items-center gap-3 pl-12 text-[10px] text-white/30 h-5 mt-0.5 select-none">
-          <span className="flex items-center gap-1">
-            <Clock className="size-3 text-white/20" />
-            {formatTime(message.timestamp)}
-          </span>
-
-          {onRollback && (
-            <button
-              onClick={() => onRollback(message.id)}
-              className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-white/5 hover:bg-[hsl(28_85%_62%/0.25)] hover:text-white border border-white/5 hover:border-[hsl(28_85%_62%/0.5)] text-[10px] text-white/50 transition-all shadow-md group/btn cursor-pointer"
-              title="回溯引擎到此消息时的情绪、线程和快照状态"
-            >
-              <History className="size-3 text-white/40 group-hover/btn:text-[hsl(28_85%_62%)] group-hover/btn:rotate-[-45deg] transition-all duration-300" />
-              <span>回溯至此</span>
-              {message.snapshot ? (
-                <span className="text-[9px] text-white/25 group-hover/btn:text-white/60 pl-1 border-l border-white/10 ml-1">
-                  {Object.entries(message.snapshot.emotion)
-                    .map(([k, v]) => `${EMOTION_SHORT[k]}${Math.round(v * 100)}`)
-                    .slice(0, 3)
-                    .join(' ')}
-                </span>
-              ) : (
-                <span className="text-[9px] text-white/25 group-hover/btn:text-white/60 pl-1 border-l border-white/10 ml-1">
-                  初始基准
-                </span>
+          {/* Action Bar - 紧贴气泡，按钮清晰可见，无需hover */}
+          {!isWarning && (
+            <div className="flex items-center gap-1.5 mt-1">
+              {onRollback && (
+                <button
+                  onClick={() => onRollback(message.id)}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-white/10 hover:bg-[hsl(28_85%_62%/0.3)] hover:text-white border border-white/15 hover:border-[hsl(28_85%_62%/0.5)] text-[11px] text-white/70 transition-all shadow-md cursor-pointer"
+                  title="回溯引擎到此消息时的情绪、线程和快照状态"
+                >
+                  <History className="size-3.5" />
+                  <span>回溯至此</span>
+                  {message.snapshot && (
+                    <span className="text-[10px] text-white/50 pl-1 border-l border-white/20 ml-1">
+                      {Object.entries(message.snapshot.emotion)
+                        .map(([k, v]) => `${EMOTION_SHORT[k]}${Math.round(v * 100)}`)
+                        .slice(0, 2)
+                        .join(' ')}
+                    </span>
+                  )}
+                </button>
               )}
-            </button>
+            </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

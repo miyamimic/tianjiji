@@ -64,6 +64,26 @@ export default function App() {
     }
   };
 
+  const handleEditMessage = async (id: string, newContent: string) => {
+    setIsLoading(true);
+    try {
+      await engine.editAndResendMessage(id, newContent, llmReady ? llmConfig : undefined);
+    } catch (e) {
+      console.error('修改消息失败', e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleHardReset = () => {
+    if (window.confirm('⚠️ 确定要完全重置吗？\n\n这将清除：所有对话历史、角色编辑、敏感词、自定义CSS、主控档案、LLM配置。\n关闭网页再打开就是完全干净的初始状态，不再被旧数据卡住。')) {
+      engine.hardReset();
+      // 重载 LLM 配置（已被清空，所以会得到默认空配置）
+      setLlmConfig(loadLlmConfig());
+      setSidebarOpen(false);
+    }
+  };
+
   return (
     <div className="relative h-screen w-full overflow-hidden bg-[hsl(222_28%_9%)]">
       {/* Pixel Room Scene - the background world */}
@@ -83,6 +103,7 @@ export default function App() {
         onClearHistory={() => engine.clearHistory()}
         onResetEmotion={() => engine.resetEmotion()}
         onOpenSettings={() => setSettingsOpen(true)}
+        onHardReset={handleHardReset}
         llmReady={llmReady}
       />
 
@@ -131,6 +152,7 @@ export default function App() {
                   message={m}
                   characterName={m.role === 'character' ? character.name : undefined}
                   onRollback={(id) => engine.rollbackToMessage(id)}
+                  onEdit={m.role === 'user' ? handleEditMessage : undefined}
                 />
               </div>
             ))}
