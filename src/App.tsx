@@ -1,170 +1,203 @@
-import { useState, useRef, useEffect } from 'react';
-import PixelRoom from '@/components/PixelRoom';
-import TopBar from '@/components/TopBar';
-import Sidebar from '@/components/Sidebar';
-import ChatInput from '@/components/ChatInput';
-import ChatBubble from '@/components/ChatBubble';
-import TypingIndicator from '@/components/TypingIndicator';
-import SettingsModal from '@/components/SettingsModal';
-import { MOCK_CHARACTERS } from '@/data/characters';
-import { useEngine } from '@/hooks/useEngine';
-import { loadLlmConfig, isLlmConfigured, type LlmConfig } from '@/lib/llm';
-import { loadCustomCss, applyCustomCss } from '@/lib/customStore';
+import { useRef, useState } from 'react';
+import WeightTracker from './components/WeightTracker';
+import MealTracker from './components/MealTracker';
+import { exportData, importData } from './lib/storage';
+import type { BackupData } from './lib/storage';
 
+type Tab = 'diet' | 'weight' | 'data';
 
 export default function App() {
-  const engine = useEngine();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [isLoading, setIsLoading] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [weather, setWeather] = useState<'clear' | 'rain'>('clear');
-  const [llmConfig, setLlmConfig] = useState<LlmConfig>(loadLlmConfig());
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [tab, setTab] = useState<Tab>('diet');
+  const [refreshKey, setRefreshKey] = useState(0);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [importMsg, setImportMsg] = useState<string>('');
 
-  useEffect(() => {
-    // Initial load and inject of custom user CSS styles
-    const css = loadCustomCss();
-    applyCustomCss(css);
-  }, []);
+  const bump = () => setRefreshKey((k) => k + 1);
 
-  const character = engine.getCharacter();
-  const emotion = engine.getEmotion();
-  const previousEmotion = engine.getPreviousEmotion();
-  const emotionConfirmed = engine.getEmotionConfirmed();
-  const threads = engine.getBackgroundThreads();
-  const anchors = engine.getTriggeredAnchors();
-  const messages = engine.getMessages();
-  const intent = engine.getLastIntent();
-  const fallback = engine.getLastFallback();
+  const handleExport = () => {
+    const data = exportData();
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: 'application/json',
+    });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    const d = new Date();
+    const stamp = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(
+      2,
+      '0'
+    )}${String(d.getDate()).padStart(2, '0')}`;
+    a.download = `饮食追踪备份_${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
-  const llmReady = isLlmConfigured(llmConfig);
+  const handleImportClick = () => {
+    setImportMsg('');
+    fileRef.current?.click();
+  };
 
-  useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [messages, isLoading]);
-
-  if (!engine.ready) {
-    return (
-      <div className="h-screen w-full flex items-center justify-center bg-[hsl(222_28%_9%)]">
-        <div className="text-white/40 animate-pulse">正在进入房间...</div>
-      </div>
-    );
-  }
-
-  const handleSend = async (text: string) => {
-    setIsLoading(true);
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
     try {
-      await engine.sendMessage(text, llmReady ? llmConfig : undefined);
-    } catch (e) {
-      console.error('发送失败', e);
-    } finally {
-      setIsLoading(false);
+      const text = await f.text();
+      const data = JSON.parse(text) as BackupData;
+      if (!confirm('导入后将覆盖当前全部数据，确认继续吗？')) return;
+      await importData(data);
+      setImportMsg('✅ 导入成功！');
+      bump();
+      setTimeout(() => setImportMsg(''), 3000);
+    } catch (err) {
+      setImportMsg('❌ 导入失败：' + (err as Error).message);
     }
   };
 
   return (
-    <div className="relative h-screen w-full overflow-hidden bg-[hsl(222_28%_9%)]">
-      {/* Pixel Room Scene - the background world */}
-      <PixelRoom
-        isTyping={isLoading}
-        weather={weather}
-        onToggleWeather={() => setWeather((w) => (w === 'clear' ? 'rain' : 'clear'))}
-      />
-
-      {/* Top bar - minimal, floating */}
-      <TopBar
-        currentCharacter={character}
-        availableCharacters={MOCK_CHARACTERS}
-        onSwitchCharacter={(id) => engine.switchCharacter(id)}
-        onToggleSidebar={() => setSidebarOpen((v) => !v)}
-        sidebarOpen={sidebarOpen}
-        onClearHistory={() => engine.clearHistory()}
-        onResetEmotion={() => engine.resetEmotion()}
-        onOpenSettings={() => setSettingsOpen(true)}
-        llmReady={llmReady}
-      />
-
-      {/* Main content area - chat floats over the scene */}
-      <div
-        className={`flex h-full flex-col pt-14 transition-all duration-300 ${sidebarOpen ? 'pr-80' : 'pr-0'}`}
-      >
-        {/* Chat scroll area - takes most of the space, messages float over the scene */}
-        <div
-          ref={scrollRef}
-          className="flex-1 overflow-y-auto chat-scroll"
-        >
-          <div className="max-w-3xl mx-auto px-4 py-6 space-y-3">
-            {messages.length === 0 && (
-              <div className="px-4 py-12 text-center">
-                <div className="mx-auto mb-4 size-16 rounded-full bg-gradient-to-br from-[hsl(28_85%_62%)] to-[hsl(28_85%_62%/0.6)] flex items-center justify-center text-2xl font-bold text-[hsl(28_30%_10%)] shadow-xl shadow-[hsl(28_85%_62%/0.3)]">
-                  {character.name.charAt(0)}
-                </div>
-                <h1 className="text-xl font-semibold text-white mb-2 drop-shadow-lg">
-                  正在与 {character.name} 对话
-                </h1>
-                <p className="text-sm text-white/50 max-w-md mx-auto leading-relaxed mb-6 drop-shadow">
-                  {llmReady
-                    ? '已连接 LLM，角色回复由 AI 生成'
-                    : '本地演示模式 · 在设置中配置 LLM 接口以启用 AI 回复'}
-                </p>
-                <div className="flex flex-wrap gap-2 justify-center">
-                  {['我真的破防了emo', '不行，我做不到', '想你', '你胸肌练得不错'].map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => handleSend(s)}
-                      className="rounded-full border border-white/15 bg-black/30 px-4 py-1.5 text-sm text-white/60 backdrop-blur-sm hover:border-[hsl(28_85%_62%/0.4)] hover:text-white hover:bg-black/50 transition-all"
-                    >
-                      {s}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={m.role === 'user' ? 'msg-enter-user' : 'msg-enter-char'}
-              >
-                <ChatBubble
-                  message={m}
-                  characterName={m.role === 'character' ? character.name : undefined}
-                  onRollback={(id) => engine.rollbackToMessage(id)}
-                />
-              </div>
-            ))}
-            {isLoading && <TypingIndicator characterName={character.name} />}
+    <div className="min-h-screen w-full bg-background text-foreground overflow-x-hidden">
+      {/* 顶部导航 */}
+      <header className="sticky top-0 z-30 backdrop-blur-lg bg-background/80 border-b border-border">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-primary/60 flex items-center justify-center text-xl shadow-lg shadow-primary/20">
+              🍎
+            </div>
+            <div>
+              <h1 className="text-base md:text-lg font-bold text-card-foreground">
+                饮食热量追踪
+              </h1>
+              <p className="text-[11px] text-muted-foreground -mt-0.5">
+                记录体重 · 六餐热量 · 本地缓存 · 联网查热量
+              </p>
+            </div>
           </div>
+
+          {/* 标签导航 */}
+          <nav className="flex items-center gap-1 p-1 rounded-xl bg-card border border-border">
+            <TabBtn
+              active={tab === 'diet'}
+              onClick={() => setTab('diet')}
+              label="🥗 今日饮食"
+            />
+            <TabBtn
+              active={tab === 'weight'}
+              onClick={() => setTab('weight')}
+              label="⚖️ 体重曲线"
+            />
+            <TabBtn
+              active={tab === 'data'}
+              onClick={() => setTab('data')}
+              label="💾 数据备份"
+            />
+          </nav>
         </div>
+      </header>
 
-        {/* Chat input - floating at bottom, semi-transparent */}
-        <ChatInput onSend={handleSend} disabled={isLoading} llmReady={llmReady} />
-      </div>
+      {/* 内容区 */}
+      <main className="max-w-6xl mx-auto px-4 py-6 pb-16">
+        {tab === 'diet' && <MealTracker key={`m-${refreshKey}`} onUpdate={bump} />}
+        {tab === 'weight' && (
+          <WeightTracker key={`w-${refreshKey}`} onUpdate={bump} />
+        )}
+        {tab === 'data' && (
+          <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+            <h2 className="text-lg font-semibold text-card-foreground flex items-center gap-2 mb-4">
+              <span className="w-1.5 h-6 rounded-full bg-primary inline-block" />
+              数据备份与恢复
+            </h2>
 
-      {/* Sidebar - slides in from right */}
-      <Sidebar
-        isOpen={sidebarOpen}
-        onToggle={() => setSidebarOpen((v) => !v)}
-        emotion={emotion}
-        previousEmotion={previousEmotion}
-        emotionConfirmed={emotionConfirmed}
-        onConfirmEmotion={() => engine.confirmEmotion()}
-        threads={threads}
-        anchors={anchors}
-        intent={intent}
-        fallback={fallback}
-        characterName={character.name}
-      />
+            <p className="text-sm text-muted-foreground mb-6 leading-relaxed">
+              你的所有数据默认保存在浏览器本地（localStorage + IndexedDB
+              双重存储，稳定性更高）。
+              为了避免清理浏览器缓存导致记录丢失，强烈建议定期导出备份文件保存到本地。
+            </p>
 
-      {/* Settings Modal */}
-      <SettingsModal
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        onConfigChange={setLlmConfig}
-        currentCharacterId={character.character_id}
-        onEngineReload={() => engine.reload()}
-      />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div className="p-5 rounded-xl border border-border bg-background/40">
+                <h3 className="font-semibold text-card-foreground mb-2 flex items-center gap-2">
+                  <span>📤</span> 导出备份
+                </h3>
+                <p className="text-xs text-muted-foreground mb-4">
+                  将所有体重记录和饮食记录打包导出为 JSON 文件，可以保存到网盘或硬盘。
+                </p>
+                <button
+                  onClick={handleExport}
+                  className="w-full h-10 rounded-lg bg-primary text-primary-foreground font-medium hover:opacity-90 transition-opacity"
+                >
+                  导出 JSON 文件
+                </button>
+              </div>
+
+              <div className="p-5 rounded-xl border border-border bg-background/40">
+                <h3 className="font-semibold text-card-foreground mb-2 flex items-center gap-2">
+                  <span>📥</span> 导入备份
+                </h3>
+                <p className="text-xs text-muted-foreground mb-4">
+                  选择之前导出的 JSON 文件进行恢复，将覆盖当前所有记录。
+                </p>
+                <button
+                  onClick={handleImportClick}
+                  className="w-full h-10 rounded-lg bg-secondary text-secondary-foreground font-medium hover:opacity-90 transition-opacity border border-border"
+                >
+                  选择 JSON 导入
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".json,application/json"
+                  className="hidden"
+                  onChange={handleFile}
+                />
+                {importMsg && (
+                  <p className="mt-2 text-xs text-center text-foreground">
+                    {importMsg}
+                  </p>
+                )}
+              </div>
+            </div>
+
+            <div className="p-4 rounded-xl border border-dashed border-border text-sm text-muted-foreground leading-relaxed">
+              <div className="font-medium text-card-foreground mb-1">
+                🔐 关于数据安全
+              </div>
+              本应用不会上传你的任何个人记录到任何服务器（食物搜索会调用公开营养数据库查询热量，不会包含你的个人信息）。
+              所有记录只保存在你自己的浏览器中，因此清除浏览器数据会导致记录丢失，
+              <span className="text-primary"> 请一定定期备份导出文件</span>。
+            </div>
+          </div>
+        )}
+      </main>
+
+      <footer className="border-t border-border py-6 text-center text-xs text-muted-foreground">
+        🍃 希望记录每一天的你，越来越健康。数据保存在本地，请记得定期备份。
+      </footer>
     </div>
+  );
+}
+
+function TabBtn({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={
+        'px-3 md:px-4 h-8 text-sm rounded-lg transition-colors whitespace-nowrap ' +
+        (active
+          ? 'bg-primary text-primary-foreground font-medium shadow-md shadow-primary/20'
+          : 'text-muted-foreground hover:text-foreground hover:bg-accent')
+      }
+    >
+      {label}
+    </button>
   );
 }
