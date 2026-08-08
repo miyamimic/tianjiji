@@ -64,6 +64,17 @@ export default function App() {
     }
   };
 
+  const handleTriggerReply = async (messageId: string) => {
+    setIsLoading(true);
+    try {
+      await engine.triggerCharacterReply(messageId, llmReady ? llmConfig : undefined);
+    } catch (e) {
+      console.error('追问生成失败', e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <div className="relative h-screen w-full overflow-hidden bg-[hsl(222_28%_9%)]">
       {/* Pixel Room Scene - the background world */}
@@ -88,7 +99,7 @@ export default function App() {
 
       {/* Main content area - chat floats over the scene */}
       <div
-        className={`flex h-full flex-col pt-14 transition-all duration-300 ${sidebarOpen ? 'pr-80' : 'pr-0'}`}
+        className={`relative z-10 flex h-full flex-col pt-14 transition-all duration-300 ${sidebarOpen ? 'pr-80' : 'pr-0'}`}
       >
         {/* Chat scroll area - takes most of the space, messages float over the scene */}
         <div
@@ -131,6 +142,9 @@ export default function App() {
                   message={m}
                   characterName={m.role === 'character' ? character.name : undefined}
                   onRollback={(id) => engine.rollbackToMessage(id)}
+                  onEdit={(id, text) => engine.editMessage(id, text)}
+                  onTriggerReply={handleTriggerReply}
+                  onAddUserMsgOnly={(id, text) => engine.addUserMessageOnly(text, id)}
                 />
               </div>
             ))}

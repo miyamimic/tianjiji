@@ -295,6 +295,140 @@ export function useEngine() {
     rerender();
   }, [persist, rerender]);
 
+  const editMessage = useCallback((messageId: string, newContent: string) => {
+    const s = stateRef.current;
+    const msg = s.messages.find((m) => m.id === messageId);
+    if (!msg) return;
+
+    msg.content = newContent;
+    msg.segments = parseSegments(newContent);
+
+    persist(s);
+    rerender();
+  }, [persist, rerender]);
+
+  const addUserMessageOnly = useCallback((content: string, afterMessageId?: string) => {
+    const s = stateRef.current;
+    
+    if (afterMessageId) {
+      const msgIndex = s.messages.findIndex((m) => m.id === afterMessageId);
+      if (msgIndex !== -1) {
+        const targetMsg = s.messages[msgIndex];
+        s.messages = s.messages.slice(0, msgIndex + 1);
+        if (targetMsg.snapshot) {
+          s.emotion = { ...targetMsg.snapshot.emotion };
+          s.backgroundThreads = targetMsg.snapshot.backgroundThreads.map((t) => ({ ...t }));
+          s.triggeredAnchors = targetMsg.snapshot.triggeredAnchors.map((a) => ({ ...a }));
+        }
+      }
+    }
+
+    const newUserMsg: ChatMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: content,
+      segments: [{ type: 'speech', text: content }],
+      timestamp: Date.now(),
+      snapshot: captureSnapshot(s),
+    };
+
+    s.messages = [...s.messages, newUserMsg];
+    persist(s);
+    rerender();
+  }, [persist, rerender]);
+
+  const triggerCharacterReply = useCallback(async (messageId: string, llmConfig?: LlmConfig) => {
+    const s = stateRef.current;
+    const msgIndex = s.messages.findIndex((m) => m.id === messageId);
+    if (msgIndex === -1) return;
+
+    const targetMsg = s.messages[msgIndex];
+    s.messages = s.messages.slice(0, msgIndex + 1);
+
+    if (targetMsg.snapshot) {
+      s.emotion = { ...targetMsg.snapshot.emotion };
+      s.backgroundThreads = targetMsg.snapshot.backgroundThreads.map((t) => ({ ...t }));
+      s.triggeredAnchors = targetMsg.snapshot.triggeredAnchors.map((a) => ({ ...a }));
+    }
+
+    previousEmotionRef.current = { ...s.emotion };
+    emotionConfirmedRef.current = false;
+    lastIntentRef.current = null;
+
+    const character = getCharacterById(s.characterId) ?? MOCK_CHARACTERS[0];
+    const lastUserMsg = [...s.messages].reverse().find((m) => m.role === 'user');
+    const triggerInput = lastUserMsg ? lastUserMsg.content : '...';
+
+    const result = processChat(
+      { ...s, emotion: { ...s.emotion }, backgroundThreads: s.backgroundThreads.map((t) => ({ ...t })) },
+      character,
+      triggerInput,
+    );
+
+    s.emotion = result.emotion;
+    s.backgroundThreads = result.backgroundThreads;
+    s.triggeredAnchors = result.triggeredAnchors;
+    lastIntentRef.current = result.intent;
+
+    let reply: ChatMessage;
+
+    if (llmConfig && isLlmConfigured(llmConfig)) {
+      try {
+        const emotionSummary = Object.entries(s.emotion)
+          .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
+          .join(', ');
+        
+        let systemPrompt = buildSystemPrompt(character.name, emotionSummary);
+
+        if ((character as any).custom_system_prompt) {
+          systemPrompt = `【角色核心专属背景与约束提示词】\n${(character as any).custom_system_prompt}\n\n${systemPrompt}`;
+        }
+
+        const userPersona = loadUserPromptProfile();
+        if (userPersona) {
+          systemPrompt = `${systemPrompt}\n\n【主控角色/当前对话者档案（用于匹配关系和心理）】\n用户正在扮演以下角色，请自始至终匹配与其契合的张力和态度：\n${userPersona}`;
+        }
+
+        const llmMessages = [
+          { role: 'system' as const, content: systemPrompt },
+          ...s.messages.slice(-10).map((m) => ({
+            role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+            content: m.content,
+          })),
+        ];
+        const rawText = await callLlm(llmConfig, llmMessages);
+        reply = {
+          id: `char-${Date.now()}`,
+          role: 'character',
+          content: rawText,
+          segments: parseSegments(rawText),
+          timestamp: Date.now(),
+          character_id: character.character_id,
+          snapshot: captureSnapshot(s),
+        };
+        lastFallbackRef.current = false;
+      } catch {
+        reply = {
+          ...result.reply,
+          id: `char-fallback-${Date.now()}`,
+          snapshot: captureSnapshot(s),
+        };
+        lastFallbackRef.current = true;
+      }
+    } else {
+      reply = {
+        ...result.reply,
+        id: `char-fallback-${Date.now()}`,
+        snapshot: captureSnapshot(s),
+      };
+      lastFallbackRef.current = true;
+    }
+
+    s.messages = [...s.messages, reply];
+    persist(s);
+    rerender();
+  }, [persist, rerender]);
+
   const controller = {
     ready: readyRef.current,
     getCharacter: (): Character => getCharacterById(stateRef.current.characterId) ?? MOCK_CHARACTERS[0],
@@ -314,6 +448,9 @@ export function useEngine() {
     resetEmotion,
     confirmEmotion,
     rollbackToMessage,
+    editMessage,
+    addUserMessageOnly,
+    triggerCharacterReply,
     reload: () => {
       const freshChar = getCharacterById(stateRef.current.characterId);
       if (freshChar) {
