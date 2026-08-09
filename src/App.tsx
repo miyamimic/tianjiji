@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import ParticleBackground from '@/components/ParticleBackground';
+import SceneCanvas from '@/components/SceneCanvas';
 import TopBar from '@/components/TopBar';
 import Sidebar from '@/components/Sidebar';
 import ChatInput from '@/components/ChatInput';
@@ -83,8 +83,8 @@ export default function App() {
         aria-hidden="true"
         className="pointer-events-none fixed inset-0 -z-20 h-full w-full object-cover"
       />
-      {/* Particle effects overlay (kept) */}
-      <ParticleBackground />
+      {/* Animated scene overlay: fire, rain, clock, particles */}
+      <SceneCanvas />
 
       {/* Top bar - minimal, floating */}
       <TopBar
