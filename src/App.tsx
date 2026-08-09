@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
-import SceneCanvas from '@/components/SceneCanvas';
+import PixelRoom from '@/components/PixelRoom';
 import TopBar from '@/components/TopBar';
 import Sidebar from '@/components/Sidebar';
 import ChatInput from '@/components/ChatInput';
@@ -17,6 +17,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [weather, setWeather] = useState<'clear' | 'rain'>('clear');
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(loadLlmConfig());
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -76,15 +77,12 @@ export default function App() {
 
   return (
     <div className="relative h-screen w-full overflow-hidden bg-[hsl(222_28%_9%)]">
-      {/* Background image */}
-      <img
-        src="/welcome_bg.jpg"
-        alt=""
-        aria-hidden="true"
-        className="pointer-events-none fixed inset-0 -z-20 h-full w-full object-cover"
+      {/* Pixel Room Scene - the background world */}
+      <PixelRoom
+        isTyping={isLoading}
+        weather={weather}
+        onToggleWeather={() => setWeather((w) => (w === 'clear' ? 'rain' : 'clear'))}
       />
-      {/* Animated scene overlay: fire, rain, clock, particles */}
-      <SceneCanvas />
 
       {/* Top bar - minimal, floating */}
       <TopBar
