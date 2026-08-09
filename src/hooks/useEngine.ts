@@ -78,9 +78,8 @@ export function useEngine() {
     saved.current = loadSavedState();
   }
 
-  const initCharacter = saved.current?.characterId
-    ? getCharacterById(saved.current.characterId) ?? MOCK_CHARACTERS[0]
-    : MOCK_CHARACTERS[0];
+  const savedChar = saved.current?.characterId ? getCharacterById(saved.current.characterId) : null;
+  const initCharacter = savedChar ?? MOCK_CHARACTERS[0];
 
   const stateRef = useRef<SessionState>({
     sessionId: '',
@@ -98,14 +97,20 @@ export function useEngine() {
   const lastFallbackRef = useRef(false);
   const readyRef = useRef(false);
 
-  useEffect(() => {
-    readyRef.current = true;
-    rerender();
-  }, [rerender]);
-
   const persist = useCallback((s: SessionState) => {
     saveState(s);
   }, []);
+
+  useEffect(() => {
+    if (!readyRef.current) {
+      if (!savedChar && saved.current?.characterId) {
+        // Silently fallback occurred, persist new correct ID so it isn't stuck on the un-found ID
+        persist(stateRef.current);
+      }
+      readyRef.current = true;
+      rerender();
+    }
+  }, [rerender, persist, savedChar]);
 
   const sendMessage = useCallback(
     async (userInput: string, llmConfig?: LlmConfig) => {
@@ -432,6 +437,7 @@ export function useEngine() {
   const controller = {
     ready: readyRef.current,
     getCharacter: (): Character => getCharacterById(stateRef.current.characterId) ?? MOCK_CHARACTERS[0],
+    getCharactersList: () => getSavedCharacters(),
     getEmotion: (): EmotionVector => ({ ...stateRef.current.emotion }),
     getPreviousEmotion: (): EmotionVector | null =>
       previousEmotionRef.current ? { ...previousEmotionRef.current } : null,

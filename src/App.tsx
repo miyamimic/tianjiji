@@ -87,7 +87,7 @@ export default function App() {
       {/* Top bar - minimal, floating */}
       <TopBar
         currentCharacter={character}
-        availableCharacters={MOCK_CHARACTERS}
+        availableCharacters={engine.getCharactersList()}
         onSwitchCharacter={(id) => engine.switchCharacter(id)}
         onToggleSidebar={() => setSidebarOpen((v) => !v)}
         sidebarOpen={sidebarOpen}
