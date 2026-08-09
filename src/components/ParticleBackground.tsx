@@ -48,20 +48,7 @@ export default function ParticleBackground() {
       time += 0.002;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      const breathe = 0.5 + Math.sin(time * 2) * 0.1;
-      const grad = ctx.createRadialGradient(
-        canvas.width / 2,
-        canvas.height / 2,
-        0,
-        canvas.width / 2,
-        canvas.height / 2,
-        Math.max(canvas.width, canvas.height) * 0.6,
-      );
-      grad.addColorStop(0, `hsla(28, 60%, 25%, ${breathe * 0.15})`);
-      grad.addColorStop(0.5, 'hsla(222, 28%, 12%, 0.3)');
-      grad.addColorStop(1, 'hsla(222, 28%, 9%, 0)');
-      ctx.fillStyle = grad;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // No background fill — let the background image show through
 
       particles.forEach((p) => {
         p.x += p.speedX;
