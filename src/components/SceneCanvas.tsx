@@ -69,7 +69,11 @@ export default function SceneCanvas({ scene }: Props) {
       const clockSpec = sc === 'welcome' ? WELCOME.clock : CHAT.clock;
 
       // ===== 画钟表指针 =====
-      drawClock(ctx, clockSpec, w, h);
+      if (sc === 'welcome') {
+        drawClock(ctx, clockSpec, w, h, { style: 'full' });
+      } else {
+        drawClock(ctx, clockSpec, w, h, { style: 'handsOnly' });
+      }
 
       // ===== 画呼吸光点 =====
       if (sc === 'welcome') {
@@ -100,102 +104,118 @@ export default function SceneCanvas({ scene }: Props) {
   );
 }
 
-// ============ 绘制：钟表（表盘圆 + 时/分/秒针） ============
+// ============ 绘制：钟表 ============
+// style:
+//   'full'      → 表盘外发光 + 外框 + 12 刻度 + 指针（welcome 场景用，背景图无表盘）
+//   'handsOnly' → 仅细指针 + 小中心钉（chat 场景用，原图 chat_clock 已有完整表盘/数字/外框，不要遮挡）
 function drawClock(
   ctx: CanvasRenderingContext2D,
   spec: { cx: number; cy: number; r: number },
   w: number,
   h: number,
+  opts: { style: 'full' | 'handsOnly' },
 ) {
-  // r 是相对舞台宽度的比例 → 实际像素
   const cx = spec.cx * w;
   const cy = spec.cy * h;
-  // r 给的是相对宽度比例，但表盘是正圆。为了竖屏不被极端拉伸，用 min(w,h) 方向参考，
-  // 但实际上比例舞台 16:9 或 3:2，w>h，直接用 w 方向即可。
   const r = spec.r * w;
   const now = new Date();
 
-  // 1. 表盘外发光（淡）
-  const halo = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r * 2.1);
-  halo.addColorStop(0, 'rgba(255, 235, 180, 0.22)');
-  halo.addColorStop(1, 'rgba(255, 235, 180, 0)');
-  ctx.fillStyle = halo;
-  ctx.beginPath();
-  ctx.arc(cx, cy, r * 2.1, 0, Math.PI * 2);
-  ctx.fill();
-
-  // 2. 表盘圈
-  ctx.save();
-  ctx.lineWidth = Math.max(1, r * 0.12);
-  ctx.strokeStyle = 'rgba(80, 45, 15, 0.85)';
-  ctx.fillStyle = 'rgba(255, 246, 220, 0.08)';
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-  ctx.restore();
-
-  // 3. 12 小时刻度
-  for (let i = 0; i < 12; i++) {
-    const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
-    const isMajor = i % 3 === 0;
-    const inner = r * (isMajor ? 0.68 : 0.78);
-    const outer = r * 0.9;
-    ctx.save();
-    ctx.strokeStyle = isMajor ? 'rgba(60, 30, 10, 0.9)' : 'rgba(60, 30, 10, 0.6)';
-    ctx.lineWidth = Math.max(1, r * (isMajor ? 0.09 : 0.05));
+  if (opts.style === 'full') {
+    // 1. 表盘外发光（淡）
+    const halo = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r * 2.1);
+    halo.addColorStop(0, 'rgba(255, 235, 180, 0.22)');
+    halo.addColorStop(1, 'rgba(255, 235, 180, 0)');
+    ctx.fillStyle = halo;
     ctx.beginPath();
-    ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
-    ctx.lineTo(cx + Math.cos(a) * outer, cy + Math.sin(a) * outer);
+    ctx.arc(cx, cy, r * 2.1, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 2. 表盘圈
+    ctx.save();
+    ctx.lineWidth = Math.max(1, r * 0.12);
+    ctx.strokeStyle = 'rgba(80, 45, 15, 0.85)';
+    ctx.fillStyle = 'rgba(255, 246, 220, 0.08)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
     ctx.stroke();
     ctx.restore();
+
+    // 3. 12 小时刻度
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
+      const isMajor = i % 3 === 0;
+      const inner = r * (isMajor ? 0.68 : 0.78);
+      const outer = r * 0.9;
+      ctx.save();
+      ctx.strokeStyle = isMajor ? 'rgba(60, 30, 10, 0.9)' : 'rgba(60, 30, 10, 0.6)';
+      ctx.lineWidth = Math.max(1, r * (isMajor ? 0.09 : 0.05));
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
+      ctx.lineTo(cx + Math.cos(a) * outer, cy + Math.sin(a) * outer);
+      ctx.stroke();
+      ctx.restore();
+    }
   }
 
-  // 4. 秒针
+  // ===== 指针（两种风格粗细/长度不同） =====
+  // handsOnly：背景图有完整表盘，指针只在数字内侧旋转，要足够细，不遮挡原图刻度
+  const handsOnly = opts.style === 'handsOnly';
+  // 秒针：细线（红色）
   const sec = now.getSeconds() + now.getMilliseconds() / 1000;
   const aSec = (sec / 60) * Math.PI * 2 - Math.PI / 2;
   ctx.save();
-  ctx.strokeStyle = 'rgba(220, 70, 40, 0.95)';
-  ctx.lineWidth = Math.max(1, r * 0.045);
+  ctx.strokeStyle = handsOnly ? 'rgba(200, 50, 30, 0.92)' : 'rgba(220, 70, 40, 0.95)';
+  ctx.lineWidth = Math.max(1, handsOnly ? Math.min(1.6, r * 0.018) : r * 0.045);
   ctx.lineCap = 'round';
+  const secLen = handsOnly ? 0.72 : 0.82;
+  const secTail = handsOnly ? 0.15 : 0.18;
   ctx.beginPath();
-  ctx.moveTo(cx - Math.cos(aSec) * r * 0.18, cy - Math.sin(aSec) * r * 0.18);
-  ctx.lineTo(cx + Math.cos(aSec) * r * 0.82, cy + Math.sin(aSec) * r * 0.82);
+  ctx.moveTo(cx - Math.cos(aSec) * r * secTail, cy - Math.sin(aSec) * r * secTail);
+  ctx.lineTo(cx + Math.cos(aSec) * r * secLen, cy + Math.sin(aSec) * r * secLen);
   ctx.stroke();
   ctx.restore();
 
-  // 5. 分针
+  // 分针
   const min = now.getMinutes() + sec / 60;
   const aMin = (min / 60) * Math.PI * 2 - Math.PI / 2;
   ctx.save();
-  ctx.strokeStyle = 'rgba(30, 15, 5, 0.9)';
-  ctx.lineWidth = Math.max(1.5, r * 0.085);
+  ctx.strokeStyle = handsOnly ? 'rgba(40, 22, 10, 0.92)' : 'rgba(30, 15, 5, 0.9)';
+  ctx.lineWidth = Math.max(1, handsOnly ? Math.min(2.2, r * 0.028) : r * 0.085);
   ctx.lineCap = 'round';
+  const minLen = handsOnly ? 0.60 : 0.75;
   ctx.beginPath();
   ctx.moveTo(cx, cy);
-  ctx.lineTo(cx + Math.cos(aMin) * r * 0.75, cy + Math.sin(aMin) * r * 0.75);
+  ctx.lineTo(cx + Math.cos(aMin) * r * minLen, cy + Math.sin(aMin) * r * minLen);
   ctx.stroke();
   ctx.restore();
 
-  // 6. 时针
+  // 时针
   const hr = (now.getHours() % 12) + min / 60;
   const aHr = (hr / 12) * Math.PI * 2 - Math.PI / 2;
   ctx.save();
-  ctx.strokeStyle = 'rgba(30, 15, 5, 0.95)';
-  ctx.lineWidth = Math.max(2, r * 0.115);
+  ctx.strokeStyle = handsOnly ? 'rgba(40, 22, 10, 0.95)' : 'rgba(30, 15, 5, 0.95)';
+  ctx.lineWidth = Math.max(1.5, handsOnly ? Math.min(3, r * 0.038) : r * 0.115);
   ctx.lineCap = 'round';
+  const hrLen = handsOnly ? 0.42 : 0.52;
   ctx.beginPath();
   ctx.moveTo(cx, cy);
-  ctx.lineTo(cx + Math.cos(aHr) * r * 0.52, cy + Math.sin(aHr) * r * 0.52);
+  ctx.lineTo(cx + Math.cos(aHr) * r * hrLen, cy + Math.sin(aHr) * r * hrLen);
   ctx.stroke();
   ctx.restore();
 
-  // 7. 中心钉
+  // 中心钉（handsOnly 缩小，避免盖住原图表盘中心）
   ctx.save();
-  ctx.fillStyle = 'rgba(30, 15, 5, 0.95)';
+  ctx.fillStyle = handsOnly ? 'rgba(40, 22, 10, 0.9)' : 'rgba(30, 15, 5, 0.95)';
   ctx.beginPath();
-  ctx.arc(cx, cy, r * 0.12, 0, Math.PI * 2);
+  ctx.arc(cx, cy, r * (handsOnly ? 0.055 : 0.12), 0, Math.PI * 2);
   ctx.fill();
+  if (handsOnly) {
+    ctx.fillStyle = 'rgba(255, 240, 210, 0.95)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.018, 0, Math.PI * 2);
+    ctx.fill();
+  }
   ctx.restore();
 }
 
