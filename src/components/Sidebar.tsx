@@ -14,6 +14,11 @@ interface Props {
   intent: IntentAnalysis | null;
   fallback: boolean;
   characterName: string;
+  /**
+   * overlay=true：手机竖屏，侧边栏是"浮在舞台右边"的 overlay（不占文档流，不压缩主内容区）
+   * overlay=false：桌面横屏，保留原独立列布局（fixed 占舞台右侧 320px）
+   */
+  overlayMode?: boolean;
 }
 
 const SENTIMENT_LABEL: Record<string, string> = {
@@ -66,21 +71,24 @@ export default function Sidebar({
   intent,
   fallback,
   characterName,
+  overlayMode = false,
 }: Props) {
   return (
     <>
       {!isOpen && (
         <button
           onClick={onToggle}
-          className="fixed right-0 top-1/2 z-30 -translate-y-1/2 bg-[hsl(220_22%_13%/0.8)] backdrop-blur-md border border-white/10 border-r-0 rounded-l-lg p-2 text-white/40 hover:text-white transition-all hover:bg-[hsl(220_22%_13%)]"
+          className={`${overlayMode ? 'absolute' : 'fixed'} right-0 top-1/2 z-[60] -translate-y-1/2 bg-[hsl(220_22%_13%/0.8)] backdrop-blur-md border border-white/10 border-r-0 rounded-l-lg p-2 text-white/40 hover:text-white transition-all hover:bg-[hsl(220_22%_13%)]`}
           aria-label="展开调试面板"
         >
           <ChevronLeft className="size-4" />
         </button>
       )}
 
+      {/* overlayMode：盖在舞台之上（absolute inset-y-0 right-0），不占主内容流；
+          桌面：fixed（独立列）*/}
       <aside
-        className={`fixed right-0 top-0 z-20 h-full w-80 bg-[hsl(220_22%_13%/0.6)] backdrop-blur-xl border-l border-white/10 transition-transform duration-300 ease-out flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
+        className={`${overlayMode ? 'absolute' : 'fixed'} right-0 top-0 z-[70] h-full w-80 max-w-[85vw] bg-[hsl(220_22%_13%/0.6)] backdrop-blur-xl border-l border-white/10 transition-transform duration-300 ease-out flex flex-col ${isOpen ? 'translate-x-0' : 'translate-x-full'}`}
       >
         <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
           <h2 className="text-sm font-semibold text-white">内部状态</h2>

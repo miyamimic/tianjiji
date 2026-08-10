@@ -1,20 +1,23 @@
 import { useEffect, useRef } from 'react';
-
-/**
- * 坐标体系：所有位置用相对舞台宽高的归一化坐标 (0..1)。
- * 画布尺寸 === 父元素（16:9 或 3:2 舞台）尺寸，背景图按 object-cover 铺满舞台。
- */
+import {
+  BG_OBJECT_POS,
+  BG_SIZE,
+  computeCoverFit,
+  isPortraitViewport,
+  type FitRect,
+} from '@/lib/stageFit';
 
 export type Scene = 'welcome' | 'chat';
 
-// ====== 统一位置常量（相对舞台宽高 0..1） ======
+// ====== 统一位置常量（相对"背景图像素"的比例，0..1）======
 // 坐标来自对应蒙版 PNG 的像素分析（连通域质心 / 包围盒半径）
+// 这些坐标与舞台容器形状无关：无论横屏 contain 还是竖屏 cover，都先做 fit 映射再使用。
 //
-// WELCOME 场景：
-//   clock.png      2276×1280  →  cx=0.39648  cy=0.04919  rw=0.02460
+// WELCOME 场景：背景图 welcome_bg.png 2276×1280
+//   clock.png      2276×1280  →  cx=0.39648  cy=0.04919  rw=0.02460  (rw 相对背景图宽)
 //   location-bg.png 2276×1280 →  每个字母下方的实心 pin 质心
 const WELCOME = {
-  clock: { cx: 0.39648, cy: 0.04919, r: 0.0246 },
+  clock: { cx: 0.39648, cy: 0.04919, rw: 0.0246 },
   hotspots: {
     A: { cx: 0.219, cy: 0.538 },
     B: { cx: 0.649, cy: 0.588 },
@@ -22,11 +25,11 @@ const WELCOME = {
   } as Record<string, { cx: number; cy: number }>,
 };
 
-// CHAT 场景：
+// CHAT 场景：背景图 chat_bg.png 1793×1188
 //   chat_clock.png    1793×1188  →  cx=0.45971  cy=0.10532  rw=0.04741
 //   chat_location.png 1793×1188  →  cx=0.8145   cy=0.5185   （唯一标记质心）
 const CHAT = {
-  clock: { cx: 0.45971, cy: 0.10532, r: 0.04741 },
+  clock: { cx: 0.45971, cy: 0.10532, rw: 0.04741 },
   back: { cx: 0.8145, cy: 0.5185 },
 };
 
@@ -63,26 +66,53 @@ export default function SceneCanvas({ scene }: Props) {
       t0 += 0.016;
       const w = canvas.width;
       const h = canvas.height;
+      const sc = sceneRef.current;
+      const portrait = isPortraitViewport(w, h);
+      const bg = BG_SIZE[sc];
+      const pos = BG_OBJECT_POS[sc];
+
+      // fitRect: 复现背景 img 的 object-fit 行为
+      //   - landscape：舞台比例 = 图片比例 → fit 实际上 scale=1、off=0，坐标原样
+      //   - portrait：图片 cover → scale>1、off 为负/正，按 object-position 偏移
+      //   注意：landscape 时我们的舞台是按图片比例居中的，所以也走 cover-fit 公式（结果是 1:1 对齐）
+      const fit: FitRect = computeCoverFit(bg.w, bg.h, w, h, pos.x, pos.y);
+
       ctx.clearRect(0, 0, w, h);
 
-      const sc = sceneRef.current;
       const clockSpec = sc === 'welcome' ? WELCOME.clock : CHAT.clock;
+      const mappedClock = (() => {
+        const p = fit.mapUV(clockSpec.cx, clockSpec.cy);
+        // rw 是相对背景图宽度的比例；cover 后背景图宽度 = bg.w * fit.scale → 真实像素半径
+        const pxR = clockSpec.rw * bg.w * fit.scale;
+        return { cx: p.x, cy: p.y, r: pxR };
+      })();
 
       // ===== 画钟表指针 =====
       if (sc === 'welcome') {
-        drawClock(ctx, clockSpec, w, h, { style: 'full' });
+        drawClock(ctx, mappedClock, w, h, { style: 'full' });
       } else {
-        drawClock(ctx, clockSpec, w, h, { style: 'handsOnly' });
+        drawClock(ctx, mappedClock, w, h, { style: 'handsOnly' });
       }
 
       // ===== 画呼吸光点 =====
+      const pulseBase = (u: number, v: number) => {
+        const p = fit.mapUV(u, v);
+        // 光点 baseR 取图片 drawW/drawH 的较小者的百分比 → 横屏/竖屏视觉大小一致
+        const refDim = Math.min(fit.drawW, fit.drawH);
+        return { cx: p.x, cy: p.y, baseR: refDim * 0.011 };
+      };
       if (sc === 'welcome') {
-        drawPulseDot(ctx, w, h, WELCOME.hotspots.A.cx, WELCOME.hotspots.A.cy, t0, '#ffd36a', '#ff7a2f');
-        drawPulseDot(ctx, w, h, WELCOME.hotspots.B.cx, WELCOME.hotspots.B.cy, t0 + 0.6, '#9fffc0', '#2fbf6a');
-        drawPulseDot(ctx, w, h, WELCOME.hotspots.C.cx, WELCOME.hotspots.C.cy, t0 + 1.2, '#9fd6ff', '#2f82ff');
+        const a = pulseBase(WELCOME.hotspots.A.cx, WELCOME.hotspots.A.cy);
+        const b = pulseBase(WELCOME.hotspots.B.cx, WELCOME.hotspots.B.cy);
+        const c = pulseBase(WELCOME.hotspots.C.cx, WELCOME.hotspots.C.cy);
+        drawPulseDot(ctx, a.cx, a.cy, a.baseR, t0, '#ffd36a', '#ff7a2f');
+        drawPulseDot(ctx, b.cx, b.cy, b.baseR, t0 + 0.6, '#9fffc0', '#2fbf6a');
+        drawPulseDot(ctx, c.cx, c.cy, c.baseR, t0 + 1.2, '#9fd6ff', '#2f82ff');
       } else {
-        drawPulseDot(ctx, w, h, CHAT.back.cx, CHAT.back.cy, t0, '#ffe9a8', '#ff9a3c');
+        const b = pulseBase(CHAT.back.cx, CHAT.back.cy);
+        drawPulseDot(ctx, b.cx, b.cy, b.baseR, t0, '#ffe9a8', '#ff9a3c');
       }
+      // （横屏/竖屏均忽略越界绘制；Canvas 超出会自动被裁，不阻塞 raf）
 
       raf = requestAnimationFrame(animate);
     };
@@ -105,23 +135,20 @@ export default function SceneCanvas({ scene }: Props) {
 }
 
 // ============ 绘制：钟表 ============
-// style:
-//   'full'      → 表盘外发光 + 外框 + 12 刻度 + 指针（welcome 场景用，背景图无表盘）
-//   'handsOnly' → 仅细指针 + 小中心钉（chat 场景用，原图 chat_clock 已有完整表盘/数字/外框，不要遮挡）
+// 输入 spec.cx/cy/r 已经是 Canvas 像素坐标（通过 cover-fit 映射后）
 function drawClock(
   ctx: CanvasRenderingContext2D,
   spec: { cx: number; cy: number; r: number },
-  w: number,
-  h: number,
+  _w: number,
+  _h: number,
   opts: { style: 'full' | 'handsOnly' },
 ) {
-  const cx = spec.cx * w;
-  const cy = spec.cy * h;
-  const r = spec.r * w;
+  const cx = spec.cx;
+  const cy = spec.cy;
+  const r = spec.r;
   const now = new Date();
 
   if (opts.style === 'full') {
-    // 1. 表盘外发光（淡）
     const halo = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r * 2.1);
     halo.addColorStop(0, 'rgba(255, 235, 180, 0.22)');
     halo.addColorStop(1, 'rgba(255, 235, 180, 0)');
@@ -130,7 +157,6 @@ function drawClock(
     ctx.arc(cx, cy, r * 2.1, 0, Math.PI * 2);
     ctx.fill();
 
-    // 2. 表盘圈
     ctx.save();
     ctx.lineWidth = Math.max(1, r * 0.12);
     ctx.strokeStyle = 'rgba(80, 45, 15, 0.85)';
@@ -141,7 +167,6 @@ function drawClock(
     ctx.stroke();
     ctx.restore();
 
-    // 3. 12 小时刻度
     for (let i = 0; i < 12; i++) {
       const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
       const isMajor = i % 3 === 0;
@@ -158,10 +183,7 @@ function drawClock(
     }
   }
 
-  // ===== 指针（两种风格粗细/长度不同） =====
-  // handsOnly：背景图有完整表盘，指针只在数字内侧旋转，要足够细，不遮挡原图刻度
   const handsOnly = opts.style === 'handsOnly';
-  // 秒针：细线（红色）
   const sec = now.getSeconds() + now.getMilliseconds() / 1000;
   const aSec = (sec / 60) * Math.PI * 2 - Math.PI / 2;
   ctx.save();
@@ -176,7 +198,6 @@ function drawClock(
   ctx.stroke();
   ctx.restore();
 
-  // 分针
   const min = now.getMinutes() + sec / 60;
   const aMin = (min / 60) * Math.PI * 2 - Math.PI / 2;
   ctx.save();
@@ -190,7 +211,6 @@ function drawClock(
   ctx.stroke();
   ctx.restore();
 
-  // 时针
   const hr = (now.getHours() % 12) + min / 60;
   const aHr = (hr / 12) * Math.PI * 2 - Math.PI / 2;
   ctx.save();
@@ -204,7 +224,6 @@ function drawClock(
   ctx.stroke();
   ctx.restore();
 
-  // 中心钉（handsOnly 缩小，避免盖住原图表盘中心）
   ctx.save();
   ctx.fillStyle = handsOnly ? 'rgba(40, 22, 10, 0.9)' : 'rgba(30, 15, 5, 0.95)';
   ctx.beginPath();
@@ -219,26 +238,22 @@ function drawClock(
   ctx.restore();
 }
 
-// ============ 绘制：呼吸光点（核心亮点 + 外层扩散圆环） ============
+// ============ 绘制：呼吸光点 ============
+// 输入 cx/cy/baseR 已经是 Canvas 像素（cover-fit 后）
 function drawPulseDot(
   ctx: CanvasRenderingContext2D,
-  w: number,
-  h: number,
-  cxRel: number,
-  cyRel: number,
+  cx: number,
+  cy: number,
+  baseR: number,
   phase: number,
   colorInner: string,
   colorOuter: string,
 ) {
-  const cx = cxRel * w;
-  const cy = cyRel * h;
-  const baseR = Math.min(w, h) * 0.012; // 舞台参考尺寸
   const t = phase;
 
-  // 1. 外层扩散呼吸环（2 个错开的波）
   for (let i = 0; i < 2; i++) {
     const tt = (t + i * 0.5) % 1.6;
-    const k = tt / 1.6; // 0→1
+    const k = tt / 1.6;
     const radius = baseR * (1.2 + k * 4.2);
     const alpha = Math.max(0, 1 - k) * 0.55;
     ctx.save();
@@ -251,7 +266,6 @@ function drawPulseDot(
     ctx.restore();
   }
 
-  // 2. 外层大发光
   const outerR = baseR * (2.0 + 0.4 * Math.sin(t * 2));
   const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerR * 3.5);
   glow.addColorStop(0, hexWithAlpha(colorOuter, 0.35));
@@ -264,7 +278,6 @@ function drawPulseDot(
   ctx.fill();
   ctx.restore();
 
-  // 3. 中间实心
   ctx.save();
   ctx.fillStyle = colorInner;
   ctx.shadowColor = hexWithAlpha(colorOuter, 0.9);
@@ -274,7 +287,6 @@ function drawPulseDot(
   ctx.fill();
   ctx.restore();
 
-  // 4. 核心高光（左上小白点）
   ctx.save();
   ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
   ctx.beginPath();
