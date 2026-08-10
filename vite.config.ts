@@ -5,6 +5,7 @@ import { defineConfig } from 'vite';
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  root: __dirname,
   resolve: {
     tsconfigPaths: true,
   },
@@ -13,7 +14,13 @@ export default defineConfig({
     port: 3000,
     allowedHosts: true,
   },
+  build: {
+    rollupOptions: {
+      input: './index.html',
+    },
+  },
   optimizeDeps: {
+    entries: ['./index.html'],
     exclude: ['lucide-react'],
   },
 });

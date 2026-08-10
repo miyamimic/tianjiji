@@ -432,6 +432,14 @@ export function useEngine() {
   const controller = {
     ready: readyRef.current,
     getCharacter: (): Character => getCharacterById(stateRef.current.characterId) ?? MOCK_CHARACTERS[0],
+    getCharactersList: (): Character[] => {
+      try {
+        const saved = getSavedCharacters();
+        return [...MOCK_CHARACTERS, ...saved];
+      } catch {
+        return MOCK_CHARACTERS;
+      }
+    },
     getEmotion: (): EmotionVector => ({ ...stateRef.current.emotion }),
     getPreviousEmotion: (): EmotionVector | null =>
       previousEmotionRef.current ? { ...previousEmotionRef.current } : null,
