@@ -30,7 +30,6 @@ const WELCOME = {
 //   chat_location.png 1793×1188  →  cx=0.8145   cy=0.5185   （唯一标记质心）
 const CHAT = {
   clock: { cx: 0.45971, cy: 0.10532, rw: 0.04741 },
-  back: { cx: 0.8145, cy: 0.5185 },
 };
 
 interface Props {
@@ -108,9 +107,6 @@ export default function SceneCanvas({ scene }: Props) {
         drawPulseDot(ctx, a.cx, a.cy, a.baseR, t0, '#ffd36a', '#ff7a2f');
         drawPulseDot(ctx, b.cx, b.cy, b.baseR, t0 + 0.6, '#9fffc0', '#2fbf6a');
         drawPulseDot(ctx, c.cx, c.cy, c.baseR, t0 + 1.2, '#9fd6ff', '#2f82ff');
-      } else {
-        const b = pulseBase(CHAT.back.cx, CHAT.back.cy);
-        drawPulseDot(ctx, b.cx, b.cy, b.baseR, t0, '#ffe9a8', '#ff9a3c');
       }
       // （横屏/竖屏均忽略越界绘制；Canvas 超出会自动被裁，不阻塞 raf）
 

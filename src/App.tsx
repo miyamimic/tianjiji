@@ -14,7 +14,9 @@ import { BG_OBJECT_POS, BG_SIZE, isPortraitViewport } from '@/lib/stageFit';
 
 export default function App() {
   const engine = useEngine();
-  const [scene, setScene] = useState<Scene>('welcome');
+  const [scene, setScene] = useState<Scene>(() => (
+    isPortraitViewport(window.innerWidth, window.innerHeight) ? 'chat' : 'welcome'
+  ));
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -143,7 +145,6 @@ export default function App() {
         <HotspotLayer
           scene={scene}
           onEnterChat={() => setScene('chat')}
-          onLeaveChat={() => setScene('welcome')}
         />
 
         {/* UI LAYER: Top bar */}
