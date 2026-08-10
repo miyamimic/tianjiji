@@ -1,9 +1,22 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Engine Web App (duplicated)</title>
+    <title>天机集</title>
+
+    <!-- ===== iOS Safari "添加到主屏幕" 全屏（无上下网址框）=====
+         只加这 4 个 meta，不改动 viewport / 不动 App.tsx / 不动 index.css，
+         不引入任何安全区/动态视口适配，避免回归之前的适配问题。
+    -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="天机集" />
+
+    <!-- 防止 iOS Safari 自动检测电话号码变蓝下划线 -->
+    <meta name="format-detection" content="telephone=no" />
+
     <meta property="og:image" content="https://bolt.new/static/og_default.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:image" content="https://bolt.new/static/og_default.png" />
