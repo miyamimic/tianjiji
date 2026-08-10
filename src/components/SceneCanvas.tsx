@@ -1,437 +1,294 @@
 import { useEffect, useRef } from 'react';
- 
+
 /**
-* SceneCanvas — ONLY draws particle / dynamic EFFECTS on top.
-* The background image is rendered by <img> in App.tsx.  We NEVER
-* redraw walls / floors / the bar / characters here — they all come
-* from the user's original welcome_bg.png.
-*
-* Coordinates are 0–1 fractions of the canvas so they scale correctly
-* on any screen.  Tweak ELEMENTS to match where things sit on YOUR
-* background image.
-*/
- 
-interface Rect { x: number; y: number; w: number; h: number }
-type Weather = 'clear' | 'rain';
- 
-// --- ELEMENT POSITIONS (0–1 fraction of canvas) ---
-// Adjust these numbers to match YOUR actual welcome_bg.png layout.
-// These are just rough starting estimates for a 16:9 bar scene.
-const ELEMENTS = {
-window:   { x: 0.03, y: 0.08, w: 0.22, h: 0.40 } as Rect,   // left window
-clock:    { x: 0.45, y: 0.16, r: 0.032 } as Rect & { r: number }, // wall clock
-fire:     { x: 0.70, y: 0.42, w: 0.13, h: 0.20 } as Rect,   // fireplace
-bottles:  { x: 0.85, y: 0.10, w: 0.14, h: 0.28 } as Rect,   // bottle shelf right
-glasses: [                                                      // bar counter glasses
-{ x: 0.56, y: 0.58, r: 0.010 },
-{ x: 0.61, y: 0.59, r: 0.010 },
-{ x: 0.66, y: 0.58, r: 0.010 },
-] as { x: number; y: number; r: number }[],
-cup:      { x: 0.30, y: 0.55, w: 0.05, h: 0.05 } as Rect,   // cup with steam
-person:   { x: 0.72, y: 0.28, w: 0.14, h: 0.32 } as Rect,   // bartender area
+ * 坐标体系：所有位置用相对舞台宽高的归一化坐标 (0..1)。
+ * 画布尺寸 === 父元素（16:9 或 3:2 舞台）尺寸，背景图按 object-cover 铺满舞台。
+ */
+
+export type Scene = 'welcome' | 'chat';
+
+// ====== 统一位置常量（相对舞台宽高 0..1） ======
+// 坐标来自对应蒙版 PNG 的像素分析（连通域质心 / 包围盒半径）
+//
+// WELCOME 场景：
+//   clock.png      2276×1280  →  cx=0.39648  cy=0.04919  rw=0.02460
+//   location-bg.png 2276×1280 →  每个字母下方的实心 pin 质心
+const WELCOME = {
+  clock: { cx: 0.39648, cy: 0.04919, r: 0.0246 },
+  hotspots: {
+    A: { cx: 0.219, cy: 0.538 },
+    B: { cx: 0.649, cy: 0.588 },
+    C: { cx: 0.472, cy: 0.681 },
+  } as Record<string, { cx: number; cy: number }>,
 };
- 
-interface Props { weather?: Weather }
- 
-export default function SceneCanvas({ weather = 'clear' }: Props) {
-const canvasRef = useRef<HTMLCanvasElement>(null);
-const weatherRef = useRef(weather);
-weatherRef.current = weather;
- 
-useEffect(() => {
-const canvas = canvasRef.current;
-if (!canvas) return;
-const ctx = canvas.getContext('2d');
-if (!ctx) return;
- 
-const resize = () => {
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
-ctx.imageSmoothingEnabled = true;
+
+// CHAT 场景：
+//   chat_clock.png    1793×1188  →  cx=0.45971  cy=0.10532  rw=0.04741
+//   chat_location.png 1793×1188  →  cx=0.8145   cy=0.5185   （唯一标记质心）
+const CHAT = {
+  clock: { cx: 0.45971, cy: 0.10532, r: 0.04741 },
+  back: { cx: 0.8145, cy: 0.5185 },
 };
-resize();
-window.addEventListener('resize', resize);
- 
-// ----- particle pools -----
-const rainDrops: { x: number; y: number; speed: number; len: number }[] = [];
-for (let i = 0; i < 140; i++) {
-rainDrops.push({
-x: Math.random(), y: Math.random(),
-speed: 0.005 + Math.random() * 0.007,
-len: 0.012 + Math.random() * 0.022,
-});
+
+interface Props {
+  scene: Scene;
 }
- 
-const leaves: { x: number; y: number; rot: number; rotSpeed: number; fall: number; drift: number; c: string }[] = [];
-for (let i = 0; i < 18; i++) {
-leaves.push({
-x: Math.random(), y: Math.random(),
-rot: Math.random() * Math.PI * 2,
-rotSpeed: (Math.random() - 0.5) * 0.02,
-fall: 0.002 + Math.random() * 0.002,
-drift: (Math.random() - 0.5) * 0.001,
-c: `hsl(${30 + Math.random() * 30}, 60%, ${45 + Math.random() * 15}%)`,
-});
+
+export default function SceneCanvas({ scene }: Props) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const sceneRef = useRef(scene);
+  sceneRef.current = scene;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const resize = () => {
+      const parent = canvas.parentElement;
+      canvas.width = parent ? parent.clientWidth : window.innerWidth;
+      canvas.height = parent ? parent.clientHeight : window.innerHeight;
+    };
+    resize();
+
+    const ro = new ResizeObserver(resize);
+    if (canvas.parentElement) ro.observe(canvas.parentElement);
+    window.addEventListener('resize', resize);
+
+    let raf = 0;
+    let t0 = 0;
+
+    const animate = () => {
+      t0 += 0.016;
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      const sc = sceneRef.current;
+      const clockSpec = sc === 'welcome' ? WELCOME.clock : CHAT.clock;
+
+      // ===== 画钟表指针 =====
+      if (sc === 'welcome') {
+        drawClock(ctx, clockSpec, w, h, { style: 'full' });
+      } else {
+        drawClock(ctx, clockSpec, w, h, { style: 'handsOnly' });
+      }
+
+      // ===== 画呼吸光点 =====
+      if (sc === 'welcome') {
+        drawPulseDot(ctx, w, h, WELCOME.hotspots.A.cx, WELCOME.hotspots.A.cy, t0, '#ffd36a', '#ff7a2f');
+        drawPulseDot(ctx, w, h, WELCOME.hotspots.B.cx, WELCOME.hotspots.B.cy, t0 + 0.6, '#9fffc0', '#2fbf6a');
+        drawPulseDot(ctx, w, h, WELCOME.hotspots.C.cx, WELCOME.hotspots.C.cy, t0 + 1.2, '#9fd6ff', '#2f82ff');
+      } else {
+        drawPulseDot(ctx, w, h, CHAT.back.cx, CHAT.back.cy, t0, '#ffe9a8', '#ff9a3c');
+      }
+
+      raf = requestAnimationFrame(animate);
+    };
+    raf = requestAnimationFrame(animate);
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+      window.removeEventListener('resize', resize);
+    };
+  }, []);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="pointer-events-none absolute inset-0 z-10 h-full w-full"
+      aria-hidden="true"
+    />
+  );
 }
- 
-const fireParticles: { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; size: number; color: string }[] = [];
- 
-const bottleHighlights: { x: number; y: number; baseX: number; next: number }[] = [];
-for (let i = 0; i < 7; i++) {
-const bx = ELEMENTS.bottles.x + (0.1 + Math.random() * 0.8) * ELEMENTS.bottles.w;
-const by = ELEMENTS.bottles.y + (0.1 + Math.random() * 0.8) * ELEMENTS.bottles.h;
-bottleHighlights.push({ x: bx, y: by, baseX: bx, next: Math.random() * 5 });
+
+// ============ 绘制：钟表 ============
+// style:
+//   'full'      → 表盘外发光 + 外框 + 12 刻度 + 指针（welcome 场景用，背景图无表盘）
+//   'handsOnly' → 仅细指针 + 小中心钉（chat 场景用，原图 chat_clock 已有完整表盘/数字/外框，不要遮挡）
+function drawClock(
+  ctx: CanvasRenderingContext2D,
+  spec: { cx: number; cy: number; r: number },
+  w: number,
+  h: number,
+  opts: { style: 'full' | 'handsOnly' },
+) {
+  const cx = spec.cx * w;
+  const cy = spec.cy * h;
+  const r = spec.r * w;
+  const now = new Date();
+
+  if (opts.style === 'full') {
+    // 1. 表盘外发光（淡）
+    const halo = ctx.createRadialGradient(cx, cy, r * 0.2, cx, cy, r * 2.1);
+    halo.addColorStop(0, 'rgba(255, 235, 180, 0.22)');
+    halo.addColorStop(1, 'rgba(255, 235, 180, 0)');
+    ctx.fillStyle = halo;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 2.1, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 2. 表盘圈
+    ctx.save();
+    ctx.lineWidth = Math.max(1, r * 0.12);
+    ctx.strokeStyle = 'rgba(80, 45, 15, 0.85)';
+    ctx.fillStyle = 'rgba(255, 246, 220, 0.08)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+
+    // 3. 12 小时刻度
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
+      const isMajor = i % 3 === 0;
+      const inner = r * (isMajor ? 0.68 : 0.78);
+      const outer = r * 0.9;
+      ctx.save();
+      ctx.strokeStyle = isMajor ? 'rgba(60, 30, 10, 0.9)' : 'rgba(60, 30, 10, 0.6)';
+      ctx.lineWidth = Math.max(1, r * (isMajor ? 0.09 : 0.05));
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * inner, cy + Math.sin(a) * inner);
+      ctx.lineTo(cx + Math.cos(a) * outer, cy + Math.sin(a) * outer);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // ===== 指针（两种风格粗细/长度不同） =====
+  // handsOnly：背景图有完整表盘，指针只在数字内侧旋转，要足够细，不遮挡原图刻度
+  const handsOnly = opts.style === 'handsOnly';
+  // 秒针：细线（红色）
+  const sec = now.getSeconds() + now.getMilliseconds() / 1000;
+  const aSec = (sec / 60) * Math.PI * 2 - Math.PI / 2;
+  ctx.save();
+  ctx.strokeStyle = handsOnly ? 'rgba(200, 50, 30, 0.92)' : 'rgba(220, 70, 40, 0.95)';
+  ctx.lineWidth = Math.max(1, handsOnly ? Math.min(1.6, r * 0.018) : r * 0.045);
+  ctx.lineCap = 'round';
+  const secLen = handsOnly ? 0.72 : 0.82;
+  const secTail = handsOnly ? 0.15 : 0.18;
+  ctx.beginPath();
+  ctx.moveTo(cx - Math.cos(aSec) * r * secTail, cy - Math.sin(aSec) * r * secTail);
+  ctx.lineTo(cx + Math.cos(aSec) * r * secLen, cy + Math.sin(aSec) * r * secLen);
+  ctx.stroke();
+  ctx.restore();
+
+  // 分针
+  const min = now.getMinutes() + sec / 60;
+  const aMin = (min / 60) * Math.PI * 2 - Math.PI / 2;
+  ctx.save();
+  ctx.strokeStyle = handsOnly ? 'rgba(40, 22, 10, 0.92)' : 'rgba(30, 15, 5, 0.9)';
+  ctx.lineWidth = Math.max(1, handsOnly ? Math.min(2.2, r * 0.028) : r * 0.085);
+  ctx.lineCap = 'round';
+  const minLen = handsOnly ? 0.60 : 0.75;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(aMin) * r * minLen, cy + Math.sin(aMin) * r * minLen);
+  ctx.stroke();
+  ctx.restore();
+
+  // 时针
+  const hr = (now.getHours() % 12) + min / 60;
+  const aHr = (hr / 12) * Math.PI * 2 - Math.PI / 2;
+  ctx.save();
+  ctx.strokeStyle = handsOnly ? 'rgba(40, 22, 10, 0.95)' : 'rgba(30, 15, 5, 0.95)';
+  ctx.lineWidth = Math.max(1.5, handsOnly ? Math.min(3, r * 0.038) : r * 0.115);
+  ctx.lineCap = 'round';
+  const hrLen = handsOnly ? 0.42 : 0.52;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(aHr) * r * hrLen, cy + Math.sin(aHr) * r * hrLen);
+  ctx.stroke();
+  ctx.restore();
+
+  // 中心钉（handsOnly 缩小，避免盖住原图表盘中心）
+  ctx.save();
+  ctx.fillStyle = handsOnly ? 'rgba(40, 22, 10, 0.9)' : 'rgba(30, 15, 5, 0.95)';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * (handsOnly ? 0.055 : 0.12), 0, Math.PI * 2);
+  ctx.fill();
+  if (handsOnly) {
+    ctx.fillStyle = 'rgba(255, 240, 210, 0.95)';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.018, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
 }
- 
-const cupSteams: { x: number; y: number; life: number; maxLife: number; size: number }[] = [];
- 
-const ambientParticles: { x: number; y: number; vx: number; vy: number; size: number; opacity: number; hue: number }[] = [];
-for (let i = 0; i < 28; i++) {
-ambientParticles.push({
-x: Math.random(), y: Math.random(),
-vx: (Math.random() - 0.5) * 0.00018,
-vy: -(Math.random() * 0.00025 + 0.00008),
-size: Math.random() * 2.5 + 1,
-opacity: Math.random() * 0.3 + 0.12,
-hue: 28 + Math.random() * 22,
-});
+
+// ============ 绘制：呼吸光点（核心亮点 + 外层扩散圆环） ============
+function drawPulseDot(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  cxRel: number,
+  cyRel: number,
+  phase: number,
+  colorInner: string,
+  colorOuter: string,
+) {
+  const cx = cxRel * w;
+  const cy = cyRel * h;
+  const baseR = Math.min(w, h) * 0.012; // 舞台参考尺寸
+  const t = phase;
+
+  // 1. 外层扩散呼吸环（2 个错开的波）
+  for (let i = 0; i < 2; i++) {
+    const tt = (t + i * 0.5) % 1.6;
+    const k = tt / 1.6; // 0→1
+    const radius = baseR * (1.2 + k * 4.2);
+    const alpha = Math.max(0, 1 - k) * 0.55;
+    ctx.save();
+    ctx.strokeStyle = colorOuter;
+    ctx.globalAlpha = alpha;
+    ctx.lineWidth = Math.max(1, baseR * 0.55);
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 2. 外层大发光
+  const outerR = baseR * (2.0 + 0.4 * Math.sin(t * 2));
+  const glow = ctx.createRadialGradient(cx, cy, 0, cx, cy, outerR * 3.5);
+  glow.addColorStop(0, hexWithAlpha(colorOuter, 0.35));
+  glow.addColorStop(0.4, hexWithAlpha(colorOuter, 0.10));
+  glow.addColorStop(1, hexWithAlpha(colorOuter, 0));
+  ctx.save();
+  ctx.fillStyle = glow;
+  ctx.beginPath();
+  ctx.arc(cx, cy, outerR * 3.5, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // 3. 中间实心
+  ctx.save();
+  ctx.fillStyle = colorInner;
+  ctx.shadowColor = hexWithAlpha(colorOuter, 0.9);
+  ctx.shadowBlur = baseR * 2.2;
+  ctx.beginPath();
+  ctx.arc(cx, cy, baseR * (1.0 + 0.12 * Math.sin(t * 3)), 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
+  // 4. 核心高光（左上小白点）
+  ctx.save();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+  ctx.beginPath();
+  ctx.arc(cx - baseR * 0.25, cy - baseR * 0.3, baseR * 0.28, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
- 
-let time = 0;
-let raf = 0;
-let lightningUntil = 0;  // timestamp when lightning effect ends
- 
-const animate = () => {
-time += 0.016;
-const w = canvas.width;
-const h = canvas.height;
-const wr = weatherRef.current;
- 
-// ======= CLEAR ONLY — background comes from the <img> tag! =======
-ctx.clearRect(0, 0, w, h);
- 
-// ======= RAIN (inside window clip) =======
-const win = ELEMENTS.window;
-const wx = win.x * w, wy = win.y * h, ww = win.w * w, wh = win.h * h;
- 
-if (wr === 'rain') {
-ctx.save();
-ctx.beginPath();
-ctx.rect(wx, wy, ww, wh);
-ctx.clip();
- 
-ctx.fillStyle = 'rgba(190, 210, 235, 0.55)';
-for (const d of rainDrops) {
-d.y += d.speed;
-d.x += 0.0004;
-if (d.y > 1) { d.y = 0; d.x = Math.random(); }
-const px = wx + d.x * ww;
-const py = wy + d.y * wh;
-ctx.fillRect(px, py, 1, d.len * h);
-}
-// window fog
-ctx.fillStyle = 'rgba(210, 220, 240, 0.06)';
-ctx.fillRect(wx, wy, ww, wh);
-ctx.restore();
- 
-// Lightning
-if (time > lightningUntil) {
-// small chance to trigger a new strike
-if (Math.random() < 0.003) {
-lightningUntil = time + 0.12 + Math.random() * 0.08;
-}
-} else {
-// lightning flash overlay
-const strength = Math.random() * 0.25 + 0.15;
-ctx.fillStyle = `rgba(230, 235, 255, ${strength})`;
-ctx.fillRect(wx, wy, ww, wh);
-// outside the window also gets some glow
-ctx.fillStyle = `rgba(230, 235, 255, ${strength * 0.3})`;
-ctx.fillRect(0, 0, w, h);
-}
-} else {
-// ======= SUNNY: floating leaves in window + light beam =======
-ctx.save();
-ctx.beginPath();
-ctx.rect(wx, wy, ww, wh);
-ctx.clip();
- 
-for (const l of leaves) {
-l.y += l.fall;
-l.x += Math.sin(time + l.rot) * 0.0005 + l.drift;
-l.rot += l.rotSpeed;
-if (l.y > 1) { l.y = -0.05; l.x = Math.random(); }
-if (l.x > 1.05) l.x = -0.05;
-if (l.x < -0.05) l.x = 1.05;
-const lx = wx + l.x * ww;
-const ly = wy + l.y * wh;
-ctx.save();
-ctx.translate(lx, ly);
-ctx.rotate(l.rot);
-ctx.fillStyle = l.c;
-ctx.fillRect(-2, -1, 4, 2);
-ctx.restore();
-}
-// soft sun beam
-const beam = ctx.createLinearGradient(wx + ww * 0.2, wy, wx + ww * 0.9, wy + wh);
-beam.addColorStop(0, 'rgba(255, 230, 160, 0.12)');
-beam.addColorStop(1, 'rgba(255, 230, 160, 0)');
-ctx.fillStyle = beam;
-ctx.fillRect(wx, wy, ww, wh);
-ctx.restore();
-}
- 
-// ======= FIREPLACE — fire particles + warm glow =======
-const fire = ELEMENTS.fire;
-const fx = (fire.x + fire.w / 2) * w;
-const fy = (fire.y + fire.h) * h;
-const fw = fire.w * w;
- 
-// spawn fire particles
-for (let i = 0; i < 4; i++) {
-const colors = ['#ff6b3a', '#ffaa3a', '#ffdd6a', '#ff8c42', '#ff5522'];
-fireParticles.push({
-x: fx + (Math.random() - 0.5) * fw * 0.85,
-y: fy,
-vx: (Math.random() - 0.5) * 0.45,
-vy: -(Math.random() * 1.8 + 0.9),
-life: 0,
-maxLife: 32 + Math.random() * 30,
-size: Math.random() * 3 + 2,
-color: colors[Math.floor(Math.random() * colors.length)],
-});
-}
-// fire glow (breathing)
-const breath = 0.85 + Math.sin(time * 3) * 0.15;
-const glow = ctx.createRadialGradient(fx, fy, 0, fx, fy, fw * 1.8);
-glow.addColorStop(0, `rgba(255, 150, 55, ${0.3 * breath})`);
-glow.addColorStop(0.5, `rgba(255, 120, 40, ${0.12 * breath})`);
-glow.addColorStop(1, 'rgba(255, 120, 40, 0)');
-ctx.fillStyle = glow;
-ctx.fillRect(fx - fw * 2, fy - fw * 2, fw * 4, fw * 4);
- 
-// draw + update fire particles
-for (let i = fireParticles.length - 1; i >= 0; i--) {
-const p = fireParticles[i];
-p.x += p.vx;
-p.y += p.vy;
-p.vy *= 0.985;
-p.life++;
-const alpha = 1 - p.life / p.maxLife;
-if (alpha <= 0) { fireParticles.splice(i, 1); continue; }
-ctx.globalAlpha = alpha * 0.85;
-ctx.fillStyle = p.color;
-ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
-}
-ctx.globalAlpha = 1;
- 
-// ======= CLOCK HANDS =======
-const clk = ELEMENTS.clock;
-const cx = clk.x * w;
-const cy = clk.y * h;
-const cr = clk.r * Math.min(w, h);
-const now = new Date();
-const hourAngle = ((now.getHours() % 12 + now.getMinutes() / 60) / 12) * Math.PI * 2 - Math.PI / 2;
-const minuteAngle = ((now.getMinutes() + now.getSeconds() / 60) / 60) * Math.PI * 2 - Math.PI / 2;
-const secondAngle = ((now.getSeconds() + now.getMilliseconds() / 1000) / 60) * Math.PI * 2 - Math.PI / 2;
- 
-// tick marks (very subtle — just accent the 12 major ticks on the existing face)
-ctx.strokeStyle = 'rgba(40, 30, 20, 0.55)';
-ctx.lineWidth = Math.max(1, cr * 0.05);
-for (let i = 0; i < 12; i++) {
-const a = (i / 12) * Math.PI * 2 - Math.PI / 2;
-ctx.beginPath();
-ctx.moveTo(cx + Math.cos(a) * cr * 0.88, cy + Math.sin(a) * cr * 0.88);
-ctx.lineTo(cx + Math.cos(a) * cr * 0.98, cy + Math.sin(a) * cr * 0.98);
-ctx.stroke();
-}
- 
-// hour hand
-ctx.strokeStyle = '#2a1a10';
-ctx.lineWidth = Math.max(2.5, cr * 0.13);
-ctx.lineCap = 'round';
-ctx.beginPath();
-ctx.moveTo(cx, cy);
-ctx.lineTo(cx + Math.cos(hourAngle) * cr * 0.48, cy + Math.sin(hourAngle) * cr * 0.48);
-ctx.stroke();
- 
-// minute hand
-ctx.lineWidth = Math.max(1.8, cr * 0.085);
-ctx.beginPath();
-ctx.moveTo(cx, cy);
-ctx.lineTo(cx + Math.cos(minuteAngle) * cr * 0.68, cy + Math.sin(minuteAngle) * cr * 0.68);
-ctx.stroke();
- 
-// second hand
-ctx.strokeStyle = '#a0521d';
-ctx.lineWidth = Math.max(1, cr * 0.045);
-ctx.beginPath();
-ctx.moveTo(cx, cy);
-ctx.lineTo(cx + Math.cos(secondAngle) * cr * 0.78, cy + Math.sin(secondAngle) * cr * 0.78);
-ctx.stroke();
- 
-// center dot
-ctx.fillStyle = '#2a1a10';
-ctx.beginPath();
-ctx.arc(cx, cy, Math.max(1.8, cr * 0.06), 0, Math.PI * 2);
-ctx.fill();
- 
-// tick sparkle every second
-if (now.getMilliseconds() < 60) {
-const secAngle = (now.getSeconds() / 60) * Math.PI * 2 - Math.PI / 2;
-const sx = cx + Math.cos(secAngle) * cr * 0.92;
-const sy = cy + Math.sin(secAngle) * cr * 0.92;
-ctx.fillStyle = 'rgba(255, 230, 180, 0.9)';
-ctx.fillRect(sx - 1, sy - 1, 2, 2);
-}
- 
-// ======= BOTTLE SHELF — highlights =======
-for (const b of bottleHighlights) {
-b.next -= 0.016;
-if (b.next <= 0) {
-// flash a highlight for ~0.6s starting now; set next in 2–8s
-b.next = 2 + Math.random() * 6;
-}
-// the highlight is on for the first 0.6s of each cycle — figure progress
-const cycleDuration = 2.6; // approx
-const t = (cycleDuration - b.next) % cycleDuration;
-if (t < 0.6) {
-const intensity = 1 - t / 0.6;
-const bx = b.x * w;
-const by = b.y * h;
-ctx.fillStyle = `rgba(255, 255, 255, ${intensity * 0.9})`;
-ctx.fillRect(bx - 2, by - 3, 2, 6);
-ctx.fillStyle = `rgba(255, 255, 255, ${intensity * 0.4})`;
-ctx.fillRect(bx - 1, by - 4, 1, 8);
-}
-}
- 
-// ======= BAR GLASSES — sparkles + bubbles + subtle glow =======
-for (const g of ELEMENTS.glasses) {
-const gx = g.x * w;
-const gy = g.y * h;
-const gr = g.r * Math.min(w, h);
- 
-// subtle glass glow
-const gGlow = ctx.createRadialGradient(gx, gy, 0, gx, gy, gr * 5);
-gGlow.addColorStop(0, 'rgba(255, 250, 230, 0.18)');
-gGlow.addColorStop(1, 'rgba(255, 250, 230, 0)');
-ctx.fillStyle = gGlow;
-ctx.fillRect(gx - gr * 5, gy - gr * 5, gr * 10, gr * 10);
- 
-// sparkle (cross-shaped)
-const sparkle = Math.sin(time * 2 + g.x * 100);
-if (sparkle > 0.7) {
-const a = (sparkle - 0.7) / 0.3;
-ctx.fillStyle = `rgba(255, 255, 255, ${a * 0.6})`;
-ctx.fillRect(gx - gr * 2, gy - 0.5, gr * 4, 1);
-ctx.fillRect(gx - 0.5, gy - gr * 2, 1, gr * 4);
-}
- 
-// occasional bubble
-if (Math.random() < 0.03) {
-ctx.fillStyle = 'rgba(255, 255, 255, 0.7)';
-const bSize = Math.random() * 1.5 + 0.8;
-ctx.fillRect(gx + (Math.random() - 0.5) * gr * 2, gy - Math.random() * gr * 2, bSize, bSize);
-}
-}
- 
-// ======= CUP STEAM =======
-const cup = ELEMENTS.cup;
-const cupCx = (cup.x + cup.w / 2) * w;
-const cupTop = cup.y * h;
-// spawn new steam particle
-if (Math.random() < 0.5) {
-cupSteams.push({
-x: cupCx + (Math.random() - 0.5) * cup.w * w * 0.5,
-y: cupTop,
-life: 0,
-maxLife: 70 + Math.random() * 30,
-size: Math.random() * 3 + 2,
-});
-}
-for (let i = cupSteams.length - 1; i >= 0; i--) {
-const s = cupSteams[i];
-s.life++;
-s.y -= 0.6;
-s.x += Math.sin(s.life * 0.1) * 0.3;
-s.size *= 1.01;
-const alpha = 1 - s.life / s.maxLife;
-if (alpha <= 0) { cupSteams.splice(i, 1); continue; }
-ctx.fillStyle = `rgba(230, 230, 230, ${alpha * 0.25})`;
-ctx.beginPath();
-ctx.arc(s.x, s.y, s.size, 0, Math.PI * 2);
-ctx.fill();
-}
- 
-// ======= PERSON — subtle hair sway particles + blinking eyes =======
-const p = ELEMENTS.person;
-// particles along the hair edges
-if (Math.random() < 0.3) {
-ambientParticles.push({
-x: p.x + Math.random() * p.w,
-y: p.y + Math.random() * p.h * 0.2,
-vx: (Math.random() - 0.5) * 0.0003,
-vy: -(Math.random() * 0.00015 + 0.00005),
-size: 1,
-opacity: 0.35,
-hue: 15 + Math.random() * 10, // dark hair-ish
-});
-}
- 
-// ======= AMBIENT WARM FLOATING PARTICLES =======
-for (const ap of ambientParticles) {
-ap.x += ap.vx;
-ap.y += ap.vy;
-if (ap.y < -0.05) { ap.y = 1.05; ap.x = Math.random(); }
-if (ap.x < -0.05) ap.x = 1.05;
-if (ap.x > 1.05) ap.x = -0.05;
-const twinkle = 0.7 + Math.sin(time * 2 + ap.x * 100) * 0.3;
-const px2 = ap.x * w;
-const py2 = ap.y * h;
-// core
-ctx.fillStyle = `hsla(${ap.hue}, 85%, 62%, ${ap.opacity * twinkle})`;
-ctx.beginPath();
-ctx.arc(px2, py2, ap.size, 0, Math.PI * 2);
-ctx.fill();
-// halo
-ctx.fillStyle = `hsla(${ap.hue}, 85%, 62%, ${ap.opacity * twinkle * 0.18})`;
-ctx.beginPath();
-ctx.arc(px2, py2, ap.size * 3, 0, Math.PI * 2);
-ctx.fill();
-}
- 
-// ======= LIGHT CAMERA SHAKE =======
-// (we don't actually shift the canvas — we'd need to drawImage for that —
-//  instead apply a super subtle global translation tint to particle draws
-//  next time.  Skipping for now to keep the overlay clean.)
- 
-// ======= VIGNETTE + warm overlay =======
-const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.max(w, h) * 0.75);
-vg.addColorStop(0, 'rgba(0, 0, 0, 0)');
-vg.addColorStop(1, 'rgba(0, 0, 0, 0.45)');
-ctx.fillStyle = vg;
-ctx.fillRect(0, 0, w, h);
- 
-// overall warm tint (very subtle)
-ctx.fillStyle = 'rgba(255, 180, 100, 0.035)';
-ctx.fillRect(0, 0, w, h);
- 
-raf = requestAnimationFrame(animate);
-};
-animate();
- 
-return () => {
-cancelAnimationFrame(raf);
-window.removeEventListener('resize', resize);
-};
-}, []);
- 
-return (
-<canvas
-ref={canvasRef}
-className="pointer-events-none fixed inset-0 z-0 h-full w-full"
-aria-hidden="true"
-/>
-);
+
+function hexWithAlpha(hex: string, alpha: number) {
+  if (hex.startsWith('#') && hex.length === 7) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r},${g},${b},${alpha})`;
+  }
+  return hex;
 }
