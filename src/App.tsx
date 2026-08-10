@@ -81,36 +81,14 @@ export default function App() {
     : { w: 1793, h: 1188 };
 
   return (
-    // 最外层容器：
-    //  - 用 dvh/dvw 替代 vh/vw，适配 iOS Safari 动态工具栏（折叠/展开时视口正确）
-    //  - padding 使用 env(safe-area-inset-*)，保证舞台内容不被刘海/灵动岛/底部 Home Indicator 遮挡
-    //  - 注意：padding 在舞台外面，黑边/留白都在舞台容器外，不会压缩舞台本身，所以背景图绝不裁切
-    <div
-      className="relative w-full flex items-center justify-center overflow-hidden bg-black"
-      style={{
-        height: '100dvh',
-        width: '100dvw',
-        paddingTop: 'env(safe-area-inset-top, 0px)',
-        paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        paddingLeft: 'env(safe-area-inset-left, 0px)',
-        paddingRight: 'env(safe-area-inset-right, 0px)',
-      }}
-    >
+    <div className="relative h-screen w-full flex items-center justify-center overflow-hidden bg-black">
       {/* ================ STAGE: 按场景比例的容器，保证背景图不裁切 ================ */}
       <div
         className="relative overflow-hidden shadow-2xl"
         style={{
           aspectRatio: `${stageRatio.w} / ${stageRatio.h}`,
-          // 这里用 calc 计算"舞台可用区域"（扣除 safe-area padding 后的 dvh/dvw），
-          // 仍然保持：图片比例由 aspect-ratio 控制 + min 约束取较小者 → 绝不裁切
-          width: `min(
-            calc(100dvw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)),
-            calc((100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)) * ${stageRatio.w} / ${stageRatio.h})
-          )`,
-          height: `min(
-            calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)),
-            calc((100dvw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)) * ${stageRatio.h} / ${stageRatio.w})
-          )`,
+          width: `min(100vw, calc(100vh * ${stageRatio.w} / ${stageRatio.h}))`,
+          height: `min(100vh, calc(100vw * ${stageRatio.h} / ${stageRatio.w}))`,
         }}
       >
         {/* LAYER 1: BACKGROUND IMAGE */}
