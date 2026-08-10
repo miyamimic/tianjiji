@@ -41,10 +41,31 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
+  /* ===== iOS / 移动端 触摸优化 ===== */
+  -webkit-text-size-adjust: 100%;       /* 禁止 iOS 横屏时自动放大字体 */
+  -webkit-tap-highlight-color: transparent; /* 点击无灰色半透明遮罩 */
+  -webkit-touch-callout: none;              /* 禁止长按弹出图片/文字拷贝菜单 */
+  -webkit-user-select: none;                /* 全局禁止选择，避免误触选中文本；聊天输入框单独恢复 */
+  user-select: none;
+  overscroll-behavior: none;                /* 禁止浏览器橡皮筋回弹（保留内部滚动回弹） */
+  touch-action: manipulation;               /* 取消 300ms 点击延迟，允许双指缩放被 viewport 禁止 */
+}
+
+/* 聊天输入框、设置弹窗等需要输入/选择的地方恢复选择能力 */
+input, textarea, select, button, [contenteditable="true"],
+button *, input *, textarea *, select * {
+  -webkit-user-select: auto;
+  user-select: auto;
 }
 
 #root {
   min-height: 100vh;
+  min-height: 100dvh; /* iOS 动态视口优先 */
+  height: 100vh;
+  height: 100dvh;
+  width: 100vw;
+  width: 100dvw;
+  overflow: hidden;
 }
 
 /* Scrollbar */

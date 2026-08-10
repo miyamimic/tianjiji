@@ -1,9 +1,37 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Engine Web App (duplicated)</title>
+    <!--
+      viewport:
+        - viewport-fit=cover      → 允许内容伸入刘海/灵动岛安全区（舞台容器内部再单独用 safe-area 留白，图片不会被裁切）
+        - initial-scale=1         → 保持 1:1 渲染
+        - maximum-scale=1 + user-scalable=no → iOS Safari "添加到主屏幕"后，禁用双击/双指缩放
+        - width=device-width      → 与横屏强制策略兼容，双端横屏保持不变
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <title>天机集 · 陆沉</title>
+    <meta name="description" content="沉浸式角色对话 — 天机集" />
+    <meta name="theme-color" content="#000000" />
+
+    <!-- ===== iOS / Safari 添加到主屏幕 全屏（无上下网页框） ===== -->
+    <!-- apple-mobile-web-app-capable=yes 是去掉上下 Safari 工具条的关键 -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="天机集" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-touch-fullscreen" content="yes" />
+
+    <!-- 防止 iOS Safari 自动检测电话号码并变蓝下划线 -->
+    <meta name="format-detection" content="telephone=no, email=no, address=no" />
+
+    <!-- iOS 主屏图标；如无 PNG 图标，Safari 会自动截屏做图标，这里允许两种情况 -->
+    <!-- <link rel="apple-touch-icon" href="/apple-touch-icon.png" /> -->
+
+    <!-- Open Graph / 社交分享（保留，不影响 iOS） -->
     <meta property="og:image" content="https://bolt.new/static/og_default.png" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:image" content="https://bolt.new/static/og_default.png" />
