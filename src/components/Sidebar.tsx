@@ -1,10 +1,12 @@
-import { ChevronLeft, ChevronRight, Brain, Sparkles, BookMarked, ScanSearch } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Brain, Sparkles, BookMarked, ScanSearch, History } from 'lucide-react';
 import EmotionRadar from './EmotionRadar';
-import type { EmotionVector, BackgroundThread, TriggeredAnchor, IntentAnalysis } from '../data/types';
+import type { EmotionVector, BackgroundThread, TriggeredAnchor, IntentAnalysis, DynamicMemory } from '../data/types';
+import { loadDynamicMemories } from '../lib/customStore';
 
 interface Props {
   isOpen: boolean;
   onToggle: () => void;
+  characterId?: string;
   emotion: EmotionVector;
   previousEmotion: EmotionVector | null;
   emotionConfirmed: boolean;
@@ -62,6 +64,7 @@ function formatTimeAgo(ts: number): string {
 export default function Sidebar({
   isOpen,
   onToggle,
+  characterId,
   emotion,
   previousEmotion,
   emotionConfirmed,
@@ -236,7 +239,7 @@ export default function Sidebar({
             </div>
             {anchors.length === 0 ? (
               <div className="rounded-lg border border-white/10 bg-[hsl(222_28%_9%/0.4)] p-3 text-center text-xs text-white/40">
-                对话中触发的记忆会显示在这里
+                对话中触发的固定记忆锚点
               </div>
             ) : (
               <div className="space-y-2">
@@ -253,6 +256,51 @@ export default function Sidebar({
               </div>
             )}
           </div>
+
+          {/* Dynamic High-Emotion Memories */}
+          {characterId && (
+            <div>
+              <div className="mb-2 flex items-center gap-2">
+                <History className="size-4 text-emerald-400" />
+                <h3 className="text-sm font-medium text-white">情绪长效记忆联动</h3>
+                <span className="ml-auto text-xs text-emerald-400/80">
+                  {loadDynamicMemories(characterId).length} 条
+                </span>
+              </div>
+              {loadDynamicMemories(characterId).length === 0 ? (
+                <div className="rounded-lg border border-white/10 bg-[hsl(222_28%_9%/0.4)] p-3 text-center text-xs text-white/40 leading-relaxed">
+                  当对话产生高情绪波动（intensity ≥ 4 或剧烈情绪差）时，系统会自动在此沉淀长效情节记忆并在后续相关话题中主动唤醒。
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {loadDynamicMemories(characterId).map((m) => (
+                    <div
+                      key={m.id}
+                      className="rounded-lg border border-emerald-500/20 bg-emerald-950/20 p-2.5 space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between text-[11px]">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {m.topic_keywords.map((kw, ki) => (
+                            <span
+                              key={ki}
+                              className="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono text-[10px]"
+                            >
+                              #{kw}
+                            </span>
+                          ))}
+                        </div>
+                        <span className="text-[10px] text-emerald-400 font-medium shrink-0 ml-1">
+                          {EMOTION_CN[m.emotion_type] || m.emotion_type} Lv.{m.intensity}
+                        </span>
+                      </div>
+                      <p className="text-xs text-white/80 leading-relaxed">{m.user_trigger_summary}</p>
+                      <p className="text-[10px] text-white/40">{formatTimeAgo(m.created_at)}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="border-t border-white/10 px-4 py-3">

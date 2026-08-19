@@ -1,6 +1,14 @@
 import { useState, useEffect } from 'react';
-import { User, ShieldAlert, Heart, MessageSquare, Clipboard, RotateCcw, Check, Sparkles, HelpCircle } from 'lucide-react';
-import { loadSavedCharacters, saveCharacterEdit, resetCharactersToDefault, loadUserPromptProfile, saveUserPromptProfile } from '../lib/customStore';
+import { User, ShieldAlert, Heart, MessageSquare, Clipboard, RotateCcw, Check, Sparkles, HelpCircle, Layers } from 'lucide-react';
+import { 
+  loadSavedCharacters, 
+  saveCharacterEdit, 
+  resetCharactersToDefault, 
+  loadUserPromptProfile, 
+  saveUserPromptProfile,
+  loadCharMinBubbles,
+  saveCharMinBubbles
+} from '../lib/customStore';
 import type { Character, CharacterCore } from '../data/types';
 import { INSTINCT_DESCRIPTIONS, SPEECH_FILTER_DESCRIPTIONS } from '../data/types';
 
@@ -24,8 +32,9 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
   const [instinct, setInstinct] = useState<'attack' | 'avoid' | 'freeze' | 'fawn' | 'observe'>('observe');
   const [speechFilter, setSpeechFilter] = useState<'rough' | 'gentle' | 'formal' | 'casual'>('casual');
   
-  // Custom system prompt additions
+  // Custom system prompt additions & min bubbles
   const [customPrompt, setCustomPrompt] = useState('');
+  const [minBubbles, setMinBubbles] = useState<number>(1);
 
   // Speech and Actions lists
   const [catchphrases, setCatchphrases] = useState('');
@@ -53,9 +62,9 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
       setCoreValues(current.core.values.join('、'));
       setInstinct(current.core.instinct_base);
       setSpeechFilter(current.core.speech_filter);
+      setMinBubbles(loadCharMinBubbles(current.character_id));
       
-      // Load custom instructions (if any custom property exists, or mock it into background thread/values)
-      // We will save custom instructions inside a new custom property: `custom_system_prompt` on Character
+      // Load custom instructions
       setCustomPrompt((current as any).custom_system_prompt || '');
 
       setCatchphrases(current.speech.catchphrases.join('、'));
@@ -109,8 +118,9 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
       },
     };
 
-    // Attach custom system prompt
+    // Attach custom system prompt & min bubbles
     (updatedChar as any).custom_system_prompt = customPrompt.trim();
+    saveCharMinBubbles(editingChar.character_id, minBubbles);
 
     saveCharacterEdit(updatedChar);
     
@@ -239,6 +249,41 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
                     </option>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            {/* Min Reply Bubbles Configuration (单次最少回复气泡数) */}
+            <div className="p-3.5 rounded-xl border border-white/10 bg-white/[0.02] space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-semibold text-white/90 flex items-center gap-1.5">
+                  <Layers className="size-3.5 text-[hsl(28_85%_62%)]" />
+                  单次最少回复气泡数 (分句 JSON 条数)
+                </label>
+                <span className="text-xs font-mono font-bold text-[hsl(28_85%_62%)] bg-[hsl(28_85%_62%/0.15)] border border-[hsl(28_85%_62%/0.3)] px-2 py-0.5 rounded-md">
+                  至少 {minBubbles} 条连续气泡
+                </span>
+              </div>
+              <p className="text-[10px] text-white/40 leading-relaxed">
+                要求该角色在回复时，必须将台词、心理活动、肢体描写拆分并连发至少 N 个独立的气泡，打造极具沉浸感的分句对话体验。
+              </p>
+              <div className="grid grid-cols-5 gap-1.5 pt-1">
+                {[1, 2, 3, 4, 5].map((count) => (
+                  <button
+                    key={count}
+                    type="button"
+                    onClick={() => setMinBubbles(count)}
+                    className={`py-2 px-1 text-xs font-semibold rounded-lg border transition-all flex flex-col items-center gap-0.5 ${
+                      minBubbles === count
+                        ? 'border-[hsl(28_85%_62%)] bg-[hsl(28_85%_62%/0.2)] text-[hsl(28_85%_62%)] ring-1 ring-[hsl(28_85%_62%/0.5)] shadow-sm'
+                        : 'border-white/10 bg-black/40 hover:bg-white/5 text-white/50 hover:text-white/80'
+                    }`}
+                  >
+                    <span>{count} 条</span>
+                    <span className="text-[9px] font-normal opacity-70">
+                      {count === 1 ? '单句' : count === 2 ? '动作+句' : count === 3 ? '连发3句' : count === 4 ? '多句连发' : '长篇连发'}
+                    </span>
+                  </button>
+                ))}
               </div>
             </div>
 

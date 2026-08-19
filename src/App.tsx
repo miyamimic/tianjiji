@@ -7,6 +7,7 @@ import ChatInput from '@/components/ChatInput';
 import ChatBubble from '@/components/ChatBubble';
 import TypingIndicator from '@/components/TypingIndicator';
 import SettingsModal from '@/components/SettingsModal';
+import NumbedNoticeModal from '@/components/NumbedNoticeModal';
 import LeafLoader from '@/components/LeafLoader';
 import WindChime from '@/components/WindChime';
 import { useEngine } from '@/hooks/useEngine';
@@ -25,6 +26,11 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [numbedModalInfo, setNumbedModalInfo] = useState<{
+    characterName: string;
+    numbedKeys: string[];
+    isSensitized: boolean;
+  } | null>(null);
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(loadLlmConfig());
   const scrollRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -83,23 +89,27 @@ export default function App() {
     );
   }
 
-  const handleSend = async (text: string) => {
-    setIsLoading(true);
+  const handleSend = (text: string) => {
     try {
-      await engine.sendMessage(text, llmReady ? llmConfig : undefined);
+      engine.addUserMessageOnly(text);
     } catch (e) {
       console.error('发送失败', e);
-    } finally {
-      setIsLoading(false);
     }
   };
 
-  const handleTriggerReply = async (messageId: string) => {
+  const handleRequestReply = async (messageId?: string) => {
     setIsLoading(true);
     try {
-      await engine.triggerCharacterReply(messageId, llmReady ? llmConfig : undefined);
+      const res = await engine.triggerCharacterReply(messageId, llmReady ? llmConfig : undefined);
+      if (res && res.numbedKeys && res.numbedKeys.length > 0) {
+        setNumbedModalInfo({
+          characterName: res.characterName || character.name,
+          numbedKeys: res.numbedKeys,
+          isSensitized: (res.sensitizedKeys && res.sensitizedKeys.length > 0) || false,
+        });
+      }
     } catch (e) {
-      console.error('追问生成失败', e);
+      console.error('回复生成失败', e);
     } finally {
       setIsLoading(false);
     }
@@ -236,7 +246,7 @@ export default function App() {
                       characterId={character.character_id}
                       onRollback={(id) => engine.rollbackToMessage(id)}
                       onEdit={(id, text) => engine.editMessage(id, text)}
-                      onTriggerReply={handleTriggerReply}
+                      onTriggerReply={handleRequestReply}
                       onAddUserMsgOnly={(id, text) => engine.addUserMessageOnly(text, id)}
                     />
                   </div>
@@ -246,7 +256,12 @@ export default function App() {
             </div>
 
             <div className="pointer-events-auto">
-              <ChatInput onSend={handleSend} disabled={isLoading} llmReady={llmReady} />
+              <ChatInput
+                onSend={handleSend}
+                onRequestReply={() => handleRequestReply()}
+                disabled={isLoading}
+                llmReady={llmReady}
+              />
             </div>
           </div>
         )}
@@ -257,6 +272,7 @@ export default function App() {
         <Sidebar
           isOpen={sidebarOpen}
           onToggle={() => setSidebarOpen((v) => !v)}
+          characterId={character.character_id}
           emotion={emotion}
           previousEmotion={previousEmotion}
           emotionConfirmed={emotionConfirmed}
@@ -283,6 +299,14 @@ export default function App() {
         onClose={() => setSettingsOpen(false)}
         currentCharacterId={character.character_id}
         onEngineReload={() => engine.reload()}
+      />
+
+      <NumbedNoticeModal
+        isOpen={!!numbedModalInfo}
+        onClose={() => setNumbedModalInfo(null)}
+        characterName={numbedModalInfo?.characterName || character.name}
+        numbedKeys={numbedModalInfo?.numbedKeys || []}
+        isSensitized={numbedModalInfo?.isSensitized}
       />
     </div>
   );

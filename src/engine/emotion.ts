@@ -33,6 +33,98 @@ export function scaleEmotion(
   return result;
 }
 
+/**
+ * 情绪强度校准系数 (1-5 级)
+ * 1 级: 极微弱波澜 (0.25)
+ * 2 级: 轻度触动 (0.60)
+ * 3 级: 适中标准 (1.00)
+ * 4 级: 强烈冲击 (1.45)
+ * 5 级: 剧烈破防/极端 (1.90)
+ */
+export const INTENSITY_FACTORS: Record<number, number> = {
+  1: 0.25,
+  2: 0.60,
+  3: 1.00,
+  4: 1.45,
+  5: 1.90,
+};
+
+export function applyIntensityCalibration(
+  delta: Partial<EmotionVector>,
+  intensity?: number,
+): Partial<EmotionVector> {
+  const safeIntensity = Math.max(1, Math.min(5, Math.round(intensity || 3)));
+  const factor = INTENSITY_FACTORS[safeIntensity] ?? 1.0;
+  return scaleEmotion(delta, factor);
+}
+
+/**
+ * 多轮情绪追踪与情绪惯性衰减/交叉敏感机制：
+ * 1. 连续递增麻木 (Emotional Numbing): 若某情绪（如悲伤/愤怒）连续 3+ 轮递增，第 4 轮增量衰减 (0.45~0.60)
+ * 2. 脆弱防线降低 (Sensitization to Warmth/Joy): 在深度悲伤/疲惫或连环受创时，温情/喜悦的触动力度被放大 (1.4~1.7倍)，更容易被细微善意打动
+ */
+export function processMultiTurnInertia(
+  current: EmotionVector,
+  rawDelta: Partial<EmotionVector>,
+  history: EmotionVector[],
+): {
+  finalDelta: Partial<EmotionVector>;
+  numbedKeys: string[];
+  sensitizedKeys: string[];
+} {
+  const finalDelta: Partial<EmotionVector> = { ...rawDelta };
+  const numbedKeys: string[] = [];
+  const sensitizedKeys: string[] = [];
+
+  if (!history || history.length < 2) {
+    return { finalDelta, numbedKeys, sensitizedKeys };
+  }
+
+  // 1. Check continuous increase streaks in history (up to last 4 turns)
+  const recent = history.slice(-4);
+  for (const k of EMOTION_KEYS) {
+    const deltaVal = finalDelta[k];
+    if (deltaVal !== undefined && deltaVal > 0) {
+      let consecutiveIncreases = 0;
+      for (let i = 0; i < recent.length - 1; i++) {
+        if (recent[i + 1][k] >= recent[i][k] - 0.02) {
+          consecutiveIncreases++;
+        }
+      }
+
+      // If already high (>=0.6) or 3+ consecutive rounds increasing, apply emotional numbing
+      if (consecutiveIncreases >= 2 && current[k] > 0.5) {
+        const numbingMultiplier = Math.max(0.4, 1.0 - (consecutiveIncreases - 1) * 0.25);
+        finalDelta[k] = deltaVal * numbingMultiplier;
+        numbedKeys.push(k);
+      }
+    }
+  }
+
+  // 2. Cross-emotion sensitivity: If sadness is high (>0.55) or fear is high (>0.55),
+  // positive warmth / joy signals have lower defense threshold and heightened impact
+  const isVulnerable = current.sadness > 0.5 || current.fear > 0.5;
+  if (isVulnerable) {
+    if (finalDelta.warmth !== undefined && finalDelta.warmth > 0) {
+      finalDelta.warmth = finalDelta.warmth * 1.55;
+      // Simultaneously accelerates negative emotion relief
+      if (finalDelta.sadness === undefined) {
+        finalDelta.sadness = -0.12;
+      } else if (finalDelta.sadness > 0) {
+        finalDelta.sadness = finalDelta.sadness * 0.4;
+      }
+      sensitizedKeys.push('warmth');
+    }
+
+    if (finalDelta.joy !== undefined && finalDelta.joy > 0) {
+      finalDelta.joy = finalDelta.joy * 1.45;
+      sensitizedKeys.push('joy');
+    }
+  }
+
+  return { finalDelta, numbedKeys, sensitizedKeys };
+}
+
 export function updateEmotionWithInertia(
   current: EmotionVector,
   baseline: EmotionVector,

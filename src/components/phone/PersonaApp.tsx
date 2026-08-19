@@ -27,7 +27,9 @@ import {
   loadCharAvatar,
   saveCharAvatar,
   loadCharVisualDesc,
-  saveCharVisualDesc
+  saveCharVisualDesc,
+  loadCharMinBubbles,
+  saveCharMinBubbles
 } from '../../lib/customStore';
 import { loadLlmConfig, analyzeVisualAvatar } from '../../lib/llm';
 import type { Character } from '../../data/types';
@@ -61,6 +63,7 @@ export default function PersonaApp({ currentCharacterId = 'char_001', onEngineRe
   const [instinct, setInstinct] = useState<'attack' | 'avoid' | 'freeze' | 'fawn' | 'observe'>('observe');
   const [speechFilter, setSpeechFilter] = useState<'rough' | 'gentle' | 'formal' | 'casual'>('casual');
   const [customPrompt, setCustomPrompt] = useState('');
+  const [minBubbles, setMinBubbles] = useState<number>(1);
   const [catchphrases, setCatchphrases] = useState('');
   const [forbiddenPhrases, setForbiddenPhrases] = useState('');
   const [controlActions, setControlActions] = useState('');
@@ -88,6 +91,7 @@ export default function PersonaApp({ currentCharacterId = 'char_001', onEngineRe
     setCharName(c.name);
     setCharAvatar(loadCharAvatar(c.character_id));
     setCharVisualDesc(loadCharVisualDesc(c.character_id));
+    setMinBubbles(loadCharMinBubbles(c.character_id));
     setCoreValues(c.core.values.join('、'));
     setInstinct(c.core.instinct_base);
     setSpeechFilter(c.core.speech_filter);
@@ -201,6 +205,7 @@ export default function PersonaApp({ currentCharacterId = 'char_001', onEngineRe
     (updatedChar as any).custom_system_prompt = customPrompt.trim();
 
     saveCharacterEdit(updatedChar);
+    saveCharMinBubbles(editingChar.character_id, minBubbles);
     saveCharAvatar(editingChar.character_id, charAvatar);
     saveCharVisualDesc(editingChar.character_id, charVisualDesc);
 
@@ -483,6 +488,35 @@ export default function PersonaApp({ currentCharacterId = 'char_001', onEngineRe
                     placeholder="掌控感、分寸感、占有欲"
                     className="w-full px-2.5 py-1.5 rounded-lg border border-white/10 bg-black/40 text-white focus:outline-none"
                   />
+                </div>
+
+                {/* Min Reply Bubbles Selector */}
+                <div className="p-2.5 rounded-xl border border-white/10 bg-black/30 space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-white/90">每次最少回复气泡数</span>
+                    <span className="font-mono text-[hsl(28_85%_62%)] font-bold bg-[hsl(28_85%_62%/0.15)] px-2 py-0.5 rounded">
+                      至少 {minBubbles} 条
+                    </span>
+                  </div>
+                  <p className="text-[9px] text-white/40">
+                    要求 LLM 每次回复必须将动作与台词拆分输出为至少 N 个独立的连续气泡 JSON。
+                  </p>
+                  <div className="grid grid-cols-5 gap-1 pt-0.5">
+                    {[1, 2, 3, 4, 5].map((cnt) => (
+                      <button
+                        key={cnt}
+                        type="button"
+                        onClick={() => setMinBubbles(cnt)}
+                        className={`py-1.5 text-[10px] font-bold rounded-lg border transition-all ${
+                          minBubbles === cnt
+                            ? 'border-[hsl(28_85%_62%)] bg-[hsl(28_85%_62%/0.2)] text-[hsl(28_85%_62%)]'
+                            : 'border-white/10 bg-black/40 text-white/40 hover:text-white/80'
+                        }`}
+                      >
+                        {cnt} 条
+                      </button>
+                    ))}
+                  </div>
                 </div>
 
                 <div>
