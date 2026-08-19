@@ -16,9 +16,22 @@ import {
   clearHistoryState,
   type SessionState,
 } from '../engine';
-import { callLlm, buildSystemPrompt, isLlmConfigured, type LlmConfig } from '../lib/llm';
+import { decayEmotionTowardsBaseline, addEmotion } from '../engine/emotion';
+import { 
+  callLlm, 
+  buildSystemPrompt, 
+  parseStructuredLlmResponse, 
+  isLlmConfigured, 
+  type LlmConfig 
+} from '../lib/llm';
 import { parseSegments } from '../engine/postprocess';
-import { checkSensitiveWords, loadUserPromptProfile } from '../lib/customStore';
+import { 
+  checkSensitiveWords, 
+  loadUserPromptProfile, 
+  loadCharVisualDesc, 
+  loadUserVisualDesc,
+  loadEmotionDecayRate 
+} from '../lib/customStore';
 
 
 const STORAGE_KEY = '__rp_engine_state';
@@ -115,7 +128,11 @@ export function useEngine() {
       previousEmotionRef.current = { ...s.emotion };
       emotionConfirmedRef.current = false;
 
-      // Pre-process input through NLP Sensitive Words Dictionary
+      // 1. Natural Emotional Calming / Decay Curve (随轮数与时间自然平复趋向基准线)
+      const decayRate = loadEmotionDecayRate();
+      s.emotion = decayEmotionTowardsBaseline(s.emotion, character.emotion.baseline, decayRate);
+
+      // 2. Pre-process input through NLP Sensitive Words Dictionary
       const sensitive = checkSensitiveWords(userInput);
       let processedInput = userInput;
 
@@ -157,7 +174,7 @@ export function useEngine() {
       s.messages = [...s.messages, userMsg];
       rerender();
 
-      await new Promise((r) => setTimeout(r, 300 + Math.random() * 200));
+      await new Promise((r) => setTimeout(r, 200 + Math.random() * 150));
 
       const result = processChat(
         { ...s, emotion: { ...s.emotion }, backgroundThreads: s.backgroundThreads.map((t) => ({ ...t })) },
@@ -165,7 +182,6 @@ export function useEngine() {
         processedInput,
       );
 
-      s.emotion = result.emotion;
       s.backgroundThreads = result.backgroundThreads;
       s.triggeredAnchors = result.triggeredAnchors;
       lastIntentRef.current = result.intent;
@@ -178,18 +194,26 @@ export function useEngine() {
             .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
             .join(', ');
           
-          let systemPrompt = buildSystemPrompt(character.name, emotionSummary);
+          const charCoreStr = [
+            `核心特质: ${character.core.values.join('、')}`,
+            `直觉本能反应: ${character.core.instinct_base}`,
+            `语言风格: ${character.core.speech_filter}`,
+            character.speech.catchphrases.length > 0 ? `口癖习惯: ${character.speech.catchphrases.join('、')}` : '',
+            character.speech.forbidden_phrases.length > 0 ? `禁止言语: ${character.speech.forbidden_phrases.join('、')}` : '',
+            (character as any).custom_system_prompt ? `专属补充: ${(character as any).custom_system_prompt}` : '',
+          ].filter(Boolean).join('\n');
 
-          // 1. Embed custom backstory / custom system prompt instructions
-          if ((character as any).custom_system_prompt) {
-            systemPrompt = `【角色核心专属背景与约束提示词】\n${(character as any).custom_system_prompt}\n\n${systemPrompt}`;
-          }
-
-          // 2. Embed user persona / user backstory profile (主控角色档案)
+          const charVisual = loadCharVisualDesc(character.character_id);
           const userPersona = loadUserPromptProfile();
-          if (userPersona) {
-            systemPrompt = `${systemPrompt}\n\n【主控角色/当前对话者档案（用于匹配关系和心理）】\n用户正在扮演以下角色，请自始至终匹配与其契合的张力和态度：\n${userPersona}`;
-          }
+          const userVisual = loadUserVisualDesc();
+
+          const systemPrompt = buildSystemPrompt(character.name, emotionSummary, {
+            characterCore: charCoreStr,
+            charVisual,
+            userPersona,
+            userVisual,
+            backgroundThreads: s.backgroundThreads.map((t) => t.content),
+          });
 
           const llmMessages = [
             { role: 'system' as const, content: systemPrompt },
@@ -198,18 +222,37 @@ export function useEngine() {
               content: m.content,
             })),
           ];
+
           const rawText = await callLlm(llmConfig, llmMessages);
+          const structured = parseStructuredLlmResponse(rawText);
+
+          // 3. Unified Engine Update with LLM Emotion Delta & Triggered Memory
+          if (structured.emotion_delta && Object.keys(structured.emotion_delta).length > 0) {
+            s.emotion = addEmotion(s.emotion, structured.emotion_delta);
+          } else {
+            // Fallback to rule engine emotion if model didn't return delta
+            s.emotion = result.emotion;
+          }
+
+          if (structured.triggered_memory) {
+            s.backgroundThreads.push({
+              content: structured.triggered_memory,
+              remaining_turns: 3,
+            });
+          }
+
           reply = {
             id: `char-${Date.now()}`,
             role: 'character',
-            content: rawText,
-            segments: parseSegments(rawText),
+            content: structured.reply,
+            segments: parseSegments(structured.reply),
             timestamp: Date.now(),
             character_id: character.character_id,
             snapshot: captureSnapshot(s),
           };
           lastFallbackRef.current = false;
         } catch {
+          s.emotion = result.emotion;
           reply = {
             ...result.reply,
             snapshot: captureSnapshot(s),
@@ -217,6 +260,7 @@ export function useEngine() {
           lastFallbackRef.current = true;
         }
       } else {
+        s.emotion = result.emotion;
         reply = {
           ...result.reply,
           snapshot: captureSnapshot(s),
@@ -435,7 +479,18 @@ export function useEngine() {
     getCharactersList: (): Character[] => {
       try {
         const saved = getSavedCharacters();
-        return [...MOCK_CHARACTERS, ...saved];
+        const map = new Map<string, Character>();
+        for (const c of saved) {
+          if (c && c.character_id) {
+            map.set(c.character_id, c);
+          }
+        }
+        for (const c of MOCK_CHARACTERS) {
+          if (!map.has(c.character_id)) {
+            map.set(c.character_id, c);
+          }
+        }
+        return Array.from(map.values());
       } catch {
         return MOCK_CHARACTERS;
       }

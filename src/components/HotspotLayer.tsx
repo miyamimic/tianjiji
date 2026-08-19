@@ -23,9 +23,11 @@ interface Hotspot {
 interface Props {
   scene: Scene;
   onEnterChat: () => void;
+  onLeaveChat: () => void;
+  portrait?: boolean;
 }
 
-export default function HotspotLayer({ scene, onEnterChat }: Props) {
+export default function HotspotLayer({ scene, onEnterChat, onLeaveChat, portrait = false }: Props) {
   const [hoverId, setHoverId] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const [fit, setFit] = useState<FitRect | null>(null);
@@ -82,7 +84,17 @@ export default function HotspotLayer({ scene, onEnterChat }: Props) {
           onClick: () => console.log('C: 更换酒保 (功能待接)'),
         },
       ]
-    : [];
+    : (portrait ? [] : [
+        {
+          id: 'back',
+          u: 0.8145, v: 0.5185,
+          label: '←',
+          color: '#ffe9a8',
+          title: '返回大厅',
+          hint: '回到欢迎场景',
+          onClick: onLeaveChat,
+        },
+      ]);
 
   return (
     // z-40：必须高于 chat 消息区（z-20），否则点击会被空态 welcome 文案容器拦截

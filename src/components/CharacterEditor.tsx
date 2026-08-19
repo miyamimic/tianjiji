@@ -149,34 +149,7 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
 
   return (
     <div className="space-y-6 text-white/90">
-      
-      {/* 1. User Profile Setup (后主控角色档案) */}
-      <div className="p-4 rounded-xl border border-white/10 bg-white/[0.02] space-y-3">
-        <h4 className="text-xs font-semibold text-white flex items-center gap-1.5">
-          <User className="size-4 text-[hsl(28_85%_62%)]" />
-          主控角色档案（你的背景设定 / 提示词发给 LLM）
-        </h4>
-        <p className="text-[11px] text-white/40 leading-relaxed">
-          在这里定义你自己的身份背景、特征或你与角色的关系。此设定会在与 LLM 交互时作为<b>主控人设提示词</b>持久附带，使角色的回复能更加契合你的偏好！
-        </p>
-        <textarea
-          value={userProfile}
-          onChange={(e) => setUserProfile(e.target.value)}
-          placeholder="例如：一个有点傲娇的学妹，暗恋着学长，平时虽然毒舌但遇到危险时会躲在他身后..."
-          className="w-full h-20 p-2.5 text-xs rounded-lg border border-white/10 bg-black/40 text-white placeholder:text-white/20 focus:border-[hsl(28_85%_62%/0.5)] focus:outline-none resize-none leading-relaxed"
-        />
-        <div className="flex justify-end">
-          <button
-            onClick={handleSaveUserProfile}
-            className="flex items-center gap-1.5 rounded-lg bg-[hsl(28_85%_62%)] hover:bg-[hsl(28_85%_62%/0.9)] px-4 py-1.5 text-xs font-semibold text-[hsl(28_30%_10%)] transition-colors"
-          >
-            {userProfileSaved ? <Check className="size-3.5 animate-scale-in" /> : null}
-            {userProfileSaved ? '主控人设已更新' : '保存主控档案'}
-          </button>
-        </div>
-      </div>
-
-      <div className="border-t border-white/10 pt-4">
+      <div>
         <div className="flex items-center justify-between mb-4">
           <div className="space-y-0.5">
             <h3 className="text-sm font-semibold text-white flex items-center gap-1.5">

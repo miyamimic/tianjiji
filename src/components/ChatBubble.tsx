@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import type { MessageSegment, ChatMessage } from '../data/types';
 import { History, Clock, Edit2, CornerDownLeft, Plus, Check, X } from 'lucide-react';
+import { loadUserAvatar, loadCharAvatar } from '../lib/customStore';
 
 interface Props {
   message: ChatMessage;
   characterName?: string;
+  characterId?: string;
   onRollback?: (id: string) => void;
   onEdit?: (id: string, newContent: string) => void;
   onTriggerReply?: (id: string) => void;
@@ -61,6 +63,7 @@ function renderSegment(seg: MessageSegment, idx: number) {
 export default function ChatBubble({
   message,
   characterName,
+  characterId = 'char_001',
   onRollback,
   onEdit,
   onTriggerReply,
@@ -73,6 +76,9 @@ export default function ChatBubble({
   const [editVal, setEditVal] = useState(message.content);
   const [isAddingUserMsg, setIsAddingUserMsg] = useState(false);
   const [userMsgVal, setUserMsgVal] = useState('');
+
+  const charAvatar = loadCharAvatar(characterId);
+  const userAvatar = loadUserAvatar();
 
   const handleSaveEdit = () => {
     if (onEdit && editVal.trim()) {
@@ -94,8 +100,14 @@ export default function ChatBubble({
       <div className={`flex gap-2.5 w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
         {/* Avatar for character */}
         {!isUser && (
-          <div className={`size-8 shrink-0 rounded-full bg-gradient-to-br ${isWarning ? 'from-red-500 to-red-600 text-white' : 'from-[hsl(28_85%_62%)] to-[hsl(28_85%_62%/0.6)] text-[hsl(28_30%_10%)]'} flex items-center justify-center text-xs font-bold ring-2 ring-[hsl(28_85%_62%/0.2)] shadow-md`}>
-            {isWarning ? '警' : (characterName || '?').charAt(0)}
+          <div className={`size-8 shrink-0 rounded-full overflow-hidden bg-gradient-to-br ${isWarning ? 'from-red-500 to-red-600 text-white' : 'from-[hsl(28_85%_62%)] to-[hsl(28_85%_62%/0.6)] text-[hsl(28_30%_10%)]'} flex items-center justify-center text-xs font-bold ring-2 ring-[hsl(28_85%_62%/0.2)] shadow-md border border-white/20`}>
+            {charAvatar && !isWarning ? (
+              <img src={charAvatar} alt={characterName || 'char'} className="w-full h-full object-cover" />
+            ) : isWarning ? (
+              '警'
+            ) : (
+              (characterName || '?').charAt(0)
+            )}
           </div>
         )}
 
@@ -149,8 +161,12 @@ export default function ChatBubble({
 
         {/* Avatar for user */}
         {isUser && (
-          <div className="size-8 shrink-0 rounded-full flex items-center justify-center bg-[hsl(217_18%_18%)] text-white/70 text-xs font-semibold border border-white/10 shadow-sm">
-            我
+          <div className="size-8 shrink-0 rounded-full overflow-hidden flex items-center justify-center bg-[hsl(217_18%_18%)] text-white/70 text-xs font-semibold border border-white/20 shadow-sm">
+            {userAvatar ? (
+              <img src={userAvatar} alt="我" className="w-full h-full object-cover" />
+            ) : (
+              '我'
+            )}
           </div>
         )}
       </div>

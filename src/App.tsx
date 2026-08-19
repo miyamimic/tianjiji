@@ -7,32 +7,47 @@ import ChatInput from '@/components/ChatInput';
 import ChatBubble from '@/components/ChatBubble';
 import TypingIndicator from '@/components/TypingIndicator';
 import SettingsModal from '@/components/SettingsModal';
+import LeafLoader from '@/components/LeafLoader';
+import WindChime from '@/components/WindChime';
 import { useEngine } from '@/hooks/useEngine';
 import { loadLlmConfig, isLlmConfigured, type LlmConfig } from '@/lib/llm';
-import { loadCustomCss, applyCustomCss } from '@/lib/customStore';
+import { loadCustomCss, applyCustomCss, loadCustomChatBg } from '@/lib/customStore';
 import { BG_OBJECT_POS, BG_SIZE, isPortraitViewport } from '@/lib/stageFit';
 
 export default function App() {
   const engine = useEngine();
-  const [scene, setScene] = useState<Scene>(() => (
-    isPortraitViewport(window.innerWidth, window.innerHeight) ? 'chat' : 'welcome'
-  ));
+  const [portrait, setPortrait] = useState<boolean>(() => isPortraitViewport(window.innerWidth, window.innerHeight));
+  // 手机端直接进入 chat 场景，电脑端保留 welcome 场景
+  const [scene, setScene] = useState<Scene>(() => isPortraitViewport(window.innerWidth, window.innerHeight) ? 'chat' : 'welcome');
+  // 手机端展示高精度像素绿叶飘落加载动画，电脑端直接进入
+  const [leafDone, setLeafDone] = useState<boolean>(() => !isPortraitViewport(window.innerWidth, window.innerHeight));
+  const [customChatBg, setCustomChatBg] = useState<string>(() => loadCustomChatBg() || '/chat_bg.png');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(loadLlmConfig());
   const scrollRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
-  const [portrait, setPortrait] = useState<boolean>(() => isPortraitViewport(window.innerWidth, window.innerHeight));
 
   useEffect(() => {
     const css = loadCustomCss();
     applyCustomCss(css);
+    const bg = loadCustomChatBg();
+    if (bg) {
+      setCustomChatBg(bg);
+    }
   }, []);
 
   // 检测横屏 / 竖屏（用视口宽高比，不是设备方向，避免依赖 device orientation API）
   useEffect(() => {
-    const recompute = () => setPortrait(isPortraitViewport(window.innerWidth, window.innerHeight));
+    const recompute = () => {
+      const isPort = isPortraitViewport(window.innerWidth, window.innerHeight);
+      setPortrait(isPort);
+      // 如果处于手机竖屏模式，确保场景为 chat 界面
+      if (isPort) {
+        setScene('chat');
+      }
+    };
     recompute();
     window.addEventListener('resize', recompute);
     window.addEventListener('orientationchange', recompute);
@@ -90,7 +105,7 @@ export default function App() {
     }
   };
 
-  const bgSrc = scene === 'welcome' ? '/welcome_bg.png' : '/chat_bg.png';
+  const bgSrc = scene === 'welcome' ? '/welcome_bg.png' : (customChatBg || '/chat_bg.png');
   const bg = BG_SIZE[scene];            // 原始图像素尺寸
   const pos = BG_OBJECT_POS[scene];     // 竖屏时的 object-position（横屏无效）
   // 横屏时：舞台严格按图片比例居中，图片 1:1 不裁切
@@ -103,12 +118,17 @@ export default function App() {
       className="relative w-full flex items-center justify-center overflow-hidden bg-black"
       style={{ height: '100vh', width: '100vw' }}
     >
+      {/* 手机端高精度像素绿叶飘落加载动画 */}
+      {!leafDone && portrait && (
+        <LeafLoader onComplete={() => setLeafDone(true)} />
+      )}
+
       {/* ================ STAGE ================ */}
       <div
         className="relative overflow-hidden shadow-2xl"
         style={
           portrait
-            // ---------- 竖屏（手机端）：铺满视口，背景图 cover + 自定义 object-position ----------
+            // ---------- 竖屏（手机端）：铺满视口，背景图 cover + 左侧保留裁切 ----------
             ? {
                 width: '100vw',
                 height: '100vh',
@@ -124,8 +144,7 @@ export default function App() {
       >
         {/* LAYER 1: BACKGROUND IMAGE
               横屏：舞台比例 = 图片比例，object-cover ≡ object-contain，不裁切
-              竖屏：object-cover + 自定义 object-position，配合 Hotspot/Canvas 内部同样的 cover-fit 公式
-                    → 光点/钟表永远与背景图标记对齐，主体人物不被切掉关键 */}
+              竖屏：object-cover + 自定义 object-position (chat x: 0 保证左侧主体人物完整可见) */}
         <img
           key={bgSrc}
           src={bgSrc}
@@ -145,6 +164,8 @@ export default function App() {
         <HotspotLayer
           scene={scene}
           onEnterChat={() => setScene('chat')}
+          onLeaveChat={() => setScene('welcome')}
+          portrait={portrait}
         />
 
         {/* UI LAYER: Top bar */}
@@ -159,8 +180,18 @@ export default function App() {
             onResetEmotion={() => engine.resetEmotion()}
             onOpenSettings={() => setSettingsOpen(true)}
             llmReady={llmReady}
+            portrait={portrait}
           />
         </div>
+
+        {/* Wind Chime Pulldown Control Panel (Anchored top-left, left of avatar) */}
+        <WindChime
+          currentBg={customChatBg}
+          onBgChange={(newBg) => setCustomChatBg(newBg)}
+          currentCharacterId={character.character_id}
+          onEngineReload={() => engine.reload()}
+          onConfigChange={setLlmConfig}
+        />
 
         {/* CHAT 场景才显示的消息区 + 输入框
               - 手机竖屏：侧边栏改为 overlay（absolute 盖在主内容上），不再 pr-80 push 主内容
@@ -202,6 +233,7 @@ export default function App() {
                     <ChatBubble
                       message={m}
                       characterName={m.role === 'character' ? character.name : undefined}
+                      characterId={character.character_id}
                       onRollback={(id) => engine.rollbackToMessage(id)}
                       onEdit={(id, text) => engine.editMessage(id, text)}
                       onTriggerReply={handleTriggerReply}
@@ -249,7 +281,6 @@ export default function App() {
       <SettingsModal
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
-        onConfigChange={setLlmConfig}
         currentCharacterId={character.character_id}
         onEngineReload={() => engine.reload()}
       />

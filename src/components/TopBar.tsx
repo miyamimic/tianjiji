@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import type { Character } from '../data/types';
+import { loadCharAvatar } from '../lib/customStore';
 
 interface Props {
   currentCharacter: Character;
@@ -20,6 +21,7 @@ interface Props {
   onResetEmotion: () => void;
   onOpenSettings: () => void;
   llmReady: boolean;
+  portrait?: boolean;
 }
 
 const INSTINCT_CN: Record<string, string> = {
@@ -40,18 +42,24 @@ export default function TopBar({
   onResetEmotion,
   onOpenSettings,
   llmReady,
+  portrait = false,
 }: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const charAvatar = loadCharAvatar(currentCharacter.character_id);
 
   return (
     <header
-      className={`fixed top-0 left-0 right-0 z-40 bg-black/30 backdrop-blur-md border-b border-white/5 transition-all duration-300 ${sidebarOpen ? 'pr-80' : 'pr-0'}`}
+      className={`fixed top-0 left-0 right-0 z-40 bg-black/30 backdrop-blur-md border-b border-white/5 transition-all duration-300 ${(!portrait && sidebarOpen) ? 'pr-80' : 'pr-0'}`}
     >
-      <div className="flex h-14 items-center justify-between px-4 md:px-6">
+      <div className="flex h-14 items-center justify-between pl-14 sm:pl-16 pr-4 md:px-6">
         {/* Left: character info + switch */}
         <div className="flex items-center gap-2">
-          <div className="size-9 rounded-full bg-gradient-to-br from-[hsl(28_85%_62%)] to-[hsl(28_85%_62%/0.6)] flex items-center justify-center text-sm font-bold text-[hsl(28_30%_10%)] shadow-lg shadow-[hsl(28_85%_62%/0.2)]">
-            {currentCharacter.name.charAt(0)}
+          <div className="size-9 rounded-full bg-gradient-to-br from-[hsl(28_85%_62%)] to-[hsl(28_85%_62%/0.6)] flex items-center justify-center text-sm font-bold text-[hsl(28_30%_10%)] shadow-lg shadow-[hsl(28_85%_62%/0.2)] overflow-hidden border border-white/20">
+            {charAvatar ? (
+              <img src={charAvatar} alt={currentCharacter.name} className="w-full h-full object-cover" />
+            ) : (
+              currentCharacter.name.charAt(0)
+            )}
           </div>
 
           <div className="relative">

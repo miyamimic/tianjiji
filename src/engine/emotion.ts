@@ -48,6 +48,25 @@ export function updateEmotionWithInertia(
   return result;
 }
 
+/**
+ * Natural Emotional Calming / Decay Curve:
+ * Relaxes elevated negative arousal (anger, fear, sadness) and extreme spikes back toward baseline per turn
+ */
+export function decayEmotionTowardsBaseline(
+  current: EmotionVector,
+  baseline: EmotionVector,
+  decayRate = 0.12,
+): EmotionVector {
+  const result = { ...current };
+  const rate = Math.max(0, Math.min(0.5, decayRate));
+  for (const k of EMOTION_KEYS) {
+    const diff = baseline[k] - current[k];
+    // Apply smooth exponential relaxation towards resting baseline
+    result[k] = clamp(current[k] + diff * rate);
+  }
+  return result;
+}
+
 export function dominantEmotions(
   emotion: EmotionVector,
   count = 2,

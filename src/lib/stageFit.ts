@@ -58,12 +58,13 @@ export const BG_SIZE: Record<'welcome' | 'chat', { w: number; h: number }> = {
 };
 
 // 各场景在 portrait 模式下的 object-position（百分比）。
-// 调参原则：保证 A/B/C / 钟表 / 返回光点（它们的蒙版坐标见 SceneCanvas 常量）
-//          全部落在可视区域内，且"主体人物"尽量不被上下左右裁掉过多。
+// 调参原则：
+//   - chat 场景：手机竖屏严格保留左侧主体画面（人物与吧台），x: 0 锚定左侧裁切。
+//   - welcome 场景：仅桌面端使用，如果意外触发保持居中。
 // landscape 下舞台比例 = 图片比例，object-position 无效果（不会被裁）
 export const BG_OBJECT_POS: Record<'welcome' | 'chat', { x: number; y: number }> = {
   welcome: { x: 46, y: 62 },
-  chat:    { x: 52, y: 38 },
+  chat:    { x: 0, y: 50 },
 };
 
 // 舞台"模式"：横屏（按图片比例放，图片不裁切）vs 竖屏（铺满，图片 cover 但坐标映射补偿）

@@ -118,7 +118,17 @@ export function getSavedCharacters(): Character[] {
   try {
     const raw = localStorage.getItem('__rp_engine_characters_edited');
     if (raw) {
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const map = new Map<string, Character>();
+        for (const c of parsed) {
+          if (c && c.character_id) map.set(c.character_id, c);
+        }
+        for (const c of MOCK_CHARACTERS) {
+          if (!map.has(c.character_id)) map.set(c.character_id, c);
+        }
+        return Array.from(map.values());
+      }
     }
   } catch {
     // ignore
