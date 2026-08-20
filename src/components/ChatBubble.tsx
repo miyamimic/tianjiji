@@ -190,7 +190,7 @@ export default function ChatBubble({
                 title="修改当前气泡的对话文本"
               >
                 <Edit2 className="size-2.5 text-blue-400" />
-                <span>编辑气泡</span>
+                <span>编辑</span>
               </button>
             )}
 
@@ -202,7 +202,7 @@ export default function ChatBubble({
                 title="回溯整个引擎状态到发送该气泡时的历史快照"
               >
                 <History className="size-2.5 text-white/40 group-hover/btn:text-[hsl(28_85%_62%)] group-hover/btn:rotate-[-45deg] transition-all duration-200" />
-                <span>回溯至此</span>
+                <span>回溯</span>
                 {message.snapshot ? (
                   <span className="text-[8px] text-white/30 pl-1 border-l border-white/10 ml-0.5">
                     {Object.entries(message.snapshot.emotion)
@@ -228,7 +228,7 @@ export default function ChatBubble({
                 title="在此气泡后直接插入我的下一句话（不触发AI自动回复，可形成连续发言）"
               >
                 <Plus className="size-2.5 text-emerald-400" />
-                <span>追加我发言</span>
+                <span>追加</span>
               </button>
             )}
 
@@ -240,7 +240,7 @@ export default function ChatBubble({
                 title="强制让角色在此处重新进行一轮推演与回复（即使该对话已被回溯或被编辑）"
               >
                 <CornerDownLeft className="size-2.5" />
-                <span>角色回复此句</span>
+                <span>回复此句</span>
               </button>
             )}
           </div>

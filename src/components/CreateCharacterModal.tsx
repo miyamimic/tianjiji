@@ -9,11 +9,19 @@ import {
   ShieldAlert, 
   MessageSquare,
   Eye,
-  Camera
+  Camera,
+  Heart
 } from 'lucide-react';
 import { createCustomCharacter, type CreateCharacterInput } from '../lib/customStore';
 import { INSTINCT_DESCRIPTIONS, SPEECH_FILTER_DESCRIPTIONS, type Character } from '../data/types';
 import { loadLlmConfig, analyzeVisualAvatar } from '../lib/llm';
+import { 
+  saveRelationState, 
+  getMentalOpenTierInfo, 
+  getPhysicalPhaseInfo, 
+  PHYSICAL_PHASES,
+  notifyRelationToast 
+} from '../lib/relationEngine';
 
 interface Props {
   isOpen: boolean;
@@ -32,6 +40,8 @@ export default function CreateCharacterModal({ isOpen, onClose, onCharacterCreat
   const [forbiddenPhrasesStr, setForbiddenPhrasesStr] = useState('对不起嘛、求求你、我不行');
   const [customPrompt, setCustomPrompt] = useState('');
   const [minBubbles, setMinBubbles] = useState<number>(2);
+  const [mentalOpen, setMentalOpen] = useState<number>(15);
+  const [physicalPhase, setPhysicalPhase] = useState<number>(0);
   const [analyzingVision, setAnalyzingVision] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -90,6 +100,17 @@ export default function CreateCharacterModal({ isOpen, onClose, onCharacterCreat
     };
 
     const newChar = createCustomCharacter(input);
+    saveRelationState(newChar.character_id, {
+      mentalOpen,
+      physicalPhase,
+      intimacyCooldown: 0,
+      milestones: [],
+    });
+    notifyRelationToast({
+      type: 'both',
+      mentalOpen,
+      physicalPhase,
+    });
     onCharacterCreated(newChar);
     onClose();
   };
@@ -236,35 +257,102 @@ export default function CreateCharacterModal({ isOpen, onClose, onCharacterCreat
             </div>
           </div>
 
-          {/* Min Reply Bubbles Setting */}
-          <div className="p-3 rounded-xl border border-white/10 bg-white/[0.02] space-y-2">
+          {/* Narrative Paragraph Requirement Notice */}
+          <div className="p-3 rounded-xl border border-white/10 bg-white/[0.02] space-y-1.5">
             <div className="flex items-center justify-between text-xs">
               <span className="font-semibold text-white/90 flex items-center gap-1.5">
-                <Layers className="size-3.5 text-[hsl(28_85%_62%)]" />
-                单次最少回复气泡数 (分句 JSON 条数)
+                <Sparkles className="size-3.5 text-[hsl(28_85%_62%)]" />
+                单条沉浸文段标准（动作 + 台词 ≥ 100 字）
               </span>
-              <span className="font-mono text-[hsl(28_85%_62%)] font-bold bg-[hsl(28_85%_62%/0.15)] px-2 py-0.5 rounded text-[11px]">
-                至少 {minBubbles} 条
+              <span className="font-mono text-[hsl(28_85%_62%)] font-bold bg-[hsl(28_85%_62%/0.15)] px-2 py-0.5 rounded text-[10px]">
+                单条完整段落
               </span>
             </div>
-            <p className="text-[10px] text-white/40">
-              要求该角色每次回复必须拆分输出为至少 N 个连续气泡（模拟真人连发打字）。
+            <p className="text-[10px] text-white/40 leading-relaxed">
+              严格分离三要素：thought 仅记录纯心理（不计入字数/不写动作台词）；reply 输出包含（动作细节）与"对话台词"的丰满文段。
             </p>
-            <div className="grid grid-cols-5 gap-1.5">
-              {[1, 2, 3, 4, 5].map((cnt) => (
-                <button
-                  key={cnt}
-                  type="button"
-                  onClick={() => setMinBubbles(cnt)}
-                  className={`py-1.5 text-xs font-bold rounded-lg border transition-all ${
-                    minBubbles === cnt
-                      ? 'border-[hsl(28_85%_62%)] bg-[hsl(28_85%_62%/0.2)] text-[hsl(28_85%_62%)]'
-                      : 'border-white/10 bg-black/40 text-white/40 hover:text-white/80'
-                  }`}
-                >
-                  {cnt} 条
-                </button>
-              ))}
+          </div>
+
+          {/* Relationship State Engine Initial Setup (初始心理开放度与身体亲密度设置) */}
+          <div className="space-y-3 p-3.5 rounded-xl border border-white/10 bg-white/[0.02]">
+            <div className="flex items-center justify-between border-b border-white/10 pb-2">
+              <div className="flex items-center gap-2">
+                <Heart className="size-4 text-pink-400" />
+                <span className="text-xs font-bold text-white">
+                  初始关系状态引擎设定
+                </span>
+              </div>
+              <span className="text-[10px] text-white/40">
+                心理与身体独立错位
+              </span>
+            </div>
+
+            {/* 初始心理开放度 */}
+            <div className="p-3 rounded-xl border border-pink-500/20 bg-pink-950/10 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-pink-200 flex items-center gap-1.5">
+                  <Heart className="size-3 text-pink-400 fill-pink-400/20" />
+                  初始心理开放度 (Mental Openness)
+                </label>
+                <span className="font-mono text-xs font-bold text-pink-300 bg-pink-500/20 px-2 py-0.5 rounded-md border border-pink-500/30">
+                  {mentalOpen} / 100
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={mentalOpen}
+                onChange={(e) => setMentalOpen(Number(e.target.value))}
+                className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-white/10 accent-pink-400"
+              />
+              <div className="flex justify-between text-[9px] text-pink-300/60 font-mono">
+                <span>0 (心防)</span>
+                <span>25 (表层友善)</span>
+                <span>50 (小烦恼)</span>
+                <span>75 (吐露经历)</span>
+                <span>100 (剖白脆弱)</span>
+              </div>
+              <p className="text-[10px] text-pink-200/80 leading-relaxed bg-black/30 p-2 rounded-lg border border-pink-500/10">
+                <span className="font-medium text-pink-300">{getMentalOpenTierInfo(mentalOpen).name}：</span>
+                {getMentalOpenTierInfo(mentalOpen).promptText}
+              </p>
+            </div>
+
+            {/* 初始身体亲密阶段 */}
+            <div className="p-3 rounded-xl border border-purple-500/20 bg-purple-950/10 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-semibold text-purple-200 flex items-center gap-1.5">
+                  <Sparkles className="size-3 text-purple-400" />
+                  初始身体亲密阶段 (Physical Phase 0~5)
+                </label>
+                <span className="font-mono text-xs font-bold text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded-md border border-purple-500/30">
+                  Phase {physicalPhase} · {getPhysicalPhaseInfo(physicalPhase).name.split('（')[0]}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5">
+                {PHYSICAL_PHASES.map((p) => (
+                  <button
+                    key={p.phase}
+                    type="button"
+                    onClick={() => setPhysicalPhase(p.phase)}
+                    className={`p-1.5 text-left rounded-lg border transition-all cursor-pointer ${
+                      physicalPhase === p.phase
+                        ? 'border-purple-400 bg-purple-500/25 text-white ring-1 ring-purple-400/50'
+                        : 'border-white/10 bg-black/40 text-white/60 hover:text-white hover:bg-white/5'
+                    }`}
+                  >
+                    <div className="text-[11px] font-bold text-purple-300">Phase {p.phase}</div>
+                    <div className="text-[10px] text-white/80 truncate">{p.name.split('（')[0]}</div>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-purple-200/80 leading-relaxed bg-black/30 p-2 rounded-lg border border-purple-500/10">
+                <span className="font-medium text-purple-300">{getPhysicalPhaseInfo(physicalPhase).name}：</span>
+                {getPhysicalPhaseInfo(physicalPhase).promptText}
+              </p>
             </div>
           </div>
 

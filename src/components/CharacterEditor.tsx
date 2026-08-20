@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, ShieldAlert, Heart, MessageSquare, Clipboard, RotateCcw, Check, Sparkles, HelpCircle, Layers } from 'lucide-react';
+import { User, ShieldAlert, Heart, MessageSquare, Clipboard, RotateCcw, Check, Sparkles, HelpCircle, Layers, Clock } from 'lucide-react';
 import { 
   loadSavedCharacters, 
   saveCharacterEdit, 
@@ -9,6 +9,16 @@ import {
   loadCharMinBubbles,
   saveCharMinBubbles
 } from '../lib/customStore';
+import {
+  loadRelationState,
+  saveRelationState,
+  getMentalOpenTierInfo,
+  getPhysicalPhaseInfo,
+  PHYSICAL_PHASES,
+  notifyRelationToast,
+  getCharacterSensitivity,
+  type RelationState
+} from '../lib/relationEngine';
 import type { Character, CharacterCore } from '../data/types';
 import { INSTINCT_DESCRIPTIONS, SPEECH_FILTER_DESCRIPTIONS } from '../data/types';
 
@@ -35,6 +45,12 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
   // Custom system prompt additions & min bubbles
   const [customPrompt, setCustomPrompt] = useState('');
   const [minBubbles, setMinBubbles] = useState<number>(1);
+
+  // Relation State Engine Fields
+  const [mentalOpen, setMentalOpen] = useState<number>(15);
+  const [physicalPhase, setPhysicalPhase] = useState<number>(0);
+  const [intimacyCooldown, setIntimacyCooldown] = useState<number>(0);
+  const [milestones, setMilestones] = useState<string[]>([]);
 
   // Speech and Actions lists
   const [catchphrases, setCatchphrases] = useState('');
@@ -64,6 +80,13 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
       setSpeechFilter(current.core.speech_filter);
       setMinBubbles(loadCharMinBubbles(current.character_id));
       
+      // Load relation state
+      const rel = loadRelationState(current.character_id);
+      setMentalOpen(rel.mentalOpen);
+      setPhysicalPhase(rel.physicalPhase);
+      setIntimacyCooldown(rel.intimacyCooldown);
+      setMilestones(rel.milestones);
+
       // Load custom instructions
       setCustomPrompt((current as any).custom_system_prompt || '');
 
@@ -121,6 +144,25 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
     // Attach custom system prompt & min bubbles
     (updatedChar as any).custom_system_prompt = customPrompt.trim();
     saveCharMinBubbles(editingChar.character_id, minBubbles);
+
+    const prevRel = loadRelationState(editingChar.character_id);
+
+    // Save relation state
+    saveRelationState(editingChar.character_id, {
+      mentalOpen,
+      physicalPhase,
+      intimacyCooldown,
+      milestones,
+    });
+
+    notifyRelationToast({
+      type: 'both',
+      mentalOpen,
+      prevMentalOpen: prevRel.mentalOpen,
+      physicalPhase,
+      prevPhysicalPhase: prevRel.physicalPhase,
+      cooldown: intimacyCooldown,
+    });
 
     saveCharacterEdit(updatedChar);
     
@@ -249,6 +291,116 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
                     </option>
                   ))}
                 </select>
+              </div>
+            </div>
+
+            {/* 心防演化敏感度解析 */}
+            {(() => {
+              const sens = getCharacterSensitivity({
+                core: { instinct_base: instinct } as any
+              } as any);
+              return (
+                <div className="p-2.5 rounded-xl bg-cyan-950/20 border border-cyan-500/20 text-xs space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-cyan-200 font-semibold flex items-center gap-1">
+                      <span>心防演化特质：{sens.temperamentTitle}</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-cyan-300">
+                      破冰 ×{sens.trustGainMultiplier.toFixed(2)} / 创伤惩罚 ×{sens.hurtPenaltyMultiplier.toFixed(2)}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-white/70 leading-relaxed">
+                    {sens.temperamentDesc}
+                  </p>
+                </div>
+              );
+            })()}
+
+            {/* Relationship State Engine Initial Setup (初始心理开放度与身体亲密度设置) */}
+            <div className="space-y-3 p-4 rounded-xl border border-white/15 bg-white/[0.02]">
+              <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                <div className="flex items-center gap-2">
+                  <Heart className="size-4 text-pink-400" />
+                  <span className="text-xs font-bold text-white">
+                    关系状态引擎初始设定 (Relationship State Engine)
+                  </span>
+                </div>
+                <span className="text-[10px] text-white/40">
+                  LLM 仅只读约束 · 独立错位演化
+                </span>
+              </div>
+
+              {/* 初始心理开放度 */}
+              <div className="p-3 rounded-xl border border-pink-500/20 bg-pink-950/10 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-pink-200 flex items-center gap-1.5">
+                    <Heart className="size-3.5 text-pink-400 fill-pink-400/20" />
+                    初始心理开放度 (Mental Openness)
+                  </label>
+                  <span className="font-mono text-xs font-bold text-pink-300 bg-pink-500/20 px-2 py-0.5 rounded-md border border-pink-500/30">
+                    {mentalOpen} / 100
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={mentalOpen}
+                  onChange={(e) => setMentalOpen(Number(e.target.value))}
+                  className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-white/10 accent-pink-400"
+                />
+                <div className="flex justify-between text-[9px] text-pink-300/60 font-mono">
+                  <span>0 (心防坚固)</span>
+                  <span>25 (表层友善)</span>
+                  <span>50 (偶尔吐露)</span>
+                  <span>75 (分享经历)</span>
+                  <span>100 (剖白脆弱自卑)</span>
+                </div>
+                <div className="text-[11px] text-pink-200/80 bg-black/30 p-2 rounded-lg border border-pink-500/15">
+                  <span className="font-medium text-pink-300">当前约束：</span>
+                  {getMentalOpenTierInfo(mentalOpen).name} — {getMentalOpenTierInfo(mentalOpen).promptText}
+                </div>
+              </div>
+
+              {/* 初始身体亲密阶段 */}
+              <div className="p-3 rounded-xl border border-purple-500/20 bg-purple-950/10 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-purple-200 flex items-center gap-1.5">
+                    <Sparkles className="size-3.5 text-purple-400" />
+                    初始身体亲密阶段 (Physical Phase 0~5)
+                  </label>
+                  <span className="font-mono text-xs font-bold text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded-md border border-purple-500/30">
+                    Phase {physicalPhase} · {getPhysicalPhaseInfo(physicalPhase).name.split('（')[0]}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {PHYSICAL_PHASES.map((p) => (
+                    <button
+                      key={p.phase}
+                      type="button"
+                      onClick={() => setPhysicalPhase(p.phase)}
+                      className={`p-2 text-left rounded-lg border transition-all cursor-pointer ${
+                        physicalPhase === p.phase
+                          ? 'border-purple-400 bg-purple-500/25 text-white ring-1 ring-purple-400/50'
+                          : 'border-white/10 bg-black/40 text-white/60 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <div className="text-xs font-bold text-purple-300">
+                        Phase {p.phase}
+                      </div>
+                      <div className="text-[11px] text-white/90 truncate">
+                        {p.name.split('（')[0]}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="text-[11px] text-purple-200/80 bg-black/30 p-2 rounded-lg border border-purple-500/15">
+                  <span className="font-medium text-purple-300">当前约束：</span>
+                  {getPhysicalPhaseInfo(physicalPhase).promptText}
+                </div>
               </div>
             </div>
 

@@ -47,6 +47,12 @@ import {
   findRelevantDynamicMemories,
   clearDynamicMemories,
 } from '../lib/customStore';
+import {
+  loadRelationState,
+  buildRelationPrompt,
+  stepRelationCooldown,
+  applyDialogueMicroDrift,
+} from '../lib/relationEngine';
 
 
 const STORAGE_KEY = '__rp_engine_state';
@@ -222,7 +228,8 @@ export function useEngine() {
           const charVisual = loadCharVisualDesc(character.character_id);
           const userPersona = loadUserPromptProfile();
           const userVisual = loadUserVisualDesc();
-          const minBubbles = loadCharMinBubbles(character.character_id);
+          const relationState = loadRelationState(character.character_id);
+          const relationPrompt = buildRelationPrompt(relationState);
 
           const systemPrompt = buildSystemPrompt(character.name, emotionSummary, {
             characterCore: charCoreStr,
@@ -230,7 +237,7 @@ export function useEngine() {
             userPersona,
             userVisual,
             backgroundThreads: s.backgroundThreads.map((t) => t.content),
-            minBubbles,
+            relationPrompt,
           });
 
           const llmMessages = [
@@ -291,6 +298,19 @@ export function useEngine() {
         s.messages = [...s.messages, reply];
         lastFallbackRef.current = true;
       }
+
+      // Decrement intimacy cooldown on round completion if active
+      stepRelationCooldown(character.character_id);
+
+      // 日常对话细微积极波动（自然陪伴升温）
+      const isConflict = s.emotion.anger > 0.45;
+      const isPositive = !isConflict && (lastIntentRef.current?.sentiment === 'positive' || s.emotion.warmth > 0.3 || s.emotion.joy > 0.3);
+      applyDialogueMicroDrift(character.character_id, character, {
+        isPositive,
+        warmthLevel: s.emotion.warmth,
+        joyLevel: s.emotion.joy,
+        isConflict,
+      });
 
       persist(s);
       rerender();
@@ -511,7 +531,8 @@ export function useEngine() {
         const charVisual = loadCharVisualDesc(character.character_id);
         const userPersona = loadUserPromptProfile();
         const userVisual = loadUserVisualDesc();
-        const minBubbles = loadCharMinBubbles(character.character_id);
+        const relationState = loadRelationState(character.character_id);
+        const relationPrompt = buildRelationPrompt(relationState);
 
         const systemPrompt = buildSystemPrompt(character.name, emotionSummary, {
           characterCore: charCoreStr,
@@ -520,7 +541,7 @@ export function useEngine() {
           userVisual,
           backgroundThreads: s.backgroundThreads.map((t) => t.content),
           dynamicMemoriesContext,
-          minBubbles,
+          relationPrompt,
         });
 
         const llmMessages = [
@@ -671,6 +692,7 @@ export function useEngine() {
     }
 
     s.messages = [...s.messages, ...newReplies];
+    stepRelationCooldown(character.character_id);
     persist(s);
     rerender();
 

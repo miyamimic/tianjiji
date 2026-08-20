@@ -416,51 +416,48 @@ const CUSTOM_SYSTEM_PROMPT_KEY = '__rp_engine_custom_system_prompt';
 const STRUCTURED_JSON_SCHEMA_PROMPT_KEY = '__rp_engine_structured_json_prompt';
 const EMOTION_DECAY_RATE_KEY = '__rp_engine_emotion_decay_rate';
 
-export const DEFAULT_STRUCTURED_JSON_PROMPT = `【强制结构化输出规范】
-为了维持沉浸感与角色心理引擎的精准同步，你必须且只能返回纯 JSON 格式（可以直接返回或用 \`\`\`json 包裹）。
-支持单条消息返回单个 JSON 对象，或多段连发返回 JSON 数组（1~3条气泡消息，模拟真人连发打字体验）：
-[
-  {
-    "reply": "角色第一句自然对话（动作描写写在*星号*内，心理活动写在（中文括号）内）",
-    "action": "角色此时的主要动作细节，如：微微俯身/指尖轻扣桌面",
-    "thought": "角色此时不宣于口的内心微澜或独白",
-    "emotion_intensity": 3,
-    "emotion_delta": {
-      "anger": 0.0,
-      "fear": 0.0,
-      "joy": 0.0,
-      "sadness": 0.0,
-      "desire": 0.0,
-      "warmth": 0.0
-    },
-    "triggered_memory": "触发的具体回忆碎片（若无则填 null）"
-  },
-  {
-    "reply": "角色跟进说的第二句或递进话语（可选）",
-    "action": "递进微动作（可选）",
-    "thought": "递进心理活动（可选）",
-    "emotion_intensity": 3,
-    "emotion_delta": {
-      "anger": 0.0,
-      "fear": 0.0,
-      "joy": 0.0,
-      "sadness": 0.0,
-      "desire": 0.0,
-      "warmth": 0.0
-    },
-    "triggered_memory": null
-  }
-]
+export const DEFAULT_STRUCTURED_JSON_PROMPT = `【强制结构化输出规范与文段要求】
+你必须且只能返回单个标准的纯 JSON 对象（不要包裹在外层数组中，不要输出除 JSON 以外的任何前后闲聊）。
 
-说明与数值约束：
-1. emotion_intensity: 情绪强度评级（整数 1~5 级）：
-   - 1: 平静/极微弱波澜
+【核心三要素严格区分原则（严禁混淆！）】：
+1. 【心理活动 (thought)】：
+   - 仅限角色的内在潜意识、真实情感波动、对主控言行的无声揣测。
+   - ⚠️ 绝对禁令：严禁在 thought 中描写任何外部肢体动作、身体接触或发出声音的对话台词！
+   - thought 仅用于底层心理引擎同步与侧边栏心理分析，【绝对不计入】正文100字字数要求。
+2. 【动作描写 (Action)】：
+   - 在 reply 中使用全角中文括号（...）描写肢体动作、呼吸神态、空间距离与微表情（例如：（指尖轻扣桌面，缓步逼近，居高临下地审视着你））。
+3. 【说话台词 (Dialogue)】：
+   - 在 reply 中使用双引号 "..." 包裹角色说出口的话语，严格遵循角色的语气、口癖与人设。
+
+【reply 正文字数与文段结构要求】：
+- reply 是呈现在主聊天气泡中的完整沉浸式互动小文段。
+- 【字数底线】：reply 内的【动作描写 + 说话台词】总字数【必须在 100 字以上】（相当于一段细腻充实的互动小说段落，丰富动作细节与台词交织推进）。
+
+【JSON 输出格式范例】：
+{
+  "thought": "他竟然直接这么问我，明明知道我最受不了他这种眼神...不过现在示弱就输了。",
+  "reply": "（修长指尖有一搭没一搭地轻扣着桌面，眼神漫不经心地从你身上扫过，却在对上你视线的瞬间沉了沉，迈步径直走到你面前停下，居高临下地俯视着你）\"你以为用这种眼神看着我，我就会松口？\"（伸手捏住你的下巴迫使你抬头，指腹带着不容抗拒的力道轻轻摩挲，语气低沉而危险）\"把刚才的话再重复一遍，让我听听你到底是真不懂，还是在故意惹我。\"",
+  "emotion_intensity": 3,
+  "emotion_delta": {
+    "anger": 0.0,
+    "fear": 0.0,
+    "joy": 0.0,
+    "sadness": 0.0,
+    "desire": 0.15,
+    "warmth": 0.0
+  },
+  "triggered_memory": null
+}
+
+【数值与参数规范】：
+1. emotion_intensity: 情绪波动强度（整数 1~5）：
+   - 1: 平静/微澜
    - 2: 轻度触动
    - 3: 中度标准波动
-   - 4: 强烈冲击（如明显被激怒、破防、动容）
-   - 5: 剧烈/极端高潮（如情绪爆发、彻底失控、深层共情）
-2. emotion_delta: 各项数值填写基准方向（如激怒时 anger: +0.2，被治愈时 warmth: +0.15）。引擎将自动结合 emotion_intensity 综合校准实际增量。
-3. reply 中必须融入生动的人设语言与动作描写，每条消息精炼富有画面感。`;
+   - 4: 强烈冲击（破防、激怒、动容）
+   - 5: 极端爆发（失控、深层共鸣）
+2. emotion_delta: 六维情绪变化方向（-0.4 ~ +0.4）。
+3. 保证 JSON 语法合法，字符串内的双引号使用 \\" 转义，或台词使用中文双引号 \"\"。`;
 
 export function loadCustomSystemPrompt(): string {
   try {

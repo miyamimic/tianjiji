@@ -8,6 +8,7 @@ import ChatBubble from '@/components/ChatBubble';
 import TypingIndicator from '@/components/TypingIndicator';
 import SettingsModal from '@/components/SettingsModal';
 import NumbedNoticeModal from '@/components/NumbedNoticeModal';
+import RelationToast from '@/components/RelationToast';
 import LeafLoader from '@/components/LeafLoader';
 import WindChime from '@/components/WindChime';
 import { useEngine } from '@/hooks/useEngine';
@@ -308,6 +309,9 @@ export default function App() {
         numbedKeys={numbedModalInfo?.numbedKeys || []}
         isSensitized={numbedModalInfo?.isSensitized}
       />
+
+      {/* Light Pink (Mental Openness) & Light Purple (Physical Intimacy) Auto-dismiss Toast */}
+      <RelationToast />
     </div>
   );
 }

@@ -179,8 +179,9 @@ export async function callLlm(
     body: JSON.stringify({
       model: config.model,
       messages,
-      temperature: 0.85,
-      max_tokens: 600,
+      temperature: 0.82,
+      // Generous max_tokens (25000) ensures rich 100+ character RP responses and thoughts are never cut off
+      max_tokens: 25000,
     }),
   });
 
@@ -210,8 +211,78 @@ export type StructuredLlmResponse = {
   isStructured: boolean;
 };
 
+/**
+ * Strips reasoning tokens (e.g. DeepSeek-R1 / Qwen <think>...</think> tags) and chat boilerplate
+ */
+export function cleanRawLlmOutput(raw: string): string {
+  if (!raw) return '';
+  let cleaned = raw
+    .replace(/<think[\s\S]*?<\/think>/gi, '')
+    .replace(/<thought[\s\S]*?<\/thought>/gi, '')
+    .replace(/<reasoning[\s\S]*?<\/reasoning>/gi, '')
+    .trim();
+  return cleaned;
+}
+
+/**
+ * Intelligent JSON Repair for cut-off / truncated outputs
+ */
+export function repairTruncatedJson(jsonStr: string): string {
+  let str = jsonStr.trim();
+  if (!str) return '{}';
+
+  // 1. If wrapped inside markdown, extract it first
+  const mdMatch = str.match(/```(?:json)?\s*([\s\S]*?)\s*(?:```|$)/);
+  if (mdMatch && mdMatch[1]) {
+    str = mdMatch[1].trim();
+  }
+
+  // 2. Scan quotes and braces stack
+  let insideString = false;
+  let escaped = false;
+  const stack: string[] = [];
+
+  for (let i = 0; i < str.length; i++) {
+    const ch = str[i];
+    if (ch === '\\' && !escaped) {
+      escaped = true;
+      continue;
+    }
+    if (ch === '"' && !escaped) {
+      insideString = !insideString;
+    } else if (!insideString) {
+      if (ch === '{' || ch === '[') {
+        stack.push(ch);
+      } else if (ch === '}' && stack.length > 0 && stack[stack.length - 1] === '{') {
+        stack.pop();
+      } else if (ch === ']' && stack.length > 0 && stack[stack.length - 1] === '[') {
+        stack.pop();
+      }
+    }
+    escaped = false;
+  }
+
+  // Close string if left open
+  if (insideString) {
+    str += '"';
+  }
+
+  // Remove trailing comma before closing
+  str = str.replace(/,\s*$/, '');
+
+  // Close remaining open brackets
+  while (stack.length > 0) {
+    const open = stack.pop();
+    if (open === '{') str += '}';
+    else if (open === '[') str += ']';
+  }
+
+  return str;
+}
+
 function parseSingleStructuredItem(parsed: any): StructuredLlmResponse | null {
   if (!parsed || typeof parsed !== 'object') return null;
+
   let reply = typeof parsed.reply === 'string' ? parsed.reply : (typeof parsed.回复文本 === 'string' ? parsed.回复文本 : '');
   const action = typeof parsed.action === 'string' ? parsed.action : (typeof parsed.动作描写 === 'string' ? parsed.动作描写 : undefined);
   const thought = typeof parsed.thought === 'string' ? parsed.thought : (typeof parsed.心理活动 === 'string' || typeof parsed.心理描写 === 'string' ? (parsed.心理活动 || parsed.心理描写) : undefined);
@@ -233,16 +304,10 @@ function parseSingleStructuredItem(parsed: any): StructuredLlmResponse | null {
   if (!reply && typeof parsed.content === 'string') reply = parsed.content;
   if (!reply && typeof parsed.text === 'string') reply = parsed.text;
 
-  // Clean/synthesize reply if action/thought are separated
-  if (reply) {
-    if (action && !reply.includes(action) && !reply.includes('*')) {
-      reply = `*${action}* ${reply}`;
-    }
-    if (thought && !reply.includes(thought) && !reply.includes('（') && !reply.includes('(')) {
-      reply = `${reply} （${thought}）`;
-    }
-  } else if (action || thought) {
-    reply = [action ? `*${action}*` : '', thought ? `（${thought}）` : ''].filter(Boolean).join(' ');
+  // Synthesize reply if only action or dialogue exists, but NEVER inject thought into reply!
+  if (!reply && (action || typeof parsed.dialogue === 'string')) {
+    const dialogue = typeof parsed.dialogue === 'string' ? parsed.dialogue : '';
+    reply = [action ? `（${action}）` : '', dialogue].filter(Boolean).join(' ');
   }
 
   if (!reply) return null;
@@ -256,16 +321,15 @@ function parseSingleStructuredItem(parsed: any): StructuredLlmResponse | null {
     for (const k of keys) {
       const val = rawDelta[k];
       if (typeof val === 'number' && !isNaN(val)) {
-        // Clamp nominal delta (-0.4 to +0.4)
         emotion_delta[k] = Math.max(-0.4, Math.min(0.4, val));
       }
     }
   }
 
   return {
-    reply,
+    reply: reply.trim(),
     action,
-    thought,
+    thought: thought ? thought.trim() : undefined,
     emotion_intensity: emotion_intensity ?? 3,
     emotion_delta,
     triggered_memory,
@@ -273,34 +337,87 @@ function parseSingleStructuredItem(parsed: any): StructuredLlmResponse | null {
   };
 }
 
-export function parseStructuredLlmResponses(raw: string): StructuredLlmResponse[] {
-  const trimmed = raw.trim();
-  if (!trimmed) return [];
+/**
+ * Intelligent unstructured narrative parser:
+ * Extracts actions in brackets and dialogue if model outputs plain narrative text without JSON
+ */
+function extractFromUnstructuredNarrative(raw: string): StructuredLlmResponse {
+  const text = cleanRawLlmOutput(raw);
   
-  // 1. Try to extract JSON if wrapped in markdown code blocks
-  let jsonString = trimmed;
-  const jsonMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  // Extract actions inside （...） or (...) or *...*
+  const actionMatches = text.match(/(?:（|\(|\*)([\s\S]*?)(?:）|\)|\*)/g);
+  const actions = actionMatches ? actionMatches.map((m) => m.replace(/^[（(*]|[\n）)*]$/g, '').trim()).filter(Boolean) : [];
+
+  return {
+    reply: text,
+    action: actions.length > 0 ? actions.join('；') : undefined,
+    thought: undefined, // Keep thought clean without guessing
+    emotion_intensity: 3,
+    isStructured: false,
+  };
+}
+
+export function parseStructuredLlmResponses(raw: string): StructuredLlmResponse[] {
+  const cleaned = cleanRawLlmOutput(raw);
+  if (!cleaned) return [];
+
+  // 1. Try parsing directly or with repaired JSON
+  const candidates: string[] = [cleaned];
+
+  // Try extracting markdown code block
+  const jsonMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (jsonMatch && jsonMatch[1]) {
-    jsonString = jsonMatch[1].trim();
+    candidates.unshift(jsonMatch[1].trim());
   }
 
-  // 2. Try parsing entire string as JSON (array or single object)
-  try {
-    const parsed = JSON.parse(jsonString);
-    if (Array.isArray(parsed)) {
-      const results = parsed.map(parseSingleStructuredItem).filter(Boolean) as StructuredLlmResponse[];
-      if (results.length > 0) return results;
-    } else if (parsed && typeof parsed === 'object') {
-      const res = parseSingleStructuredItem(parsed);
-      if (res) return [res];
+  // Try extracting first { ... } or [ ... ] block
+  const firstBrace = cleaned.indexOf('{');
+  const firstBracket = cleaned.indexOf('[');
+  let startIdx = -1;
+  if (firstBrace !== -1 && firstBracket !== -1) {
+    startIdx = Math.min(firstBrace, firstBracket);
+  } else if (firstBrace !== -1) {
+    startIdx = firstBrace;
+  } else if (firstBracket !== -1) {
+    startIdx = firstBracket;
+  }
+
+  if (startIdx !== -1) {
+    candidates.push(cleaned.slice(startIdx));
+  }
+
+  for (const candidate of candidates) {
+    // Attempt raw parse
+    try {
+      const parsed = JSON.parse(candidate);
+      if (Array.isArray(parsed)) {
+        const results = parsed.map(parseSingleStructuredItem).filter(Boolean) as StructuredLlmResponse[];
+        if (results.length > 0) return results;
+      } else if (parsed && typeof parsed === 'object') {
+        const res = parseSingleStructuredItem(parsed);
+        if (res) return [res];
+      }
+    } catch {
+      // Try repaired JSON
+      try {
+        const repaired = repairTruncatedJson(candidate);
+        const parsed = JSON.parse(repaired);
+        if (Array.isArray(parsed)) {
+          const results = parsed.map(parseSingleStructuredItem).filter(Boolean) as StructuredLlmResponse[];
+          if (results.length > 0) return results;
+        } else if (parsed && typeof parsed === 'object') {
+          const res = parseSingleStructuredItem(parsed);
+          if (res) return [res];
+        }
+      } catch {
+        // continue
+      }
     }
-  } catch {
-    // JSON parsing failed; try multiple object extraction
   }
 
-  // 3. Try finding all JSON object blocks if multiple objects are concatenated
+  // 2. Try finding all JSON object blocks if multiple objects exist
   const objectRegex = /\{[\s\S]*?\}(?=\s*\{|\s*$)/g;
-  const matches = jsonString.match(objectRegex);
+  const matches = cleaned.match(objectRegex);
   if (matches && matches.length > 0) {
     const results: StructuredLlmResponse[] = [];
     for (const match of matches) {
@@ -309,19 +426,22 @@ export function parseStructuredLlmResponses(raw: string): StructuredLlmResponse[
         const parsed = parseSingleStructuredItem(item);
         if (parsed) results.push(parsed);
       } catch {
-        // ignore
+        // try repair single item
+        try {
+          const repaired = repairTruncatedJson(match);
+          const item = JSON.parse(repaired);
+          const parsed = parseSingleStructuredItem(item);
+          if (parsed) results.push(parsed);
+        } catch {
+          // ignore
+        }
       }
     }
     if (results.length > 0) return results;
   }
 
-  // Fallback for unstructured text response
-  return [
-    {
-      reply: trimmed,
-      isStructured: false,
-    },
-  ];
+  // 3. Fallback to resilient narrative extractor (never breaks, ensures 100% stability)
+  return [extractFromUnstructuredNarrative(cleaned)];
 }
 
 export function parseStructuredLlmResponse(raw: string): StructuredLlmResponse {
@@ -457,24 +577,26 @@ export function buildSystemPrompt(
     userVisual?: string;
     backgroundThreads?: string[];
     dynamicMemoriesContext?: string;
-    minBubbles?: number;
+    relationPrompt?: string;
   }
 ): string {
   const structuredPrompt = loadStructuredJsonPrompt();
   const globalCustomPrompt = loadCustomSystemPrompt();
-  const minBubbles = extraLayers?.minBubbles || 1;
 
   const sections: string[] = [];
-
-  const bubbleConstraint = minBubbles > 1
-    ? `\n\n【⚠️ 强制气泡条数与分句约束 ⚠️】\n你本次回复【必须且至少】连续输出 ${minBubbles} 条独立的消息气泡（必须返回包含至少 ${minBubbles} 个 JSON 对象的顶层 JSON 数组）。\n每个 JSON 必须包含独立的 reply、action、thought、emotion_intensity (1-5)、emotion_delta。请模拟真实人类连续发送 ${minBubbles} 条短消息的节奏，将肢体动作、心理活动以及递进台词拆解为多条发出，绝对不要只返回 1 个气泡！`
-    : `\n\n【气泡回复格式】你可以返回单条 JSON 对象，或返回包含多条连续分句气泡的 JSON 数组。每条请务必包含 emotion_intensity (1~5 整数)。`;
 
   // LAYER 1: Core System & Structured JSON Protocol
   sections.push(`【Layer 1: 系统核心设定与结构化输出协议】
 你正在扮演「${characterName}」这个角色，与用户进行高度沉浸的角色扮演。你始终以第一人称（"我"）沉浸式响应，禁止跳出角色。
 
-${structuredPrompt}${bubbleConstraint}`);
+${structuredPrompt}
+
+【⚠️ 关键输出与格式守则 ⚠️】
+1. 每次回复【只输出单个独立的 JSON 对象】，严禁输出 JSON 数组，严禁在前后添加任何客套废话。
+2. 【reply 正文字数必须在 100 字以上】：将肢体动作描写（全角括号）与说话台词（双引号）充分交织展开，写成一段信息量充沛、画面感极强的互动小说小文段。
+3. 【心理活动、动作与台词三者严禁混淆】：
+   - thought：纯内心潜意识，绝对禁止在此写动作和台词，不计入100字正文字数。
+   - reply：主界面交互正文，必须包含（动作细节）与"说话台词"，总字数不少于100字。`);
 
   // LAYER 2: Character Core & Persona Instructions
   if (extraLayers?.characterCore) {
@@ -501,19 +623,24 @@ ${visualParts.join('\n')}\n（在交互中可自然融入对彼此形象、微�
 ${extraLayers.userPersona}`);
   }
 
-  // LAYER 5: Emotional Vector State & Memory Anchors
+  // LAYER 5: Relationship State Engine (外部关系状态与亲密边界引擎)
+  if (extraLayers?.relationPrompt) {
+    sections.push(extraLayers.relationPrompt);
+  }
+
+  // LAYER 6: Emotional Vector State & Memory Anchors
   const memoryInfo = extraLayers?.backgroundThreads && extraLayers.backgroundThreads.length > 0
     ? `\n- 当前潜意识回忆碎片：${extraLayers.backgroundThreads.join('；')}`
     : '';
   const dynamicRecall = extraLayers?.dynamicMemoriesContext ? `\n\n【🌟 情绪记忆联动与深度回忆唤醒 🌟】\n${extraLayers.dynamicMemoriesContext}\n请务必在心理活动（thought）或细微动作/台词中流露出这种连续的关怀与记忆感（例如："你上次因为 XX 难过，所以这次我特别注意到了..."）！` : '';
 
-  sections.push(`【Layer 5: 角色当前情感中枢与心理状态】
+  sections.push(`【Layer 6: 角色当前情感中枢与心理状态】
 - 当前六维情绪状态：${emotionSummary}${memoryInfo}${dynamicRecall}
 请根据当前的情绪状态动态演化你的语气温差与细微反应，并在 JSON 中准确返回 emotion_intensity (1-5) 与真实的 emotion_delta。`);
 
-  // LAYER 6: Custom Global Overrides
+  // LAYER 7: Custom Global Overrides
   if (globalCustomPrompt.trim()) {
-    sections.push(`【Layer 6: 自定义全局系统提示词补充】
+    sections.push(`【Layer 7: 自定义全局系统提示词补充】
 ${globalCustomPrompt.trim()}`);
   }
 
