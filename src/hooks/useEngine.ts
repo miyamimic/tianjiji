@@ -438,12 +438,13 @@ export function useEngine() {
   const triggerCharacterReply = useCallback(async (messageId?: string, llmConfig?: LlmConfig) => {
     const s = stateRef.current;
     
+    let targetMsg: ChatMessage | undefined;
     if (messageId) {
       const msgIndex = s.messages.findIndex((m) => m.id === messageId);
       if (msgIndex !== -1) {
-        const targetMsg = s.messages[msgIndex];
-        s.messages = s.messages.slice(0, msgIndex + 1);
-
+        targetMsg = s.messages[msgIndex];
+        // Do NOT slice/truncate message history - keep whole conversation intact
+        // But adopt targetMsg snapshot emotion if available as the emotional baseline
         if (targetMsg.snapshot) {
           s.emotion = { ...targetMsg.snapshot.emotion };
           s.backgroundThreads = targetMsg.snapshot.backgroundThreads.map((t) => ({ ...t }));
@@ -463,7 +464,7 @@ export function useEngine() {
     lastIntentRef.current = null;
 
     const lastUserMsg = [...s.messages].reverse().find((m) => m.role === 'user');
-    const triggerInput = lastUserMsg ? lastUserMsg.content : '...';
+    const triggerInput = targetMsg ? targetMsg.content : (lastUserMsg ? lastUserMsg.content : '...');
 
     // A. Dynamic Memory topic matching and contextual recall injection
     const matchedDynamicMemories = findRelevantDynamicMemories(character.character_id, triggerInput);
@@ -528,6 +529,14 @@ export function useEngine() {
             content: m.content,
           })),
         ];
+
+        // If replying to a specific message, inject instruction at the end
+        if (targetMsg) {
+          llmMessages.push({
+            role: 'user' as const,
+            content: `（特别指令：希望你以这一句“${targetMsg.content}”为本次回复的核心情感基准与回应重点，在此情绪基调上进行接续推演与回应。）`,
+          });
+        }
 
         // Defensive guardrail LLM call with auto-regeneration
         const rawText = await callLlmWithGuardrail(llmConfig, llmMessages, character);
