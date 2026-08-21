@@ -12,6 +12,9 @@ import {
   type DBIntimacyMilestone
 } from './idb';
 
+import type { EmotionVector } from '../data/types';
+import type { SandbaggingReport, StepLogItem } from './gomokuProtocolEngine';
+
 export type GameInvitation = DBGameInvite;
 export type GomokuMatchRecord = DBGameMatchRecord;
 
@@ -19,7 +22,35 @@ const PENDING_INVITE_KEY = '__rp_engine_pending_game_invite';
 const ACTIVE_SESSION_KEY_PREFIX = '__rp_active_gomoku_session_';
 const GAME_HISTORY_KEY = '__rp_engine_gomoku_history';
 const DEBUG_SHORTCUT_KEY = '__rp_game_debug_shortcut';
-const LAST_INVITE_TURN_PREFIX = '__rp_last_invite_turn_';
+const LAST_INVITE_TIMESTAMP_PREFIX = '__rp_last_invite_ts_';
+const GAME_EMOTION_IMPACTS_KEY = '__rp_game_emotion_impacts';
+
+export const INVITE_HARD_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes hard cooldown
+
+export interface GameEmotionImpactRecord {
+  id: string;
+  matchId: string;
+  characterId: string;
+  characterName: string;
+  timestamp: number;
+  winner: 'player' | 'character' | 'draw' | 'surrender';
+  totalMoves: number;
+  totalDelta: Partial<EmotionVector>;
+  applied: boolean;
+  appliedTimestamp?: number;
+  summary: string;
+}
+
+export interface InGameChatMessage {
+  id: string;
+  sender: 'user' | 'character' | 'system';
+  text: string;
+  thought?: string;
+  moveStep?: number;
+  coord?: [number, number];
+  tactic?: string;
+  timestamp: number;
+}
 
 export interface ActiveGomokuSession {
   characterId: string;
@@ -28,10 +59,15 @@ export interface ActiveGomokuSession {
   moveHistory: Array<{ step: number; r: number; c: number; color: 'B' | 'W'; timestamp: number }>;
   playerColor: 'B' | 'W';
   currentTurn: 'B' | 'W';
-  inGameChats: Array<{ id: string; sender: 'user' | 'character'; text: string; timestamp: number }>;
+  inGameChats: InGameChatMessage[];
   characterSpeech: string;
+  characterInnerThought?: string;
+  currentTactic?: string;
   isPaused: boolean;
   lastUpdated: number;
+  gameTotalDelta?: Partial<EmotionVector>;
+  stepLogs?: StepLogItem[];
+  sandbaggingReport?: SandbaggingReport;
 }
 
 export function saveActiveGameSession(session: ActiveGomokuSession): void {
@@ -89,26 +125,86 @@ export function setGameDebugShortcutEnabled(enabled: boolean): void {
 }
 
 // -------------------------------------------------------------
-// 2. Character Active Invitation Frequency / Cooldown Limiter
+// 2. Character Active Invitation Hard Cooldown (30 Minutes Mandatory)
 // -------------------------------------------------------------
 
-const MIN_TURNS_BETWEEN_INVITES = 6; // Cooldown of at least 6 conversation turns
-
-export function canCharacterSendInvite(characterId: string, currentTurnCount: number): boolean {
+export function checkInviteCooldown(characterId: string): { allowed: boolean; remainingMinutes: number } {
   try {
-    const raw = localStorage.getItem(`${LAST_INVITE_TURN_PREFIX}${characterId}`);
-    if (raw === null) return true;
-    const lastTurn = parseInt(raw, 10);
-    if (isNaN(lastTurn)) return true;
-    return currentTurnCount - lastTurn >= MIN_TURNS_BETWEEN_INVITES;
+    const raw = localStorage.getItem(`${LAST_INVITE_TIMESTAMP_PREFIX}${characterId}`);
+    if (!raw) return { allowed: true, remainingMinutes: 0 };
+    const lastTime = parseInt(raw, 10);
+    if (isNaN(lastTime)) return { allowed: true, remainingMinutes: 0 };
+
+    const elapsed = Date.now() - lastTime;
+    if (elapsed >= INVITE_HARD_COOLDOWN_MS) {
+      return { allowed: true, remainingMinutes: 0 };
+    }
+
+    const remainingMs = INVITE_HARD_COOLDOWN_MS - elapsed;
+    const remainingMinutes = Math.ceil(remainingMs / 60000);
+    return { allowed: false, remainingMinutes };
   } catch {
-    return true;
+    return { allowed: true, remainingMinutes: 0 };
   }
 }
 
-export function recordCharacterInviteSent(characterId: string, currentTurnCount: number): void {
+export function canCharacterSendInvite(characterId: string): boolean {
+  return checkInviteCooldown(characterId).allowed;
+}
+
+export function recordCharacterInviteSent(characterId: string): void {
   try {
-    localStorage.setItem(`${LAST_INVITE_TURN_PREFIX}${characterId}`, String(currentTurnCount));
+    localStorage.setItem(`${LAST_INVITE_TIMESTAMP_PREFIX}${characterId}`, String(Date.now()));
+  } catch {
+    // ignore
+  }
+}
+
+// -------------------------------------------------------------
+// 2.1 Game Emotion Impact Records (右侧边栏情绪变动总账)
+// -------------------------------------------------------------
+
+export function loadGameEmotionImpacts(characterId?: string): GameEmotionImpactRecord[] {
+  try {
+    const raw = localStorage.getItem(GAME_EMOTION_IMPACTS_KEY);
+    if (!raw) return [];
+    const list: GameEmotionImpactRecord[] = JSON.parse(raw);
+    if (!Array.isArray(list)) return [];
+    if (characterId) {
+      return list.filter((item) => item.characterId === characterId);
+    }
+    return list;
+  } catch {
+    return [];
+  }
+}
+
+export function saveGameEmotionImpact(record: GameEmotionImpactRecord): void {
+  try {
+    const list = loadGameEmotionImpacts();
+    const existingIdx = list.findIndex((item) => item.id === record.id);
+    if (existingIdx !== -1) {
+      list[existingIdx] = record;
+    } else {
+      list.unshift(record);
+      // Keep up to 50 records
+      if (list.length > 50) list.pop();
+    }
+    localStorage.setItem(GAME_EMOTION_IMPACTS_KEY, JSON.stringify(list));
+  } catch {
+    // ignore
+  }
+}
+
+export function clearGameEmotionImpacts(characterId?: string): void {
+  try {
+    if (!characterId) {
+      localStorage.removeItem(GAME_EMOTION_IMPACTS_KEY);
+    } else {
+      const list = loadGameEmotionImpacts();
+      const filtered = list.filter((item) => item.characterId !== characterId);
+      localStorage.setItem(GAME_EMOTION_IMPACTS_KEY, JSON.stringify(filtered));
+    }
   } catch {
     // ignore
   }
@@ -171,6 +267,7 @@ export function setPendingGameInvite(invite: GameInvitation | null): void {
 export function acceptGameInvite(id: string): void {
   const current = getPendingGameInvite();
   if (current && current.id === id) {
+    recordCharacterInviteSent(current.characterId);
     const updated: GameInvitation = { ...current, status: 'accepted' };
     setPendingGameInvite(null);
     idbSaveInvitation(updated);
@@ -180,6 +277,7 @@ export function acceptGameInvite(id: string): void {
 export function rejectGameInvite(id: string): void {
   const current = getPendingGameInvite();
   if (current && current.id === id) {
+    recordCharacterInviteSent(current.characterId);
     const updated: GameInvitation = { ...current, status: 'rejected' };
     setPendingGameInvite(null);
     idbSaveInvitation(updated);
@@ -189,6 +287,7 @@ export function rejectGameInvite(id: string): void {
 export function dismissGameInvite(id: string): void {
   const current = getPendingGameInvite();
   if (current && current.id === id) {
+    recordCharacterInviteSent(current.characterId);
     const updated: GameInvitation = { ...current, status: 'dismissed' };
     setPendingGameInvite(null);
     idbSaveInvitation(updated);
@@ -363,3 +462,6 @@ export function playInviteVoiceNotification(): void {
     // ignore
   }
 }
+
+export const recordGameEmotionImpact = saveGameEmotionImpact;
+

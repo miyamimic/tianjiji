@@ -220,11 +220,18 @@ export default function App() {
           onBgChange={(newBg) => setCustomChatBg(newBg)}
           currentCharacterId={character.character_id}
           characterName={character.name}
+          character={character}
+          currentEmotionSnapshot={engine.getEmotion()}
           onEngineReload={() => engine.reload()}
           onConfigChange={setLlmConfig}
           forceOpenApp={forceOpenApp}
           onClearForceOpenApp={() => setForceOpenApp(null)}
-          onGameFinished={(summary, rawRecord) => engine.handleGameFinished(summary, rawRecord)}
+          onGameFinished={(summary, rawRecord, applyDelta, customDelta) =>
+            engine.handleGameFinished(summary, rawRecord, applyDelta, customDelta)
+          }
+          onApplyGameEmotionDelta={(delta, summary) =>
+            engine.applyGameEmotionSettlement(delta, summary)
+          }
           onInGameChat={(userInput, matchContext, chatHistory) =>
             engine.sendInGameChat(userInput, character.character_id, matchContext, llmConfig, chatHistory)
           }

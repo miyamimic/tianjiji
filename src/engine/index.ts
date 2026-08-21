@@ -65,11 +65,18 @@ function checkMemoryAnchors(
   userInput: string,
   intent: IntentAnalysis,
   triggeredAnchors: TriggeredAnchor[],
+  currentEmotion?: EmotionVector,
 ): { delta: Partial<EmotionVector>; reactions: string[]; updatedAnchors: TriggeredAnchor[] } {
   const delta: Partial<EmotionVector> = {};
   const reactions: string[] = [];
   const updatedAnchors = [...triggeredAnchors];
   const anchors = character.memory.anchors;
+
+  // Candidate anchor scoring
+  const scoredAnchors: Array<{
+    anchor: typeof anchors[0];
+    score: number;
+  }> = [];
 
   for (const anchor of anchors) {
     let triggered = userInput.includes(anchor.trigger);
@@ -79,18 +86,45 @@ function checkMemoryAnchors(
     if (!triggered && intent.intent === 'refuse' && anchor.trigger.includes('不行')) {
       triggered = intent.intent === 'refuse';
     }
+
     if (triggered) {
-      reactions.push(anchor.reaction);
-      const scaled = scaleEmotion(anchor.emotion_shift, anchor.weight);
-      for (const k of EMOTION_KEYS) {
-        const v = scaled[k];
-        if (v !== undefined) {
-          const cur = delta[k] ?? 0;
-          delta[k] = Math.round((cur + v) * 10000) / 10000;
+      // 1. Keyword match score (0.3)
+      const keywordScore = 1.0;
+      // 2. Emotion match score (0.2)
+      let emotionScore = 0.5;
+      if (currentEmotion && anchor.emotion_shift) {
+        for (const k of EMOTION_KEYS) {
+          const shift = anchor.emotion_shift[k];
+          if (shift && shift > 0 && currentEmotion[k] > 0.3) {
+            emotionScore = Math.min(1.0, emotionScore + 0.25);
+          }
         }
       }
-      updatedAnchors.push({ anchor, triggered_at: nowMs() });
+      // 3. Weight / Importance score (0.3)
+      const weightScore = Math.min(1.0, Math.max(0.1, anchor.weight / 1.5));
+      // 4. Recency score (0.2)
+      const recencyScore = 1.0;
+
+      const totalScore = 0.3 * keywordScore + 0.2 * emotionScore + 0.3 * weightScore + 0.2 * recencyScore;
+      scoredAnchors.push({ anchor, score: totalScore });
     }
+  }
+
+  // Sort by weighted score descending
+  scoredAnchors.sort((a, b) => b.score - a.score);
+
+  for (const item of scoredAnchors) {
+    const anchor = item.anchor;
+    reactions.push(anchor.reaction);
+    const scaled = scaleEmotion(anchor.emotion_shift, anchor.weight);
+    for (const k of EMOTION_KEYS) {
+      const v = scaled[k];
+      if (v !== undefined) {
+        const cur = delta[k] ?? 0;
+        delta[k] = Math.round((cur + v) * 10000) / 10000;
+      }
+    }
+    updatedAnchors.push({ anchor, triggered_at: nowMs() });
   }
 
   return { delta, reactions, updatedAnchors };

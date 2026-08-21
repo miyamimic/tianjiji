@@ -592,21 +592,57 @@ export function saveDynamicMemory(charId: string, memory: DynamicMemory): void {
   }
 }
 
-export function findRelevantDynamicMemories(charId: string, text: string): DynamicMemory[] {
+export function findRelevantDynamicMemories(
+  charId: string,
+  text: string,
+  currentEmotion?: Partial<Record<EmotionKey, number>>
+): DynamicMemory[] {
   const memories = loadDynamicMemories(charId);
   if (memories.length === 0 || !text.trim()) return [];
 
   const lowerText = text.toLowerCase();
-  const matched: DynamicMemory[] = [];
+  const scoredMemories: Array<{ memory: DynamicMemory; score: number }> = [];
+  const now = Date.now();
 
   for (const m of memories) {
-    const hasKeyword = m.topic_keywords.some((kw) => kw && lowerText.includes(kw.toLowerCase()));
-    if (hasKeyword) {
-      matched.push(m);
+    // 1. Keyword match score (weight: 0.3)
+    let keywordMatches = 0;
+    for (const kw of m.topic_keywords) {
+      if (kw && lowerText.includes(kw.toLowerCase())) {
+        keywordMatches++;
+      }
+    }
+    const keywordScore = m.topic_keywords.length > 0 
+      ? Math.min(1.0, keywordMatches / Math.max(1, m.topic_keywords.length))
+      : 0;
+
+    // 2. Emotion match score (weight: 0.2)
+    let emotionScore = 0.5;
+    if (currentEmotion && m.emotion_type && currentEmotion[m.emotion_type] !== undefined) {
+      const emoVal = currentEmotion[m.emotion_type] ?? 0;
+      emotionScore = Math.max(0, Math.min(1.0, emoVal));
+    }
+
+    // 3. Importance / Intensity score (weight: 0.3)
+    const intensityScore = Math.min(1.0, Math.max(0.2, (m.intensity || 3) / 5));
+
+    // 4. Freshness / Recency score with exponential decay (weight: 0.2)
+    const ageHours = Math.max(0, (now - (m.created_at || now)) / 3600000);
+    const recencyScore = Math.exp(-ageHours / 48); // 48h half-life decay
+
+    // Total weighted score
+    const totalScore = 0.3 * keywordScore + 0.2 * emotionScore + 0.3 * intensityScore + 0.2 * recencyScore;
+
+    // Only recall if there is some relevance or high keyword matching
+    if (keywordMatches > 0 || totalScore > 0.45) {
+      scoredMemories.push({ memory: m, score: totalScore });
     }
   }
 
-  return matched.slice(0, 3);
+  // Sort descending by score
+  scoredMemories.sort((a, b) => b.score - a.score);
+
+  return scoredMemories.slice(0, 3).map((item) => item.memory);
 }
 
 export function clearDynamicMemories(charId: string): void {

@@ -29,21 +29,30 @@ import {
   type GameInvitation,
   type GomokuMatchRecord 
 } from '../lib/gameStore';
+import type { Character, EmotionVector } from '../data/types';
 
 interface Props {
   onBgChange: (newBg: string) => void;
   currentBg?: string;
   currentCharacterId?: string;
   characterName?: string;
+  character?: Character;
+  currentEmotionSnapshot?: EmotionVector;
   onEngineReload?: () => void;
   onConfigChange?: (config: LlmConfig) => void;
   forceOpenApp?: AppId | null;
   onClearForceOpenApp?: () => void;
-  onGameFinished?: (summary: string, rawRecord: GomokuMatchRecord) => void;
+  onGameFinished?: (
+    summary: string, 
+    rawRecord: GomokuMatchRecord, 
+    applyEmotionDelta?: boolean, 
+    customDelta?: Partial<EmotionVector>
+  ) => void;
+  onApplyGameEmotionDelta?: (delta: Partial<EmotionVector>, summary: string) => void;
   onInGameChat?: (
     userInput: string,
     matchContext: { moveCount: number; playerColor: 'B' | 'W'; currentTurn: 'B' | 'W' },
-    chatHistory?: Array<{ sender: 'user' | 'character'; text: string }>
+    chatHistory?: Array<{ sender: 'user' | 'character' | 'system'; text: string }>
   ) => Promise<{ reply: string; tactic: 'aggressive' | 'defensive' | 'gentle' | 'balanced' } | string>;
   onRejectGameInvite?: (invite: GameInvitation) => void;
 }
@@ -118,11 +127,14 @@ export default function WindChime({
   currentBg,
   currentCharacterId = 'char_001',
   characterName = '角色',
+  character,
+  currentEmotionSnapshot,
   onEngineReload,
   onConfigChange,
   forceOpenApp,
   onClearForceOpenApp,
   onGameFinished,
+  onApplyGameEmotionDelta,
   onInGameChat,
   onRejectGameInvite,
 }: Props) {
@@ -540,7 +552,10 @@ export default function WindChime({
                     <GomokuApp
                       currentCharacterId={currentCharacterId}
                       characterName={characterName}
+                      character={character}
+                      currentEmotionSnapshot={currentEmotionSnapshot}
                       onGameFinished={onGameFinished}
+                      onApplyGameEmotionDelta={onApplyGameEmotionDelta}
                       onInGameChat={onInGameChat}
                       onRejectInvite={onRejectGameInvite}
                       onExit={() => setActiveApp(null)}

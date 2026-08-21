@@ -20,12 +20,33 @@ export interface DBGameMatchRecord {
   }>;
   chats: Array<{
     id: string;
-    sender: 'user' | 'character';
+    sender: 'user' | 'character' | 'system';
     text: string;
+    thought?: string;
+    moveStep?: number;
     timestamp: number;
   }>;
   summary: string;
   timestamp: number;
+  gameTotalDelta?: Record<string, number>;
+  emotionApplied?: boolean;
+  stepLogs?: Array<{
+    step: number;
+    coord: [number, number];
+    color: 'B' | 'W';
+    innerThought?: string;
+    spokenDialogue?: string;
+    emotionDelta?: Record<string, number>;
+    timestamp: number;
+  }>;
+  sandbaggingReport?: {
+    isPlayerSandbagging: boolean;
+    abandonedBestPoints: Array<{
+      coord: [number, number];
+      reason: string;
+      missedAdvantage: number;
+    }>;
+  };
 }
 
 export interface DBGameInvite {

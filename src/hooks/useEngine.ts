@@ -662,7 +662,7 @@ export function useEngine() {
         const gameInviteItem = structuredList.find((st) => st.game_invite);
         
         // Character Active Invite: must obey turn frequency limit
-        if (gameInviteItem?.game_invite && canCharacterSendInvite(character.character_id, s.messages.length)) {
+        if (gameInviteItem?.game_invite && canCharacterSendInvite(character.character_id)) {
           const invite: GameInvitation = {
             id: `invite_${Date.now()}`,
             gameType: 'gomoku',
@@ -672,7 +672,7 @@ export function useEngine() {
             timestamp: Date.now(),
             status: 'pending',
           };
-          recordCharacterInviteSent(character.character_id, s.messages.length);
+          recordCharacterInviteSent(character.character_id);
           setPendingGameInvite(invite);
         } else if (isGameKeyword && isGameDebugShortcutEnabled()) {
           // Local debug shortcut mode
@@ -788,19 +788,27 @@ export function useEngine() {
   // Handle Game Finished Conclusion (Pipeline Integration)
   // -------------------------------------------------------------
   const handleGameFinished = useCallback(
-    async (summary: string, rawRecord: GomokuMatchRecord) => {
+    async (
+      summary: string, 
+      rawRecord: GomokuMatchRecord, 
+      applyEmotionDelta: boolean = false, 
+      customDelta?: Partial<EmotionVector>
+    ) => {
       const s = stateRef.current;
       const character = getCharacterById(rawRecord.characterId) ?? MOCK_CHARACTERS[0];
 
-      // 1. Emotion shift based on game outcome
-      if (rawRecord.winner === 'player') {
-        s.emotion = addEmotion(s.emotion, { joy: 0.2, warmth: 0.15, desire: 0.1 });
-      } else if (rawRecord.winner === 'character') {
-        s.emotion = addEmotion(s.emotion, { joy: 0.25, warmth: 0.1, anger: -0.1 });
-      } else if (rawRecord.winner === 'draw') {
-        s.emotion = addEmotion(s.emotion, { warmth: 0.2, joy: 0.1 });
-      } else {
-        s.emotion = addEmotion(s.emotion, { warmth: 0.1, desire: 0.05 });
+      // 1. Emotion shift strictly obeys settlement confirmation
+      if (applyEmotionDelta) {
+        const deltaToApply = customDelta || rawRecord.gameTotalDelta || (
+          rawRecord.winner === 'player'
+            ? { joy: 0.2, warmth: 0.15, desire: 0.1 }
+            : rawRecord.winner === 'character'
+            ? { joy: 0.25, warmth: 0.1, anger: -0.1 }
+            : rawRecord.winner === 'draw'
+            ? { warmth: 0.2, joy: 0.1 }
+            : { warmth: 0.1, desire: 0.05 }
+        );
+        s.emotion = addEmotion(s.emotion, deltaToApply);
       }
 
       // 2. Add background thought thread
@@ -847,6 +855,16 @@ export function useEngine() {
     [persist, rerender]
   );
 
+  const applyGameEmotionSettlement = useCallback(
+    (delta: Partial<EmotionVector>, _summary?: string) => {
+      const s = stateRef.current;
+      s.emotion = addEmotion(s.emotion, delta);
+      persist(s);
+      rerender();
+    },
+    [persist, rerender]
+  );
+
   // -------------------------------------------------------------
   // In-Game Live Dialogue / Chat (Proxied through LLM & Engine)
   // -------------------------------------------------------------
@@ -856,7 +874,7 @@ export function useEngine() {
       charId: string,
       matchContext: { moveCount: number; playerColor: 'B' | 'W'; currentTurn: 'B' | 'W' },
       llmConfig?: LlmConfig,
-      chatHistory?: Array<{ sender: 'user' | 'character'; text: string }>
+      chatHistory?: Array<{ sender: 'user' | 'character' | 'system'; text: string }>
     ): Promise<{ reply: string; tactic: 'aggressive' | 'defensive' | 'gentle' | 'balanced' }> => {
       const character = getCharacterById(charId) ?? MOCK_CHARACTERS[0];
       const activeConfig = (llmConfig && isLlmConfigured(llmConfig)) ? llmConfig : loadLlmConfig();
@@ -978,6 +996,7 @@ export function useEngine() {
     triggerCharacterReply,
     handleUserRejectGameInvite,
     handleGameFinished,
+    applyGameEmotionSettlement,
     sendInGameChat,
     reload: () => {
       const freshChar = getCharacterById(stateRef.current.characterId);

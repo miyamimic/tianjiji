@@ -28,7 +28,12 @@ import {
   Volume2,
   VolumeX,
   Gamepad2,
-  Layers
+  Layers,
+  BrainCircuit,
+  Eye,
+  EyeOff,
+  Check,
+  AlertCircle
 } from 'lucide-react';
 import { 
   getPendingGameInvite, 
@@ -44,25 +49,54 @@ import {
   saveActiveGameSession,
   loadActiveGameSession,
   clearActiveGameSession,
+  recordGameEmotionImpact,
   type GomokuStats,
   type GomokuMatchRecord,
   type GameInvitation,
-  type ActiveGomokuSession
+  type ActiveGomokuSession,
+  type InGameChatMessage
 } from '../../lib/gameStore';
 import { loadCharAvatar } from '../../lib/customStore';
+import { 
+  BOARD_SIZE,
+  checkWinner,
+  generateTop5CandidateMoves,
+  analyzePlayerSandbagging,
+  accumulateGameEmotionDelta,
+  checkIfCharacterShouldSurrender,
+  type Cell,
+  type CandidateMove,
+  type SandbaggingReport,
+  type StepLogItem
+} from '../../lib/gomokuProtocolEngine';
+import { 
+  generateGomokuMoveDecision,
+  loadLlmConfig,
+  isLlmConfigured
+} from '../../lib/llm';
+import { getCharacterById, MOCK_CHARACTERS } from '../../data/characters';
+import { EMOTION_NAMES } from '../../data/types';
+import type { Character, EmotionVector, EmotionKey } from '../../data/types';
 
-const BOARD_SIZE = 15;
-export type Cell = 'B' | 'W' | null;
+export type { Cell };
 export type AiTactic = 'aggressive' | 'defensive' | 'gentle' | 'balanced';
 
 interface Props {
   currentCharacterId: string;
   characterName: string;
-  onGameFinished?: (summary: string, rawRecord: GomokuMatchRecord) => void;
+  character?: Character;
+  currentEmotionSnapshot?: EmotionVector;
+  onGameFinished?: (
+    summary: string, 
+    rawRecord: GomokuMatchRecord, 
+    applyEmotionDelta?: boolean, 
+    customDelta?: Partial<EmotionVector>
+  ) => void;
+  onApplyGameEmotionDelta?: (delta: Partial<EmotionVector>, summary: string) => void;
   onInGameChat?: (
     userInput: string,
     matchContext: { moveCount: number; playerColor: 'B' | 'W'; currentTurn: 'B' | 'W' },
-    chatHistory?: Array<{ sender: 'user' | 'character'; text: string }>
+    chatHistory?: InGameChatMessage[] | Array<{ sender: 'user' | 'character' | 'system'; text: string }>
   ) => Promise<{ reply: string; tactic: 'aggressive' | 'defensive' | 'gentle' | 'balanced' } | string>;
   onRejectInvite?: (invite: GameInvitation) => void;
   onExit?: () => void;
@@ -124,198 +158,6 @@ function playWinSound() {
   }
 }
 
-// -------------------------------------------------------------
-// Gomoku Rules Engine: 5-in-a-row checker
-// -------------------------------------------------------------
-
-function checkWinner(board: Cell[][]): { winner: Cell; line?: [number, number][] } {
-  const directions = [
-    [0, 1],  // Horizontal
-    [1, 0],  // Vertical
-    [1, 1],  // Diagonal \
-    [1, -1], // Diagonal /
-  ];
-
-  for (let r = 0; r < BOARD_SIZE; r++) {
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      const cell = board[r][c];
-      if (!cell) continue;
-
-      for (const [dr, dc] of directions) {
-        let count = 1;
-        const line: [number, number][] = [[r, c]];
-
-        for (let step = 1; step < 5; step++) {
-          const nr = r + dr * step;
-          const nc = c + dc * step;
-          if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === cell) {
-            count++;
-            line.push([nr, nc]);
-          } else {
-            break;
-          }
-        }
-
-        if (count >= 5) {
-          return { winner: cell, line };
-        }
-      }
-    }
-  }
-
-  return { winner: null };
-}
-
-// -------------------------------------------------------------
-// Gomoku Heuristic AI Calculation (Dynamic Tactic Aware)
-// -------------------------------------------------------------
-
-function findBestMove(
-  board: Cell[][],
-  aiColor: 'B' | 'W',
-  tactic: AiTactic = 'balanced'
-): [number, number] {
-  const humanColor: 'B' | 'W' = aiColor === 'B' ? 'W' : 'B';
-  const directions = [
-    [0, 1],
-    [1, 0],
-    [1, 1],
-    [1, -1],
-  ];
-
-  const evaluateLine = (r: number, c: number, dr: number, dc: number, color: 'B' | 'W'): number => {
-    let count = 0;
-    let openEnds = 0;
-
-    // Check forward
-    let step = 1;
-    while (step <= 4) {
-      const nr = r + dr * step;
-      const nc = c + dc * step;
-      if (nr < 0 || nr >= BOARD_SIZE || nc < 0 || nc >= BOARD_SIZE) break;
-      if (board[nr][nc] === color) {
-        count++;
-        step++;
-      } else if (board[nr][nc] === null) {
-        openEnds++;
-        break;
-      } else {
-        break;
-      }
-    }
-
-    // Check backward
-    step = 1;
-    while (step <= 4) {
-      const nr = r - dr * step;
-      const nc = c - dc * step;
-      if (nr < 0 || nr >= BOARD_SIZE || nc < 0 || nc >= BOARD_SIZE) break;
-      if (board[nr][nc] === color) {
-        count++;
-        step++;
-      } else if (board[nr][nc] === null) {
-        openEnds++;
-        break;
-      } else {
-        break;
-      }
-    }
-
-    if (count >= 4) return 100000;
-    if (count === 3) {
-      if (openEnds === 2) return 10000;
-      if (openEnds === 1) return 1200;
-    }
-    if (count === 2) {
-      if (openEnds === 2) return 1500;
-      if (openEnds === 1) return 120;
-    }
-    if (count === 1) {
-      if (openEnds === 2) return 50;
-      if (openEnds === 1) return 10;
-    }
-    return 0;
-  };
-
-  let maxScore = -1;
-  let bestMoves: [number, number][] = [];
-
-  // Tactic weighting multipliers
-  let aiWeight = 1.15;
-  let humanWeight = 1.05;
-
-  if (tactic === 'aggressive') {
-    aiWeight = 2.5;
-    humanWeight = 0.75;
-  } else if (tactic === 'defensive') {
-    aiWeight = 0.7;
-    humanWeight = 2.6;
-  } else if (tactic === 'gentle') {
-    aiWeight = 0.65;
-    humanWeight = 0.65;
-  }
-
-  for (let r = 0; r < BOARD_SIZE; r++) {
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      if (board[r][c] !== null) continue;
-
-      const centerDist = Math.abs(r - 7) + Math.abs(c - 7);
-      let score = (14 - centerDist) * 2;
-
-      let hasNeighbor = false;
-      for (let dr = -2; dr <= 2; dr++) {
-        for (let dc = -2; dc <= 2; dc++) {
-          const nr = r + dr;
-          const nc = c + dc;
-          if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] !== null) {
-            hasNeighbor = true;
-            break;
-          }
-        }
-        if (hasNeighbor) break;
-      }
-
-      if (!hasNeighbor && r === 7 && c === 7) {
-        return [7, 7];
-      }
-      if (!hasNeighbor) continue;
-
-      let aiScore = 0;
-      let humanScore = 0;
-
-      for (const [dr, dc] of directions) {
-        aiScore += evaluateLine(r, c, dr, dc, aiColor);
-        humanScore += evaluateLine(r, c, dr, dc, humanColor);
-      }
-
-      // If AI can win this turn immediately, always take it
-      if (aiScore >= 100000) {
-        return [r, c];
-      }
-
-      // If Human is about to win (4 in a row), block unless in purely gentle mode
-      if (humanScore >= 100000 && tactic !== 'gentle') {
-        score += 200000;
-      }
-
-      score += aiScore * aiWeight + humanScore * humanWeight;
-
-      if (score > maxScore) {
-        maxScore = score;
-        bestMoves = [[r, c]];
-      } else if (score === maxScore) {
-        bestMoves.push([r, c]);
-      }
-    }
-  }
-
-  if (bestMoves.length === 0) {
-    return [7, 7];
-  }
-
-  return bestMoves[Math.floor(Math.random() * bestMoves.length)];
-}
-
 const TACTIC_INFO: Record<AiTactic, { label: string; icon: React.ElementType; color: string; desc: string }> = {
   aggressive: {
     label: '激进绞杀',
@@ -346,16 +188,26 @@ const TACTIC_INFO: Record<AiTactic, { label: string; icon: React.ElementType; co
 export default function GomokuApp({
   currentCharacterId,
   characterName,
+  character: propCharacter,
+  currentEmotionSnapshot: propEmotionSnapshot,
   onGameFinished,
+  onApplyGameEmotionDelta,
   onInGameChat,
   onRejectInvite,
   onExit,
 }: Props) {
+  const activeChar = propCharacter || getCharacterById(currentCharacterId) || MOCK_CHARACTERS[0];
+  const initialEmotionSnapshot = propEmotionSnapshot || {
+    joy: 0.5,
+    sadness: 0.1,
+    anger: 0.05,
+    fear: 0.05,
+    warmth: 0.6,
+    desire: 0.4,
+  };
+
   // Screen Mode: 'arena' (Full Screen Game) or 'hub' (Game Selection & Archives Hub)
   const initialSession = loadActiveGameSession(currentCharacterId);
-  const pendingInviteOnMount = getPendingGameInvite();
-  
-  // Default to full-screen arena if there is an active session or a pending invite
   const [screenMode, setScreenMode] = useState<'arena' | 'hub'>('arena');
 
   // Hub sub-tabs: 'games' | 'invites' | 'history' | 'settings'
@@ -374,6 +226,21 @@ export default function GomokuApp({
   const [winner, setWinner] = useState<Cell | 'draw' | 'surrender' | null>(null);
   const [winningLine, setWinningLine] = useState<[number, number][] | null>(null);
 
+  // Mechanical Protocol Layer State
+  const [top5Candidates, setTop5Candidates] = useState<CandidateMove[]>([]);
+  const [sandbaggingReport, setSandbaggingReport] = useState<SandbaggingReport>({
+    isPlayerSandbagging: false,
+    abandonedBestPoints: [],
+    playerMistakeCount: 0,
+  });
+  const [showInspector, setShowInspector] = useState(false);
+
+  // In-Game Emotion Isolation & Step Logs
+  const [gameTotalDelta, setGameTotalDelta] = useState<Partial<EmotionVector>>({});
+  const [stepLogs, setStepLogs] = useState<StepLogItem[]>([]);
+  const [showSettlementModal, setShowSettlementModal] = useState(false);
+  const [settlementPendingRecord, setSettlementPendingRecord] = useState<GomokuMatchRecord | null>(null);
+
   // AI Tactic State (Modulated by LLM during in-game chat)
   const [currentTactic, setCurrentTactic] = useState<AiTactic>('balanced');
 
@@ -383,21 +250,32 @@ export default function GomokuApp({
   // Pause State
   const [isPaused, setIsPaused] = useState<boolean>(() => (initialSession ? true : false));
 
-  // In-Game Chat State
-  const [inGameChats, setInGameChats] = useState<
-    Array<{ id: string; sender: 'user' | 'character'; text: string; timestamp: number }>
-  >(() => initialSession?.inGameChats || []);
+  // In-Game Chat Stream & Timeline State (Persistent, scrollable round history)
+  const [inGameChats, setInGameChats] = useState<InGameChatMessage[]>(() => {
+    if (initialSession?.inGameChats && initialSession.inGameChats.length > 0) {
+      return initialSession.inGameChats;
+    }
+    return [
+      {
+        id: `chat_init_${Date.now()}`,
+        sender: 'character',
+        text: `（拂袖落座，指尖轻敲棋子）"落子无悔。你想执黑先行还是执白？"`,
+        timestamp: Date.now(),
+      },
+    ];
+  });
   const [chatInputText, setChatInputText] = useState('');
   const [isChatSending, setIsChatSending] = useState(false);
-  const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
+  const [showSurrenderConfirm, setShowSurrenderConfirm] = useState(false);
 
-  // Character Dialogue Bubble
+  // Character Dialogue Bubble & Inner Thought
   const [characterSpeech, setCharacterSpeech] = useState<string>(() => {
     if (initialSession && initialSession.moveHistory.length > 0) {
       return `（见你重新坐回棋盘前，微微抬眸）"局势已为你保存在第 ${initialSession.moveHistory.length} 手，请继续落子。"`;
     }
     return `（拂袖落座，指尖轻敲棋子）"落子无悔。你想执黑先行还是执白？"`;
   });
+  const [characterInnerThought, setCharacterInnerThought] = useState<string>('');
 
   // Stats & Match History Archive
   const [stats, setStats] = useState<GomokuStats>(() => loadGomokuStats(currentCharacterId));
@@ -411,14 +289,13 @@ export default function GomokuApp({
   const charAvatar = loadCharAvatar(currentCharacterId);
   const boardRef = useRef<HTMLDivElement>(null);
   const gameFinalizedRef = useRef(false);
+  const chatScrollContainerRef = useRef<HTMLDivElement>(null);
   const chatsEndRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to bottom of chat history when drawer opens or new message arrives
+  // Auto-scroll to bottom of live chat stream when new message arrives
   useEffect(() => {
-    if (showHistoryDrawer) {
-      chatsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [inGameChats, showHistoryDrawer]);
+    chatsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [inGameChats]);
 
   // Persistent Auto-Save In-Progress Match & Pause on Exit
   useEffect(() => {
@@ -478,8 +355,8 @@ export default function GomokuApp({
     }
   }, [refreshLists]);
 
-  // Finalize Game & Trigger Mind Pipeline
-  const finalizeGameConclusion = useCallback(
+  // Finalize Game Record Preparation (Opens Settlement Modal)
+  const prepareGameSettlement = useCallback(
     (finalWinner: 'player' | 'character' | 'draw' | 'surrender') => {
       if (gameFinalizedRef.current) return;
       gameFinalizedRef.current = true;
@@ -494,6 +371,20 @@ export default function GomokuApp({
         playWinSound();
       }
 
+      // Base game delta based on outcome if no step delta accumulated
+      let calculatedTotalDelta = { ...gameTotalDelta };
+      if (Object.keys(calculatedTotalDelta).length === 0) {
+        if (finalWinner === 'player') {
+          calculatedTotalDelta = { joy: 0.2, warmth: 0.15, desire: 0.1 };
+        } else if (finalWinner === 'character') {
+          calculatedTotalDelta = { joy: 0.25, warmth: 0.1, anger: -0.05 };
+        } else if (finalWinner === 'draw') {
+          calculatedTotalDelta = { warmth: 0.2, joy: 0.1 };
+        } else {
+          calculatedTotalDelta = { warmth: 0.1, desire: 0.05 };
+        }
+      }
+
       const matchRecord: GomokuMatchRecord = {
         id: `match_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
         characterId: currentCharacterId,
@@ -505,15 +396,17 @@ export default function GomokuApp({
         chats: [...inGameChats],
         summary: '',
         timestamp: Date.now(),
+        gameTotalDelta: calculatedTotalDelta,
+        stepLogs: [...stepLogs],
+        sandbaggingReport: { ...sandbaggingReport },
+        emotionApplied: false,
       };
 
       const summary = generateGameSummary(matchRecord);
       matchRecord.summary = summary;
 
-      if (onGameFinished) {
-        onGameFinished(summary, matchRecord);
-      }
-
+      setSettlementPendingRecord(matchRecord);
+      setShowSettlementModal(true);
       refreshLists();
     },
     [
@@ -523,74 +416,254 @@ export default function GomokuApp({
       moveHistory,
       inGameChats,
       soundEnabled,
-      onGameFinished,
+      gameTotalDelta,
+      stepLogs,
+      sandbaggingReport,
       refreshLists,
     ]
   );
+
+  // Settlement Confirm Actions
+  const handleConfirmSettlement = (apply: boolean) => {
+    if (!settlementPendingRecord) return;
+    const finalRecord = {
+      ...settlementPendingRecord,
+      emotionApplied: apply,
+    };
+
+    // Record emotion impact item for sidebar audit
+    recordGameEmotionImpact({
+      id: `impact_${Date.now()}`,
+      matchId: finalRecord.id,
+      characterId: currentCharacterId,
+      characterName,
+      timestamp: Date.now(),
+      winner: finalRecord.winner,
+      totalMoves: finalRecord.totalMoves,
+      totalDelta: finalRecord.gameTotalDelta || {},
+      applied: apply,
+      appliedTimestamp: apply ? Date.now() : undefined,
+      summary: finalRecord.summary || `五子棋对局(${finalRecord.totalMoves}手)`,
+    });
+
+    if (apply && onApplyGameEmotionDelta && finalRecord.gameTotalDelta) {
+      onApplyGameEmotionDelta(finalRecord.gameTotalDelta, finalRecord.summary);
+    }
+
+    if (onGameFinished) {
+      onGameFinished(finalRecord.summary, finalRecord, apply, finalRecord.gameTotalDelta);
+    }
+
+    setShowSettlementModal(false);
+    refreshLists();
+  };
 
   // Watch winner state
   useEffect(() => {
     if (!winner) return;
 
     if (winner === 'draw') {
-      finalizeGameConclusion('draw');
+      prepareGameSettlement('draw');
       setCharacterSpeech(`（将剩余棋子收回盒中）"棋逢对手，不分伯仲。能与我下成和局，你很不错。"`);
     } else if (winner === playerColor) {
-      finalizeGameConclusion('player');
-      setCharacterSpeech(
-        `（目光在胜势的五子处停留片刻，低笑一声）"竟然真被你破了局……棋力见长啊，这局算你赢了。"`
-      );
+      prepareGameSettlement('player');
     } else if (winner === 'surrender') {
-      finalizeGameConclusion('surrender');
-      setCharacterSpeech(`（轻按住你的棋子）"认输了？不急，棋局复盘多练几次自会开窍。"`);
+      prepareGameSettlement('surrender');
     } else {
-      finalizeGameConclusion('character');
+      prepareGameSettlement('character');
       setCharacterSpeech(
         `（从容放下最后一子，抬眸看向你）"承让了。棋盘如战场，稍有不慎就会被我抓住破绽。还想再来吗？"`
       );
     }
-  }, [winner, playerColor, finalizeGameConclusion]);
+  }, [winner, playerColor, prepareGameSettlement]);
 
-  // AI Move Execution
+  // AI Move Execution: Protocol Mechanical Top-5 -> LLM Decision -> Mechanical Sanitization
   const triggerAiMove = useCallback(
-    (currentBoard: Cell[][], aiCol: 'B' | 'W') => {
+    async (currentBoard: Cell[][], aiCol: 'B' | 'W') => {
       setIsAiThinking(true);
 
-      setTimeout(() => {
-        const [r, c] = findBestMove(currentBoard, aiCol, currentTactic);
-        if (soundEnabled) {
-          playStoneSound(aiCol === 'B');
-        }
+      const humanColor: 'B' | 'W' = aiCol === 'B' ? 'W' : 'B';
+      // 1. JS Mechanical Layer: Check if AI should surrender due to hopeless multi-threats
+      const mechSurrender = checkIfCharacterShouldSurrender(currentBoard, aiCol, moveHistory.length);
 
-        const nextBoard = currentBoard.map((row) => [...row]);
-        nextBoard[r][c] = aiCol;
-        setBoard(nextBoard);
+      // 2. JS Mechanical Layer: Generate Top-5 Candidate Moves
+      const candidates = generateTop5CandidateMoves(currentBoard, aiCol);
+      setTop5Candidates(candidates);
 
-        const newHistoryItem = {
-          step: moveHistory.length + 1,
-          r,
-          c,
-          color: aiCol,
-          timestamp: Date.now(),
-        };
-        setMoveHistory((prev) => [...prev, newHistoryItem]);
+      // 3. JS Mechanical Layer: Detect sandbagging facts
+      const sandbagReport = analyzePlayerSandbagging(currentBoard, humanColor, moveHistory);
+      setSandbaggingReport(sandbagReport);
 
-        const winCheck = checkWinner(nextBoard);
-        if (winCheck.winner) {
-          setWinner(winCheck.winner);
-          setWinningLine(winCheck.line || null);
-        } else {
-          const isFull = nextBoard.every((row) => row.every((cell) => cell !== null));
-          if (isFull) {
-            setWinner('draw');
-          } else {
-            setCurrentTurn(aiCol === 'B' ? 'W' : 'B');
+      const llmConfig = loadLlmConfig();
+      let chosenCoord: [number, number];
+      let innerThought = '';
+      let spokenDialogue = '';
+      let stepDelta: Partial<EmotionVector> = {};
+      let isAiSurrender = mechSurrender.shouldSurrender;
+
+      if (isLlmConfigured(llmConfig)) {
+        try {
+          const decision = await generateGomokuMoveDecision(
+            llmConfig,
+            {
+              character: activeChar,
+              currentEmotionSnapshot: initialEmotionSnapshot,
+              aiColor: aiCol,
+              stepNumber: moveHistory.length + 1,
+              recentMoves: moveHistory.map((m) => ({ step: m.step, r: m.r, c: m.c, color: m.color })),
+              top5Candidates: candidates,
+              isPlayerSandbagging: sandbagReport.isPlayerSandbagging,
+              abandonedBestPoints: sandbagReport.abandonedBestPoints,
+              inGameChats: inGameChats.map((c) => ({ sender: c.sender, text: c.text })),
+            },
+            currentBoard
+          );
+          chosenCoord = decision.coord;
+          innerThought = decision.innerThought;
+          spokenDialogue = decision.spokenDialogue;
+          stepDelta = decision.stepEmotionDelta;
+          if (decision.surrender && moveHistory.length >= 12) {
+            isAiSurrender = true;
           }
+        } catch (err) {
+          console.warn('LLM move error, fallback to candidate top-1:', err);
+          const topOne = candidates[0] || { coord: [7, 7], reason: '落于天元' };
+          chosenCoord = topOne.coord;
+          innerThought = `*局势复杂，先守住核心要道。*`;
+          spokenDialogue = `（从容落子）"请继续。"`;
+          stepDelta = { warmth: 0.02 };
         }
+      } else {
+        // Deterministic protocol engine fallback
+        const topOne = candidates[0] || { coord: [7, 7], reason: '落于天元' };
+        chosenCoord = topOne.coord;
+        innerThought = `*${topOne.reason}，按常规棋理推演。*`;
+        spokenDialogue = `（沉稳落子）"轮到你了。"`;
+        stepDelta = { warmth: 0.02 };
+      }
+
+      // Check if Character Surrenders!
+      if (isAiSurrender) {
+        const surrenderDialogue =
+          spokenDialogue ||
+          `（端详棋局良久，轻叹一声放下手中棋子）"大势已去，这一局是你技高一筹，我认输了。"`;
+        const surrenderThought =
+          innerThought || `*无力回天了，认输也是应有之理。*`;
+
+        setCharacterSpeech(surrenderDialogue);
+        setCharacterInnerThought(surrenderThought);
+
+        setInGameChats((prev) => [
+          ...prev,
+          {
+            id: `chat_event_${Date.now()}`,
+            sender: 'system',
+            text: `🏳️ 「${characterName}」已投子认负！你获得了本局胜利！`,
+            timestamp: Date.now(),
+          },
+          {
+            id: `chat_char_surrender_${Date.now() + 1}`,
+            sender: 'character',
+            text: surrenderDialogue,
+            thought: surrenderThought,
+            tactic: currentTactic,
+            timestamp: Date.now() + 1,
+          },
+        ]);
+
+        setWinner(playerColor);
         setIsAiThinking(false);
-      }, 450 + Math.random() * 250);
+        return;
+      }
+
+      const [r, c] = chosenCoord;
+
+      if (soundEnabled) {
+        playStoneSound(aiCol === 'B');
+      }
+
+      // Update in-game dialogue & thought
+      if (spokenDialogue) {
+        setCharacterSpeech(spokenDialogue);
+      }
+      if (innerThought) {
+        setCharacterInnerThought(innerThought);
+      }
+
+      // Add to scrollable chat stream
+      const charMoveMsg: InGameChatMessage = {
+        id: `chat_move_${Date.now()}`,
+        sender: 'character',
+        text: spokenDialogue || '（从容落子）"请继续。"',
+        thought: innerThought || undefined,
+        moveStep: moveHistory.length + 1,
+        coord: [r, c],
+        tactic: currentTactic,
+        timestamp: Date.now(),
+      };
+      setInGameChats((prev) => [...prev, charMoveMsg]);
+
+      // Accumulate isolated local emotion delta
+      setGameTotalDelta((prev) => accumulateGameEmotionDelta(prev, stepDelta));
+
+      // Record step log
+      const newStepLog: StepLogItem = {
+        step: moveHistory.length + 1,
+        coord: [r, c],
+        color: aiCol,
+        innerThought,
+        spokenDialogue,
+        emotionDelta: stepDelta,
+        timestamp: Date.now(),
+      };
+      setStepLogs((prev) => [...prev, newStepLog]);
+
+      const nextBoard = currentBoard.map((row) => [...row]);
+      nextBoard[r][c] = aiCol;
+      setBoard(nextBoard);
+
+      const newHistoryItem = {
+        step: moveHistory.length + 1,
+        r,
+        c,
+        color: aiCol,
+        timestamp: Date.now(),
+      };
+      setMoveHistory((prev) => [...prev, newHistoryItem]);
+
+      const winCheck = checkWinner(nextBoard);
+      if (winCheck.winner) {
+        setWinner(winCheck.winner);
+        setWinningLine(winCheck.line || null);
+        setInGameChats((prev) => [
+          ...prev,
+          {
+            id: `chat_win_event_${Date.now()}`,
+            sender: 'system',
+            text: `⚔️ 「${characterName}」达成五子连珠，获得胜利。`,
+            timestamp: Date.now(),
+          },
+        ]);
+      } else {
+        const isFull = nextBoard.every((row) => row.every((cell) => cell !== null));
+        if (isFull) {
+          setWinner('draw');
+          setInGameChats((prev) => [
+            ...prev,
+            {
+              id: `chat_draw_event_${Date.now()}`,
+              sender: 'system',
+              text: `🤝 棋盘已满，双方握手言和。`,
+              timestamp: Date.now(),
+            },
+          ]);
+        } else {
+          setCurrentTurn(aiCol === 'B' ? 'W' : 'B');
+        }
+      }
+      setIsAiThinking(false);
     },
-    [moveHistory.length, currentTactic, soundEnabled]
+    [moveHistory, activeChar, initialEmotionSnapshot, inGameChats, soundEnabled, currentTactic, characterName, playerColor]
   );
 
   // Human Cell Click
@@ -623,12 +696,38 @@ export default function GomokuApp({
     if (winCheck.winner) {
       setWinner(winCheck.winner);
       setWinningLine(winCheck.line || null);
+      const playerWinSpeech = `（目光在胜势的五子处停留片刻，低笑一声）"竟然真被你破了局……棋力见长啊，这局算你赢了。"`;
+      setCharacterSpeech(playerWinSpeech);
+      setInGameChats((prev) => [
+        ...prev,
+        {
+          id: `chat_win_event_${Date.now()}`,
+          sender: 'system',
+          text: `🏆 五子连珠！你赢得了对局胜利！`,
+          timestamp: Date.now(),
+        },
+        {
+          id: `chat_char_win_resp_${Date.now() + 1}`,
+          sender: 'character',
+          text: playerWinSpeech,
+          timestamp: Date.now() + 1,
+        },
+      ]);
       return;
     }
 
     const isFull = nextBoard.every((row) => row.every((cell) => cell !== null));
     if (isFull) {
       setWinner('draw');
+      setInGameChats((prev) => [
+        ...prev,
+        {
+          id: `chat_draw_event_${Date.now()}`,
+          sender: 'system',
+          text: `🤝 棋盘已满，双方握手言和。`,
+          timestamp: Date.now(),
+        },
+      ]);
       return;
     }
 
@@ -644,20 +743,37 @@ export default function GomokuApp({
     const emptyBoard = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
     setBoard(emptyBoard);
     setMoveHistory([]);
-    setInGameChats([]);
+    setStepLogs([]);
+    setGameTotalDelta({});
     setWinner(null);
     setWinningLine(null);
+    setShowSettlementModal(false);
+    setShowSurrenderConfirm(false);
+    setSettlementPendingRecord(null);
     setIsPaused(false);
     setPlayerColor(newPlayerColor);
     setCurrentTurn('B');
     setIsAiThinking(false);
     setCurrentTactic('balanced');
+    setCharacterInnerThought('');
+
+    const openingText =
+      newPlayerColor === 'W'
+        ? `（黑子先落，轻扣天元）"既然你让我先行，那我就不客气了。"`
+        : `（棋盘归整如初）"请吧，执黑先行。这次可要全力以赴。"`;
+
+    setCharacterSpeech(openingText);
+    setInGameChats([
+      {
+        id: `chat_init_${Date.now()}`,
+        sender: 'character',
+        text: openingText,
+        timestamp: Date.now(),
+      },
+    ]);
 
     if (newPlayerColor === 'W') {
-      setCharacterSpeech(`（黑子先落，轻扣天元）"既然你让我先行，那我就不客气了。"`);
       triggerAiMove(emptyBoard, 'B');
-    } else {
-      setCharacterSpeech(`（棋盘归整如初）"请吧，执黑先行。这次可要全力以赴。"`);
     }
   };
 
@@ -674,13 +790,52 @@ export default function GomokuApp({
     setBoard(newBoard);
     setMoveHistory(newHistory);
     setCurrentTurn(playerColor);
-    setCharacterSpeech(`（无奈失笑，任由你收回棋子）"下错了？落子可要多看三步。"`);
+    const undoText = `（无奈失笑，任由你收回棋子）"下错了？落子可要多看三步。"`;
+    setCharacterSpeech(undoText);
+    setInGameChats((prev) => [
+      ...prev,
+      {
+        id: `chat_undo_sys_${Date.now()}`,
+        sender: 'system',
+        text: `↩️ 悔棋一步`,
+        timestamp: Date.now(),
+      },
+      {
+        id: `chat_undo_char_${Date.now() + 1}`,
+        sender: 'character',
+        text: undoText,
+        timestamp: Date.now() + 1,
+      },
+    ]);
   };
 
-  // Surrender
+  // Surrender: Show confirmation first
   const handleSurrender = () => {
     if (winner || moveHistory.length === 0) return;
+    setShowSurrenderConfirm(true);
+  };
+
+  // Confirm Player Surrender
+  const confirmPlayerSurrender = () => {
+    setShowSurrenderConfirm(false);
     setWinner('surrender');
+    const concedeSpeech = `（见你投子认负，轻按住你的手背，眼眸微敛）"认输了？胜败乃兵家常事，这局你下得很有章法，待会儿再陪你下一盘。"`;
+    setCharacterSpeech(concedeSpeech);
+    setInGameChats((prev) => [
+      ...prev,
+      {
+        id: `chat_user_surrender_${Date.now()}`,
+        sender: 'system',
+        text: `🏳️ 你主动投子认负。`,
+        timestamp: Date.now(),
+      },
+      {
+        id: `chat_char_concede_${Date.now() + 1}`,
+        sender: 'character',
+        text: concedeSpeech,
+        timestamp: Date.now() + 1,
+      },
+    ]);
   };
 
   // Toggle Pause / Resume
@@ -688,11 +843,25 @@ export default function GomokuApp({
     if (winner || moveHistory.length === 0) return;
     setIsPaused((prev) => {
       const next = !prev;
-      if (next) {
-        setCharacterSpeech(`（静候在棋盘前，双手拢入袖中）"棋局已暂停。等你得空我们再接着下。"`);
-      } else {
-        setCharacterSpeech(`（抬眸微微一笑）"继续手谈。该谁落子了？"`);
-      }
+      const speech = next
+        ? `（静候在棋盘前，双手拢入袖中）"棋局已暂停。等你得空我们再接着下。"`
+        : `（抬眸微微一笑）"继续手谈。该谁落子了？"`;
+      setCharacterSpeech(speech);
+      setInGameChats((old) => [
+        ...old,
+        {
+          id: `chat_pause_sys_${Date.now()}`,
+          sender: 'system',
+          text: next ? '⏸️ 对局已暂停' : '▶️ 对局继续进行',
+          timestamp: Date.now(),
+        },
+        {
+          id: `chat_pause_char_${Date.now() + 1}`,
+          sender: 'character',
+          text: speech,
+          timestamp: Date.now() + 1,
+        },
+      ]);
       return next;
     });
   };
@@ -703,9 +872,9 @@ export default function GomokuApp({
     const text = chatInputText.trim();
     if (!text || isChatSending) return;
 
-    const userMsg = {
-      id: `chat_${Date.now()}`,
-      sender: 'user' as const,
+    const userMsg: InGameChatMessage = {
+      id: `chat_user_${Date.now()}`,
+      sender: 'user',
       text,
       timestamp: Date.now(),
     };
@@ -738,11 +907,12 @@ export default function GomokuApp({
 
         if (replyText) {
           setCharacterSpeech(replyText);
-          const charMsg = {
-            id: `chat_${Date.now() + 1}`,
-            sender: 'character' as const,
+          const charMsg: InGameChatMessage = {
+            id: `chat_char_${Date.now() + 1}`,
+            sender: 'character',
             text: replyText,
-            timestamp: Date.now(),
+            tactic: currentTactic,
+            timestamp: Date.now() + 1,
           };
           setInGameChats((prev) => [...prev, charMsg]);
         }
@@ -754,10 +924,10 @@ export default function GomokuApp({
       setInGameChats((prev) => [
         ...prev,
         {
-          id: `chat_${Date.now() + 1}`,
+          id: `chat_fallback_${Date.now() + 1}`,
           sender: 'character',
           text: fallbackReply,
-          timestamp: Date.now(),
+          timestamp: Date.now() + 1,
         },
       ]);
     } finally {
@@ -833,12 +1003,26 @@ export default function GomokuApp({
             </span>
           </div>
 
-          {/* Right: Score and Sound Mute toggle */}
+          {/* Right: Protocol Inspector toggle & Score & Sound Mute toggle */}
           <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowInspector(!showInspector)}
+              className={`flex items-center gap-1 px-2.5 py-1 rounded-xl text-[11px] font-semibold border transition cursor-pointer ${
+                showInspector
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                  : 'bg-white/5 hover:bg-white/10 text-white/60 border-white/10'
+              }`}
+              title="查看机械层 Top-5 候选与心智分析"
+            >
+              <BrainCircuit className="size-3.5 text-amber-400" />
+              <span className="hidden sm:inline">心智分析</span>
+            </button>
+
             <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white/5 border border-white/10 text-[11px] text-white/70">
               <Trophy className="size-3 text-amber-400" />
               <span>{stats.playerWins}胜 {stats.characterWins}负</span>
             </div>
+
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className="p-1.5 rounded-xl bg-white/5 hover:bg-white/15 border border-white/10 text-white/60 hover:text-white transition cursor-pointer"
@@ -850,7 +1034,7 @@ export default function GomokuApp({
         </div>
 
         {/* ================= 1. TOP/UPPER HALF: FULL PROMINENT CHESSBOARD ================= */}
-        <div className="flex-1 flex items-center justify-center py-1 shrink-0">
+        <div className="flex-1 flex items-center justify-center py-1 shrink-0 relative">
           <div
             ref={boardRef}
             className="relative w-full max-w-[340px] sm:max-w-[400px] aspect-square rounded-2xl bg-gradient-to-br from-[#c89b65] via-[#b5844e] to-[#9a6a34] p-2.5 sm:p-3 shadow-[0_20px_50px_rgba(0,0,0,0.8)] border-[3.5px] border-[#7d5225] overflow-hidden select-none"
@@ -908,6 +1092,7 @@ export default function GomokuApp({
                   row.map((cell, c) => {
                     const isLast = lastMove && lastMove.r === r && lastMove.c === c;
                     const isWinCell = winningLine?.some(([wr, wc]) => wr === r && wc === c);
+                    const candidateIndex = top5Candidates.findIndex((cand) => cand.coord[0] === r && cand.coord[1] === c);
 
                     return (
                       <div
@@ -922,6 +1107,13 @@ export default function GomokuApp({
                               playerColor === 'B' ? 'bg-black' : 'bg-white'
                             }`}
                           />
+                        )}
+
+                        {/* Top-5 Candidate Hint Badges (when Inspector is open and cell is empty) */}
+                        {showInspector && !cell && candidateIndex !== -1 && (
+                          <div className="absolute size-4 rounded-full bg-amber-500/80 text-amber-950 text-[9px] font-bold flex items-center justify-center pointer-events-none z-10 shadow-sm border border-amber-300">
+                            {candidateIndex + 1}
+                          </div>
                         )}
 
                         {/* Placed Stone */}
@@ -953,83 +1145,164 @@ export default function GomokuApp({
               </div>
             </div>
           </div>
-        </div>
 
-        {/* ================= 2. MIDDLE: CHARACTER DIALOGUE BUBBLE & LIVE TACTIC ================= */}
-        <div className="shrink-0 max-w-xl mx-auto w-full space-y-1.5">
-          <div className="relative p-3 rounded-2xl bg-black/60 border border-white/15 shadow-xl space-y-1.5 backdrop-blur-md">
-            <div className="flex items-center justify-between">
-              {/* Character Avatar + Name + Live Strategy Badge */}
-              <div className="flex items-center gap-2">
-                <div className="size-7 rounded-full overflow-hidden bg-gradient-to-br from-[hsl(28_85%_62%)] to-[hsl(28_85%_62%/0.6)] flex items-center justify-center text-[10px] font-bold text-amber-950 ring-1 ring-amber-400/50 shrink-0">
-                  {charAvatar ? (
-                    <img src={charAvatar} alt={characterName} className="w-full h-full object-cover" />
-                  ) : (
-                    characterName.charAt(0)
+          {/* Floating Mechanical Top-5 & Mind Analysis Inspector Drawer */}
+          {showInspector && (
+            <div className="absolute right-2 top-2 bottom-2 w-64 rounded-2xl bg-black/85 border border-amber-500/30 p-3 shadow-2xl backdrop-blur-md overflow-y-auto no-scrollbar space-y-2.5 z-20 animate-in slide-in-from-right-2 duration-150 text-xs">
+              <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
+                <div className="flex items-center gap-1.5 font-bold text-amber-300">
+                  <BrainCircuit className="size-4" />
+                  <span>机械层与心智透镜</span>
+                </div>
+                <button
+                  onClick={() => setShowInspector(false)}
+                  className="p-1 rounded-lg text-white/50 hover:text-white transition cursor-pointer"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+
+              {/* Sandbagging fact */}
+              <div className="p-2 rounded-xl bg-white/5 border border-white/10 space-y-1">
+                <div className="text-[11px] font-bold text-white flex items-center justify-between">
+                  <span>放水让子检测:</span>
+                  <span className={sandbaggingReport.isPlayerSandbagging ? 'text-amber-400' : 'text-emerald-400'}>
+                    {sandbaggingReport.isPlayerSandbagging ? '⚠️ 发现让棋迹象' : '✅ 正常对抗'}
+                  </span>
+                </div>
+                {sandbaggingReport.abandonedBestPoints.length > 0 && (
+                  <p className="text-[10px] text-white/60">
+                    错失点位: {sandbaggingReport.abandonedBestPoints.map(p => `[${p.coord.join(',')}]`).join('、')}
+                  </p>
+                )}
+              </div>
+
+              {/* Top-5 Candidate Pool */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-bold text-amber-200 block">机械层 Top-5 候选落子池:</span>
+                {top5Candidates.length === 0 ? (
+                  <p className="text-[10px] text-white/40 italic">等待下一手演算...</p>
+                ) : (
+                  top5Candidates.map((cand, idx) => (
+                    <div
+                      key={idx}
+                      className="p-2 rounded-xl bg-white/[0.04] border border-white/5 space-y-0.5"
+                    >
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="font-bold text-amber-300">
+                          #{idx + 1} 坐标 [{cand.coord[0]}, {cand.coord[1]}]
+                        </span>
+                        <span className="text-[9px] font-mono text-white/50">权重 {cand.score}</span>
+                      </div>
+                      <p className="text-[10px] text-white/70">{cand.reason}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* In-Game Accumulated Emotion Delta */}
+              <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 space-y-1 text-[10.5px]">
+                <span className="font-bold text-amber-300 block">局内隔离情绪累积账本:</span>
+                <p className="text-white/60 text-[9.5px]">
+                  （此数值对局中完全隔离，仅在对局结束后经你确认才结算写入主世界）
+                </p>
+                <div className="flex flex-wrap gap-1.5 pt-1">
+                  {Object.entries(gameTotalDelta).map(([k, v]) => (
+                    <span key={k} className="px-1.5 py-0.5 rounded bg-black/40 text-amber-200 font-mono text-[10px]">
+                      {EMOTION_NAMES[k as EmotionKey] || k}: {v && v > 0 ? `+${v.toFixed(2)}` : v?.toFixed(2)}
+                    </span>
+                  ))}
+                  {Object.keys(gameTotalDelta).length === 0 && (
+                    <span className="text-white/40 text-[10px]">暂无剧烈波动</span>
                   )}
                 </div>
-                <span className="text-xs font-bold text-white">{characterName}</span>
-
-                {/* Dynamic Strategy Badge */}
-                <div
-                  className={`flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold border ${TACTIC_INFO[currentTactic].color}`}
-                  title={TACTIC_INFO[currentTactic].desc}
-                >
-                  <ActiveTacticIcon className="size-3" />
-                  <span>{TACTIC_INFO[currentTactic].label}</span>
-                </div>
               </div>
-
-              {/* History Drawer Toggle Button */}
-              {inGameChats.length > 0 && (
-                <button
-                  onClick={() => setShowHistoryDrawer(!showHistoryDrawer)}
-                  className="flex items-center gap-1 text-[11px] text-amber-300/80 hover:text-amber-300 transition cursor-pointer"
-                >
-                  <MessageSquare className="size-3" />
-                  <span>{showHistoryDrawer ? '收起历史' : `交谈记录(${inGameChats.length})`}</span>
-                  {showHistoryDrawer ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-                </button>
-              )}
             </div>
+          )}
+        </div>
 
-            {/* In-Character Dialogue Text (Direct LLM Speech) */}
-            <p className="text-xs sm:text-[13px] text-amber-100 leading-relaxed italic pl-1">
-              {characterSpeech}
-            </p>
-
-            {/* Collapsible Chat History Drawer */}
-            {showHistoryDrawer && inGameChats.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-white/10 max-h-32 overflow-y-auto space-y-1.5 pr-1 no-scrollbar animate-in slide-in-from-top-2 duration-150">
-                {inGameChats.map((c) => (
-                  <div
-                    key={c.id}
-                    className={`text-[11px] p-2 rounded-xl leading-snug ${
-                      c.sender === 'user'
-                        ? 'bg-amber-500/20 text-amber-200 ml-6 text-right'
-                        : 'bg-white/10 text-white/90 mr-6'
-                    }`}
-                  >
-                    <span className="font-bold opacity-60 mr-1">
-                      {c.sender === 'user' ? '你' : characterName}:
+        {/* ================= 2. MIDDLE: PERSISTENT LIVE SCROLLABLE ROUND & CHAT STREAM ================= */}
+        <div className="shrink-0 max-w-xl mx-auto w-full flex flex-col space-y-1">
+          <div
+            ref={chatScrollContainerRef}
+            className="h-[130px] sm:h-[155px] w-full rounded-2xl bg-black/65 border border-white/15 p-2.5 overflow-y-auto space-y-2 backdrop-blur-md shadow-inner text-xs"
+          >
+            {inGameChats.map((c) => {
+              if (c.sender === 'system') {
+                return (
+                  <div key={c.id} className="flex justify-center my-1">
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-medium bg-amber-500/15 border border-amber-500/25 text-amber-200 shadow-xs">
+                      {c.text}
                     </span>
-                    <span>{c.text}</span>
                   </div>
-                ))}
-                <div ref={chatsEndRef} />
-              </div>
-            )}
+                );
+              }
+
+              if (c.sender === 'user') {
+                return (
+                  <div key={c.id} className="flex justify-end gap-1.5 items-end ml-8">
+                    <div className="bg-gradient-to-r from-amber-600/30 to-amber-500/25 border border-amber-400/30 text-amber-100 px-3 py-1.5 rounded-2xl rounded-br-xs text-xs shadow-sm max-w-[85%] break-words">
+                      {c.text}
+                    </div>
+                    <div className="size-5 rounded-full bg-amber-500/30 border border-amber-400/40 text-[9px] font-bold text-amber-200 flex items-center justify-center shrink-0">
+                      你
+                    </div>
+                  </div>
+                );
+              }
+
+              // Character message
+              return (
+                <div key={c.id} className="flex items-start gap-2 mr-6 text-xs">
+                  <div className="size-6 rounded-full overflow-hidden bg-gradient-to-br from-[hsl(28_85%_62%)] to-[hsl(28_85%_62%/0.6)] flex items-center justify-center text-[9px] font-bold text-amber-950 ring-1 ring-amber-400/50 shrink-0 mt-0.5">
+                    {charAvatar ? (
+                      <img src={charAvatar} alt={characterName} className="w-full h-full object-cover" />
+                    ) : (
+                      characterName.charAt(0)
+                    )}
+                  </div>
+
+                  <div className="flex-1 space-y-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-amber-300 text-[11px]">{characterName}</span>
+                      {c.moveStep && (
+                        <span className="text-[9px] bg-white/10 text-white/70 px-1.5 py-0.2 rounded font-mono">
+                          第 {c.moveStep} 手
+                        </span>
+                      )}
+                      {c.tactic && TACTIC_INFO[c.tactic as AiTactic] && (
+                        <span className={`text-[9px] px-1.5 py-0.2 rounded border ${TACTIC_INFO[c.tactic as AiTactic].color}`}>
+                          {TACTIC_INFO[c.tactic as AiTactic].label}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="p-2 rounded-2xl rounded-tl-xs bg-white/[0.08] border border-white/10 text-white/95 leading-relaxed break-words">
+                      {c.text}
+                    </div>
+
+                    {c.thought && (
+                      <div className="text-[10px] text-amber-300/80 italic bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg">
+                        <span className="font-semibold text-amber-400 not-italic mr-1">独白:</span>
+                        <span>{c.thought}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            <div ref={chatsEndRef} />
           </div>
         </div>
 
         {/* ================= 3. LOWER: TALK INPUT FIELD ================= */}
-        <div className="shrink-0 max-w-xl mx-auto w-full pt-1">
+        <div className="shrink-0 max-w-xl mx-auto w-full pt-0.5">
           <form onSubmit={handleSendInGameChat} className="flex items-center gap-2">
             <input
               type="text"
               value={chatInputText}
               onChange={(e) => setChatInputText(e.target.value)}
-              placeholder="对TA说句话，TA会依据对话调整棋路..."
+              placeholder="边下边聊，对TA说句话..."
               disabled={isChatSending}
               className="flex-1 bg-black/50 border border-white/20 rounded-xl px-3.5 py-2 text-xs text-white placeholder-white/40 outline-none focus:border-amber-400/80 transition shadow-inner"
             />
@@ -1049,7 +1322,7 @@ export default function GomokuApp({
         </div>
 
         {/* ================= 4. BOTTOM: OPERATION TOOLBAR ================= */}
-        <div className="shrink-0 max-w-xl mx-auto w-full grid grid-cols-5 gap-1.5 pt-1.5">
+        <div className="shrink-0 max-w-xl mx-auto w-full grid grid-cols-5 gap-1.5 pt-1">
           {/* Switch Player Color */}
           <button
             onClick={() => handleRestart(playerColor === 'B' ? 'W' : 'B')}
@@ -1107,6 +1380,119 @@ export default function GomokuApp({
             <span>认输</span>
           </button>
         </div>
+
+        {/* Surrender Confirmation Modal */}
+        {showSurrenderConfirm && (
+          <div className="fixed inset-0 z-[80] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in-0 duration-150">
+            <div className="max-w-xs w-full rounded-2xl bg-gradient-to-b from-[#221c17] to-[#120f0d] border border-red-500/40 p-4 space-y-3 shadow-2xl text-white">
+              <div className="flex items-center gap-2 text-red-400 font-bold text-sm">
+                <Flag className="size-4" />
+                <span>投子认负确认</span>
+              </div>
+              <p className="text-xs text-white/80 leading-relaxed">
+                确定要向【{characterName}】投子认负吗？本局将以对方获胜结算，并沉淀相应对局情绪。
+              </p>
+              <div className="grid grid-cols-2 gap-2 pt-1">
+                <button
+                  onClick={() => setShowSurrenderConfirm(false)}
+                  className="py-2 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs text-white/70 hover:text-white transition cursor-pointer"
+                >
+                  继续对弈
+                </button>
+                <button
+                  onClick={confirmPlayerSurrender}
+                  className="py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs shadow-md transition active:scale-95 cursor-pointer"
+                >
+                  确定认输
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= 5. POST-GAME EMOTION SETTLEMENT CONFIRMATION MODAL ================= */}
+        {showSettlementModal && settlementPendingRecord && (
+          <div className="fixed inset-0 z-[70] bg-black/80 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in-0 duration-200">
+            <div className="max-w-md w-full rounded-3xl bg-gradient-to-b from-[#221c17] to-[#120f0d] border border-amber-400/40 p-5 space-y-4 shadow-2xl text-white">
+              
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-2xl bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    <Trophy className="size-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-white">对弈胜负与情绪结算确认</h3>
+                    <p className="text-[11px] text-white/50">
+                      共 {settlementPendingRecord.totalMoves} 手 ·{' '}
+                      {settlementPendingRecord.winner === 'player'
+                        ? '你赢得了对局 🏆'
+                        : settlementPendingRecord.winner === 'surrender'
+                        ? '玩家主动投子认负 🏳️'
+                        : settlementPendingRecord.winner === 'draw'
+                        ? '双方战成和局 🤝'
+                        : `${characterName} 赢得了对局 ⚔️`}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Summary quote */}
+              <div className="p-3 rounded-2xl bg-black/40 border border-white/10 space-y-1.5 text-xs">
+                <div className="text-amber-300 font-semibold">{characterName} 的棋后心声:</div>
+                <p className="text-white/80 italic leading-relaxed">
+                  "{characterSpeech.replace(/^（.*?）/g, '') || '手谈一局，意犹未尽。'}"
+                </p>
+              </div>
+
+              {/* Emotion Ledger Breakdown */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-amber-200">本次对局产生的情绪沉淀 (账本)</span>
+                  <span className="text-[10px] text-white/40">完全隔离，需确认应用</span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-white/[0.04] border border-white/10 text-center">
+                  {Object.entries(settlementPendingRecord.gameTotalDelta || {}).map(([k, v]) => {
+                    const num = v || 0;
+                    const isPos = num > 0;
+                    return (
+                      <div key={k} className="p-1.5 rounded-xl bg-black/30">
+                        <span className="text-[10px] text-white/50 block">{EMOTION_NAMES[k as EmotionKey] || k}</span>
+                        <span className={`text-xs font-bold font-mono ${isPos ? 'text-emerald-400' : num < 0 ? 'text-rose-400' : 'text-white/60'}`}>
+                          {isPos ? `+${num.toFixed(2)}` : num.toFixed(2)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {Object.keys(settlementPendingRecord.gameTotalDelta || {}).length === 0 && (
+                    <div className="col-span-3 py-2 text-white/40 text-xs">
+                      本局情绪波动平稳，无显著数值增减
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Confirm & Cancel Buttons */}
+              <div className="grid grid-cols-2 gap-2.5 pt-1">
+                <button
+                  onClick={() => handleConfirmSettlement(false)}
+                  className="py-2.5 rounded-xl bg-white/10 hover:bg-white/15 border border-white/15 text-xs font-semibold text-white/70 hover:text-white transition active:scale-95 cursor-pointer"
+                >
+                  忽略，不沉淀情绪
+                </button>
+                <button
+                  onClick={() => handleConfirmSettlement(true)}
+                  className="py-2.5 rounded-xl bg-gradient-to-r from-[hsl(28_85%_62%)] to-[hsl(28_95%_55%)] text-amber-950 font-bold text-xs shadow-md hover:brightness-110 transition active:scale-95 cursor-pointer flex items-center justify-center gap-1"
+                >
+                  <Check className="size-4" />
+                  <span>应用到主世界情绪</span>
+                </button>
+              </div>
+
+            </div>
+          </div>
+        )}
 
       </div>
     );
@@ -1460,6 +1846,18 @@ export default function GomokuApp({
                           <span className="font-bold text-amber-300 block mb-0.5">心智沉淀摘要:</span>
                           <p className="text-white/80 whitespace-pre-wrap leading-relaxed">{m.summary}</p>
                         </div>
+                        {m.gameTotalDelta && Object.keys(m.gameTotalDelta).length > 0 && (
+                          <div>
+                            <span className="font-bold text-amber-300 block mb-0.5">情绪结算账本:</span>
+                            <div className="flex flex-wrap gap-1.5">
+                              {Object.entries(m.gameTotalDelta).map(([k, v]) => (
+                                <span key={k} className="px-2 py-0.5 rounded-md bg-white/5 text-amber-200 font-mono text-[10px]">
+                                  {EMOTION_NAMES[k as EmotionKey] || k}: {v && v > 0 ? `+${v.toFixed(2)}` : v?.toFixed(2)}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                         {m.chats.length > 0 && (
                           <div>
                             <span className="font-bold text-amber-300 block mb-1">对弈交谈回顾:</span>

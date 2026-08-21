@@ -1,7 +1,9 @@
-import { ChevronLeft, ChevronRight, Brain, Sparkles, BookMarked, ScanSearch, History } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Brain, Sparkles, BookMarked, ScanSearch, History, Swords, ChevronDown, ChevronUp } from 'lucide-react';
+import React, { useState } from 'react';
 import EmotionRadar from './EmotionRadar';
 import type { EmotionVector, BackgroundThread, TriggeredAnchor, IntentAnalysis, DynamicMemory } from '../data/types';
 import { loadDynamicMemories } from '../lib/customStore';
+import { loadGameEmotionImpacts } from '../lib/gameStore';
 
 interface Props {
   isOpen: boolean;
@@ -76,6 +78,9 @@ export default function Sidebar({
   characterName,
   overlayMode = false,
 }: Props) {
+  const [isGameEmotionOpen, setIsGameEmotionOpen] = useState(true);
+  const gameEmotionImpacts = characterId ? loadGameEmotionImpacts(characterId) : [];
+
   return (
     <>
       {!isOpen && (
@@ -297,6 +302,119 @@ export default function Sidebar({
                       <p className="text-[10px] text-white/40">{formatTimeAgo(m.created_at)}</p>
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Game Emotion Impact Ledger (游戏带来的情绪变动) */}
+          {characterId && (
+            <div className="pt-2 border-t border-white/10">
+              <button
+                onClick={() => setIsGameEmotionOpen(!isGameEmotionOpen)}
+                className="w-full flex items-center justify-between mb-2 cursor-pointer group text-left"
+              >
+                <div className="flex items-center gap-2">
+                  <Swords className="size-4 text-amber-400" />
+                  <h3 className="text-sm font-medium text-white group-hover:text-amber-300 transition-colors">
+                    游戏带来的情绪变动
+                  </h3>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-amber-400/80 font-mono">
+                    {gameEmotionImpacts.length} 局
+                  </span>
+                  {isGameEmotionOpen ? (
+                    <ChevronUp className="size-3.5 text-white/40" />
+                  ) : (
+                    <ChevronDown className="size-3.5 text-white/40" />
+                  )}
+                </div>
+              </button>
+
+              {isGameEmotionOpen && (
+                <div>
+                  {gameEmotionImpacts.length === 0 ? (
+                    <div className="rounded-lg border border-white/10 bg-[hsl(222_28%_9%/0.4)] p-3 text-center text-xs text-white/40 leading-relaxed">
+                      对局结束后经主控确认结算的情绪变动（gameTotalDelta）将归档于此。
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {gameEmotionImpacts.map((record) => {
+                        const winLabel =
+                          record.winner === 'player'
+                            ? '玩家获胜 🏆'
+                            : record.winner === 'draw'
+                            ? '和局 🤝'
+                            : record.winner === 'surrender'
+                            ? '认输 🏳️'
+                            : '角色获胜 ⚔️';
+                        const deltas = Object.entries(record.totalDelta || {}).filter(
+                          ([_, v]) => typeof v === 'number' && Math.abs(v) > 0.001
+                        );
+
+                        return (
+                          <div
+                            key={record.id}
+                            className={`rounded-lg border p-2.5 space-y-1.5 transition-colors ${
+                              record.applied
+                                ? 'border-amber-500/30 bg-amber-950/20'
+                                : 'border-white/10 bg-white/[0.02]'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between text-[11px]">
+                              <span className="font-semibold text-white/90">
+                                {winLabel} ({record.totalMoves}手)
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.2 rounded text-[9.5px] font-bold ${
+                                  record.applied
+                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                                    : 'bg-white/10 text-white/40 border border-white/10'
+                                }`}
+                              >
+                                {record.applied ? '已应用至主世界' : '已忽略/未应用'}
+                              </span>
+                            </div>
+
+                            {deltas.length > 0 ? (
+                              <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                                {deltas.map(([key, val]) => {
+                                  const num = Number(val);
+                                  const isPos = num > 0;
+                                  return (
+                                    <span
+                                      key={key}
+                                      className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                                        isPos
+                                          ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/25'
+                                          : 'bg-red-500/15 text-red-300 border border-red-500/25'
+                                      }`}
+                                    >
+                                      {EMOTION_CN[key as keyof typeof EMOTION_CN] || key}{' '}
+                                      {isPos ? `+${num.toFixed(2)}` : num.toFixed(2)}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <p className="text-[10px] text-white/40 italic">本局无显著情绪波动</p>
+                            )}
+
+                            {record.summary && (
+                              <p className="text-[10.5px] text-white/70 leading-relaxed line-clamp-2">
+                                {record.summary}
+                              </p>
+                            )}
+
+                            <p className="text-[9.5px] text-white/40 pt-0.5">
+                              {formatTimeAgo(record.timestamp)}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

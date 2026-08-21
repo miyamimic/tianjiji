@@ -661,4 +661,205 @@ ${globalCustomPrompt.trim()}`);
   return sections.join('\n\n');
 }
 
+// -------------------------------------------------------------
+// 风铃·五子棋系统矫正补充协议 - LLM 决策层函数
+// -------------------------------------------------------------
+
+import type { CandidateMove, Cell } from './gomokuProtocolEngine';
+import { sanitizeLlmDecision } from './gomokuProtocolEngine';
+
+export interface GomokuMoveContext {
+  character: Character;
+  currentEmotionSnapshot: EmotionVector;
+  aiColor: 'B' | 'W';
+  stepNumber: number;
+  recentMoves: Array<{ step: number; r: number; c: number; color: 'B' | 'W' }>;
+  top5Candidates: CandidateMove[];
+  isPlayerSandbagging: boolean;
+  abandonedBestPoints: Array<{ coord: [number, number]; reason: string }>;
+  inGameChats: Array<{ sender: 'user' | 'character' | 'system'; text: string }>;
+}
+
+export async function generateGomokuMoveDecision(
+  config: LlmConfig,
+  ctx: GomokuMoveContext,
+  board: Cell[][]
+): Promise<{
+  coord: [number, number];
+  innerThought: string;
+  spokenDialogue: string;
+  stepEmotionDelta: Partial<EmotionVector>;
+  wasFallback: boolean;
+  surrender: boolean;
+}> {
+  const {
+    character,
+    currentEmotionSnapshot,
+    aiColor,
+    stepNumber,
+    recentMoves,
+    top5Candidates,
+    isPlayerSandbagging,
+    abandonedBestPoints,
+    inGameChats,
+  } = ctx;
+
+  const colorLabel = aiColor === 'B' ? '黑棋 (先行)' : '白棋 (后手)';
+  const emotionStr = Object.entries(currentEmotionSnapshot)
+    .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
+    .join(', ');
+
+  const candidatePoolList = top5Candidates
+    .map((c, i) => `${i + 1}. 坐标: [${c.coord[0]}, ${c.coord[1]}] | 战术评估: ${c.reason} (权重分: ${c.score})`)
+    .join('\n');
+
+  const recentMovesList = recentMoves.slice(-4).map((m) => 
+    `第 ${m.step} 手: ${m.color === aiColor ? character.name : '主控'} 落于 [${m.r}, ${m.c}]`
+  ).join('\n') || '无';
+
+  const chatsList = inGameChats.slice(-4).map((c) => 
+    `${c.sender === 'user' ? '主控' : character.name}: ${c.text}`
+  ).join('\n') || '无';
+
+  const sandbaggingFact = isPlayerSandbagging
+    ? `【⚠️ 客观事实标记：主控有放水/让子迹象】\n检测到主控在上一手放弃了极佳的胜势/防守点位（${abandonedBestPoints.map(p => `[${p.coord[0]}, ${p.coord[1]}] ${p.reason}`).join('、')}）。请结合你的人设性格（是骄傲戳穿、嗔怪、还是装作不知道乘胜追击），在内心活动和台词中体现。`
+    : '【客观事实标记：正常对弈对抗】双方走子均在合理推演范围内。';
+
+  const prompt = `【风铃·五子棋 LLM 决策层指令】
+你正在以「${character.name}」的身份与主控进行实盘五子棋对弈。你执${colorLabel}，当前为全局第 ${stepNumber} 手。
+
+【角色人设约束】
+- 核心特质: ${character.core.values.join('、')}
+- 语言风格: ${character.core.speech_filter}
+- 直觉本能: ${character.core.instinct_base}
+- 当前基线情绪快照: ${emotionStr}
+
+【当前局势与客观事实】
+${sandbaggingFact}
+近期走子:
+${recentMovesList}
+棋局边聊记录:
+${chatsList}
+
+【机械层裁定的 Top-5 候选落子池（你必须从中选择一手）】
+${candidatePoolList}
+
+【输出规范】
+请必须且仅输出单个合法 JSON 对象，严格包含以下字段：
+\`\`\`json
+{
+  "selected_move": [行坐标, 列坐标],
+  "inner_thought": "脑海中的心理活动（如：*他刚刚那一手分明是故意让我...真当我看出来？*）",
+  "spoken_dialogue": "（动作细节）\"对弈台词\"",
+  "step_emotion_delta": {
+    "warmth": 0.05,
+    "anger": 0.0
+  },
+  "surrender": false
+}
+\`\`\`
+注意与行为准则：
+1. \`selected_move\` 必须严格选取上方 Top-5 候选池中的其中一个坐标 [r, c]。
+2. 关于投降认负（\`surrender\`）的严格准则（**默认必须为 false**）：
+   - **原则上不要轻易认输**：即使局面落后或即将失利，也请正常落子防守，把达成五子连珠的终局一击留给主控，让主控亲手连成五子享受酣畅淋漓的胜利爽感！
+   - **投降的唯一目的在于“让主控高兴、提供情绪价值”，绝不可扫兴**：
+     - 开局阶段或手数较少（未满12手）时绝对严禁认输，避免过早扫兴。
+     - 只有在主控在聊天中流露出明显的挫败、生气、烦躁或吃力（如“太难了”、“下不过你”、“你欺负我”等）时，角色为了宠溺哄主控开心或给主控台阶，才可在中后期主动投子认负，并附带体贴温暖、宠溺或打趣的认负台词与心理独白。
+     - 除上述特定哄人情境之外，一律保持 \`surrender: false\`，正常落子防守。
+3. \`inner_thought\` 为脑内真实心理独白，使用 *星号* 语气。
+4. \`spoken_dialogue\` 为角色说话与对弈肢体动作，台词用引号。
+5. \`step_emotion_delta\` 仅记录本手产生的细微情绪增减（数值在 -0.2 ~ +0.2 之间），此增减仅计入局部结算，严禁直接篡改主世界情绪。`;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，请以纯净 JSON 格式输出五子棋落子决策与内心活动。` },
+      { role: 'user', content: prompt }
+    ]);
+
+    // Parse JSON
+    let parsed: any = null;
+    try {
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) {
+        parsed = JSON.parse(match[0]);
+      }
+    } catch {
+      // ignore
+    }
+
+    return sanitizeLlmDecision(parsed, top5Candidates, board);
+  } catch (err) {
+    console.warn('Gomoku LLM decision call failed, using sanitized fallback:', err);
+    return sanitizeLlmDecision(null, top5Candidates, board);
+  }
+}
+
+export async function evaluateCharacterGameInvite(
+  config: LlmConfig,
+  character: Character,
+  currentEmotionSnapshot: EmotionVector,
+  recentConversation: string
+): Promise<{
+  should_invite: boolean;
+  invite_tone: '温柔' | '挑衅' | '撒娇' | '赌气';
+  invite_reason: string;
+  invite_text: string;
+}> {
+  const emotionStr = Object.entries(currentEmotionSnapshot)
+    .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
+    .join(', ');
+
+  const prompt = `【风铃·角色自主发起对弈邀约评估】
+你正在以「${character.name}」的身份，评估当前与主控的互动氛围是否适合主动邀请TA来一局五子棋。
+
+【角色特质】
+- 人设与口癖: ${character.core.speech_filter}
+- 当前情绪状态: ${emotionStr}
+
+【近期对话上下文】
+${recentConversation}
+
+【评估指令】
+结合当前情绪与情境，判断是否要主动提出下棋邀约。请仅输出标准 JSON：
+\`\`\`json
+{
+  "should_invite": true,
+  "invite_tone": "撒娇",
+  "invite_reason": "主控近期话题轻松且彼此温情度高，适合休闲互动",
+  "invite_text": "（动作）\"邀约台词\""
+}
+\`\`\`
+其中 \`invite_tone\` 必须从 ["温柔", "挑衅", "撒娇", "赌气"] 中选择。如果决定不邀请，\`should_invite\` 置为 false。`;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，请以纯净 JSON 格式评估五子棋邀约意愿。` },
+      { role: 'user', content: prompt }
+    ]);
+
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      const tones = ['温柔', '挑衅', '撒娇', '赌气'] as const;
+      const tone = tones.includes(parsed.invite_tone) ? parsed.invite_tone : '温柔';
+      return {
+        should_invite: Boolean(parsed.should_invite),
+        invite_tone: tone,
+        invite_reason: String(parsed.invite_reason || ''),
+        invite_text: String(parsed.invite_text || '“可有兴致同我下一盘五子棋？”'),
+      };
+    }
+  } catch {
+    // ignore
+  }
+
+  return {
+    should_invite: false,
+    invite_tone: '温柔',
+    invite_reason: '',
+    invite_text: '“可有兴致同我下一盘五子棋？”',
+  };
+}
+
+
 
