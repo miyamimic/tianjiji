@@ -32,6 +32,8 @@ import {
   parseStructuredLlmResponse,
   parseStructuredLlmResponses, 
   isLlmConfigured, 
+  loadLlmConfig,
+  cleanRawLlmOutput,
   type LlmConfig 
 } from '../lib/llm';
 import { parseSegments } from '../engine/postprocess';
@@ -47,6 +49,16 @@ import {
   findRelevantDynamicMemories,
   clearDynamicMemories,
 } from '../lib/customStore';
+import { 
+  setPendingGameInvite, 
+  canCharacterSendInvite,
+  recordCharacterInviteSent,
+  isGameDebugShortcutEnabled,
+  recordGameMilestone,
+  saveMatchRecord,
+  type GameInvitation,
+  type GomokuMatchRecord 
+} from '../lib/gameStore';
 
 
 const STORAGE_KEY = '__rp_engine_state';
@@ -645,6 +657,37 @@ export function useEngine() {
           emotionHistoryRef.current.shift();
         }
 
+        // 5. Game Invitation Trigger with Frequency Cooldown and Debug Switch
+        const isGameKeyword = /下棋|五子棋|来一局|来一盘|玩游戏|玩局游戏|下盘棋|陪我下棋|对弈|下一局/.test(triggerInput);
+        const gameInviteItem = structuredList.find((st) => st.game_invite);
+        
+        // Character Active Invite: must obey turn frequency limit
+        if (gameInviteItem?.game_invite && canCharacterSendInvite(character.character_id, s.messages.length)) {
+          const invite: GameInvitation = {
+            id: `invite_${Date.now()}`,
+            gameType: 'gomoku',
+            characterId: character.character_id,
+            characterName: character.name,
+            inviteText: gameInviteItem.game_invite.text || `“棋盘已经为你备好了，要不要与我下一盘五子棋？”`,
+            timestamp: Date.now(),
+            status: 'pending',
+          };
+          recordCharacterInviteSent(character.character_id, s.messages.length);
+          setPendingGameInvite(invite);
+        } else if (isGameKeyword && isGameDebugShortcutEnabled()) {
+          // Local debug shortcut mode
+          const invite: GameInvitation = {
+            id: `invite_${Date.now()}`,
+            gameType: 'gomoku',
+            characterId: character.character_id,
+            characterName: character.name,
+            inviteText: `“棋盘已经备妥，今日便与你手谈一局五子棋。”`,
+            timestamp: Date.now(),
+            status: 'pending',
+          };
+          setPendingGameInvite(invite);
+        }
+
         lastFallbackRef.current = false;
 
         s.messages = [...s.messages, ...newReplies];
@@ -679,6 +722,21 @@ export function useEngine() {
       lastFallbackRef.current = true;
     }
 
+    // Trigger game invite in mock / fallback ONLY if debug shortcut enabled
+    const isGameKeywordFallback = /下棋|五子棋|来一局|来一盘|玩游戏|玩局游戏|下盘棋|陪我下棋|对弈|下一局/.test(triggerInput);
+    if (isGameKeywordFallback && isGameDebugShortcutEnabled()) {
+      const invite: GameInvitation = {
+        id: `invite_${Date.now()}`,
+        gameType: 'gomoku',
+        characterId: character.character_id,
+        characterName: character.name,
+        inviteText: `“既然你提起了，我正好有兴致同你手谈一局五子棋。”`,
+        timestamp: Date.now(),
+        status: 'pending',
+      };
+      setPendingGameInvite(invite);
+    }
+
     s.messages = [...s.messages, ...newReplies];
     persist(s);
     rerender();
@@ -690,6 +748,192 @@ export function useEngine() {
       characterName: character.name,
     };
   }, [persist, rerender]);
+
+  // -------------------------------------------------------------
+  // Handle User Rejection of Game Invitation (Pipeline Integration)
+  // -------------------------------------------------------------
+  const handleUserRejectGameInvite = useCallback((characterId: string, characterName: string) => {
+    const s = stateRef.current;
+    const character = getCharacterById(characterId) ?? MOCK_CHARACTERS[0];
+
+    // Shift emotion based on instinct
+    if (character.core.instinct_base === 'attack') {
+      s.emotion = addEmotion(s.emotion, { anger: 0.1, desire: 0.1 });
+    } else if (character.core.instinct_base === 'fawn') {
+      s.emotion = addEmotion(s.emotion, { sadness: 0.15, warmth: 0.05 });
+    } else {
+      s.emotion = addEmotion(s.emotion, { sadness: 0.08, warmth: -0.05 });
+    }
+
+    // Add background thought
+    s.backgroundThreads.unshift({
+      content: `主控刚才婉拒了对弈邀约，心中掠过一丝遗憾与微澜`,
+      remaining_turns: 3,
+    });
+    if (s.backgroundThreads.length > 5) s.backgroundThreads.pop();
+
+    // Log intimacy milestone
+    recordGameMilestone(
+      characterId,
+      '婉拒对弈',
+      `主控婉拒了与${characterName}的五子棋手谈邀约。`,
+      'game_refuse'
+    );
+
+    persist(s);
+    rerender();
+  }, [persist, rerender]);
+
+  // -------------------------------------------------------------
+  // Handle Game Finished Conclusion (Pipeline Integration)
+  // -------------------------------------------------------------
+  const handleGameFinished = useCallback(
+    async (summary: string, rawRecord: GomokuMatchRecord) => {
+      const s = stateRef.current;
+      const character = getCharacterById(rawRecord.characterId) ?? MOCK_CHARACTERS[0];
+
+      // 1. Emotion shift based on game outcome
+      if (rawRecord.winner === 'player') {
+        s.emotion = addEmotion(s.emotion, { joy: 0.2, warmth: 0.15, desire: 0.1 });
+      } else if (rawRecord.winner === 'character') {
+        s.emotion = addEmotion(s.emotion, { joy: 0.25, warmth: 0.1, anger: -0.1 });
+      } else if (rawRecord.winner === 'draw') {
+        s.emotion = addEmotion(s.emotion, { warmth: 0.2, joy: 0.1 });
+      } else {
+        s.emotion = addEmotion(s.emotion, { warmth: 0.1, desire: 0.05 });
+      }
+
+      // 2. Add background thought thread
+      s.backgroundThreads.unshift({
+        content: `刚刚手谈一局五子棋：${rawRecord.winner === 'player' ? '主控技高一筹破局' : '局势激烈试探'}，棋意犹存`,
+        remaining_turns: 4,
+      });
+      if (s.backgroundThreads.length > 5) s.backgroundThreads.pop();
+
+      // 3. Save intimacy milestone & dynamic memory
+      const milestoneType =
+        rawRecord.winner === 'player'
+          ? 'game_win'
+          : rawRecord.winner === 'character'
+          ? 'game_loss'
+          : 'game_draw';
+
+      recordGameMilestone(
+        rawRecord.characterId,
+        '五子棋手谈',
+        summary,
+        milestoneType
+      );
+
+      const dynamicMemory: DynamicMemory = {
+        id: `dyn_game_${Date.now()}`,
+        character_id: rawRecord.characterId,
+        topic_keywords: ['五子棋', '对弈', '下棋'],
+        emotion_type: 'warmth',
+        intensity: 3,
+        user_trigger_summary: `与${character.name}对弈了一局五子棋`,
+        character_reaction_summary: summary,
+        created_at: Date.now(),
+        recall_count: 0,
+      };
+      saveDynamicMemory(rawRecord.characterId, dynamicMemory);
+
+      // 4. Save raw match record to IndexedDB (isolated from LLM history)
+      await saveMatchRecord(rawRecord);
+
+      persist(s);
+      rerender();
+    },
+    [persist, rerender]
+  );
+
+  // -------------------------------------------------------------
+  // In-Game Live Dialogue / Chat (Proxied through LLM & Engine)
+  // -------------------------------------------------------------
+  const sendInGameChat = useCallback(
+    async (
+      userInput: string,
+      charId: string,
+      matchContext: { moveCount: number; playerColor: 'B' | 'W'; currentTurn: 'B' | 'W' },
+      llmConfig?: LlmConfig,
+      chatHistory?: Array<{ sender: 'user' | 'character'; text: string }>
+    ): Promise<{ reply: string; tactic: 'aggressive' | 'defensive' | 'gentle' | 'balanced' }> => {
+      const character = getCharacterById(charId) ?? MOCK_CHARACTERS[0];
+      const activeConfig = (llmConfig && isLlmConfigured(llmConfig)) ? llmConfig : loadLlmConfig();
+
+      if (isLlmConfigured(activeConfig)) {
+        try {
+          const s = stateRef.current;
+          const emotionSummary = Object.entries(s.emotion)
+            .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
+            .join(', ');
+
+          const sysPrompt = `你正在与主控进行【五子棋对局】手谈。
+你的角色身份：${character.name}
+核心特质：${character.core.values.join('、')}
+语言风格：${character.core.speech_filter}
+当前情绪状态：${emotionSummary}
+对局当前状态：已下 ${matchContext.moveCount} 手，主控执${matchContext.playerColor === 'B' ? '黑' : '白'}，当前轮到${matchContext.currentTurn === 'B' ? '黑方' : '白方'}落子。
+
+【回复规范】：
+1. 必须完全代入${character.name}的性格，以第一人称对主控在棋局上的话语做出精妙生动的回应。
+2. 包含细腻传神的（动作描写/神态）与"台词"，突出手谈博弈时的心理与对主控的互动。
+3. 请在回复最后一行输出且仅输出下棋决策策略标签之一：
+   - [TACTIC: aggressive] （激进绞杀、猛烈进攻、被挑衅激发好胜心）
+   - [TACTIC: defensive] （防守严密、谨慎堵路、步步为营）
+   - [TACTIC: gentle] （温柔宠溺、故意放水、留有余地）
+   - [TACTIC: balanced] （攻守兼备、沉稳从容）
+4. 严禁输出任何JSON或无关注释。`;
+
+          const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [
+            { role: 'system', content: sysPrompt },
+          ];
+
+          if (chatHistory && chatHistory.length > 0) {
+            const recent = chatHistory.slice(-6);
+            recent.forEach((item) => {
+              messages.push({
+                role: item.sender === 'user' ? 'user' : 'assistant',
+                content: item.text,
+              });
+            });
+          }
+
+          messages.push({ role: 'user', content: `（在棋盘前对你说）：${userInput}` });
+
+          const rawReply = await callLlm(activeConfig, messages);
+          const cleanText = cleanRawLlmOutput(rawReply);
+
+          let tactic: 'aggressive' | 'defensive' | 'gentle' | 'balanced' = 'balanced';
+          const tacticMatch = cleanText.match(/\[TACTIC:\s*(aggressive|defensive|gentle|balanced)\]/i);
+          if (tacticMatch) {
+            tactic = tacticMatch[1].toLowerCase() as any;
+          }
+
+          const reply = cleanText.replace(/\[TACTIC:\s*(aggressive|defensive|gentle|balanced)\]/gi, '').trim();
+
+          return {
+            reply: reply || `（指尖转动着棋子，轻笑一声）"专心看棋，别想借着说话乱我心神。"`,
+            tactic,
+          };
+        } catch (err) {
+          console.warn('In-game LLM chat failed, using in-character fallback:', err);
+        }
+      }
+
+      const defaultResponses = [
+        `（修长指尖轻敲棋子，垂眸审视）"怎么，想借说话分散我的注意？专心下你的棋。"`,
+        `（微微偏头看着你，唇角含笑）"落子无悔，我可不会轻易让你。"`,
+        `（指尖拈起一枚棋子在指间把玩）"步步紧逼啊……有意思，我看你接下来怎么走。"`,
+        `（从容落子于位）"局势才刚铺开，胜负犹未可知呢。"`,
+      ];
+      return {
+        reply: defaultResponses[Math.floor(Math.random() * defaultResponses.length)],
+        tactic: 'balanced',
+      };
+    },
+    []
+  );
 
   const controller = {
     ready: readyRef.current,
@@ -732,6 +976,9 @@ export function useEngine() {
     editMessage,
     addUserMessageOnly,
     triggerCharacterReply,
+    handleUserRejectGameInvite,
+    handleGameFinished,
+    sendInGameChat,
     reload: () => {
       const freshChar = getCharacterById(stateRef.current.characterId);
       if (freshChar) {

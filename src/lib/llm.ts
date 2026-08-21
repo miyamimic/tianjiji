@@ -208,6 +208,10 @@ export type StructuredLlmResponse = {
   emotion_intensity?: number; // 1-5
   emotion_delta?: Partial<EmotionVector>;
   triggered_memory?: string | null;
+  game_invite?: {
+    type: 'gomoku';
+    text: string;
+  } | null;
   isStructured: boolean;
 };
 
@@ -326,6 +330,15 @@ function parseSingleStructuredItem(parsed: any): StructuredLlmResponse | null {
     }
   }
 
+  // Parse game invite if present
+  let game_invite: { type: 'gomoku'; text: string } | null = null;
+  const rawInvite = parsed.game_invite || parsed.gameInvite || parsed.游戏邀请 || parsed.对弈邀请;
+  if (typeof rawInvite === 'string' && rawInvite.trim().length > 0) {
+    game_invite = { type: 'gomoku', text: rawInvite.trim() };
+  } else if (rawInvite && typeof rawInvite === 'object' && typeof rawInvite.text === 'string') {
+    game_invite = { type: 'gomoku', text: rawInvite.text.trim() };
+  }
+
   return {
     reply: reply.trim(),
     action,
@@ -333,6 +346,7 @@ function parseSingleStructuredItem(parsed: any): StructuredLlmResponse | null {
     emotion_intensity: emotion_intensity ?? 3,
     emotion_delta,
     triggered_memory,
+    game_invite,
     isStructured: true,
   };
 }

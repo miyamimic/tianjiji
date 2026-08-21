@@ -9,10 +9,17 @@ import TypingIndicator from '@/components/TypingIndicator';
 import SettingsModal from '@/components/SettingsModal';
 import NumbedNoticeModal from '@/components/NumbedNoticeModal';
 import LeafLoader from '@/components/LeafLoader';
-import WindChime from '@/components/WindChime';
+import WindChime, { type AppId } from '@/components/WindChime';
+import GameInviteModal from '@/components/GameInviteModal';
 import { useEngine } from '@/hooks/useEngine';
 import { loadLlmConfig, isLlmConfigured, type LlmConfig } from '@/lib/llm';
 import { loadCustomCss, applyCustomCss, loadCustomChatBg } from '@/lib/customStore';
+import { 
+  subscribeGameInvite, 
+  acceptGameInvite, 
+  rejectGameInvite, 
+  type GameInvitation 
+} from '@/lib/gameStore';
 import { BG_OBJECT_POS, BG_SIZE, isPortraitViewport } from '@/lib/stageFit';
 
 export default function App() {
@@ -31,9 +38,22 @@ export default function App() {
     numbedKeys: string[];
     isSensitized: boolean;
   } | null>(null);
+  const [activeInviteModal, setActiveInviteModal] = useState<GameInvitation | null>(null);
+  const [forceOpenApp, setForceOpenApp] = useState<AppId | null>(null);
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(loadLlmConfig());
   const scrollRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const unsub = subscribeGameInvite((invite) => {
+      if (invite && invite.status === 'pending') {
+        setActiveInviteModal(invite);
+      } else {
+        setActiveInviteModal(null);
+      }
+    });
+    return unsub;
+  }, []);
 
   useEffect(() => {
     const css = loadCustomCss();
@@ -199,8 +219,19 @@ export default function App() {
           currentBg={customChatBg}
           onBgChange={(newBg) => setCustomChatBg(newBg)}
           currentCharacterId={character.character_id}
+          characterName={character.name}
           onEngineReload={() => engine.reload()}
           onConfigChange={setLlmConfig}
+          forceOpenApp={forceOpenApp}
+          onClearForceOpenApp={() => setForceOpenApp(null)}
+          onGameFinished={(summary, rawRecord) => engine.handleGameFinished(summary, rawRecord)}
+          onInGameChat={(userInput, matchContext, chatHistory) =>
+            engine.sendInGameChat(userInput, character.character_id, matchContext, llmConfig, chatHistory)
+          }
+          onRejectGameInvite={(invite) => {
+            rejectGameInvite(invite.id);
+            engine.handleUserRejectGameInvite(invite.characterId, invite.characterName);
+          }}
         />
 
         {/* CHAT 场景才显示的消息区 + 输入框
@@ -307,6 +338,24 @@ export default function App() {
         characterName={numbedModalInfo?.characterName || character.name}
         numbedKeys={numbedModalInfo?.numbedKeys || []}
         isSensitized={numbedModalInfo?.isSensitized}
+      />
+
+      {/* Character Game Invitation Pop-up Modal */}
+      <GameInviteModal
+        invite={activeInviteModal}
+        onStart={(invite) => {
+          acceptGameInvite(invite.id);
+          setActiveInviteModal(null);
+          setForceOpenApp('game');
+        }}
+        onReject={(invite) => {
+          rejectGameInvite(invite.id);
+          engine.handleUserRejectGameInvite(invite.characterId, invite.characterName);
+          setActiveInviteModal(null);
+        }}
+        onLater={(_invite) => {
+          setActiveInviteModal(null);
+        }}
       />
     </div>
   );

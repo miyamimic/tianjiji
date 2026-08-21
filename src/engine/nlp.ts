@@ -30,6 +30,7 @@ type MatchContext = {
   hasProvocation: boolean;
   hasRejection: boolean;
   hasComplaining: boolean;
+  hasGame: boolean;
 };
 
 // ── Signal detectors ──
@@ -46,6 +47,7 @@ const RATIONAL_WORDS = ['为什么', '原因', '分析', '逻辑', '道理', '�
 const PROVOCATION_WORDS = ['你凭什么', '你管得着', '你算什么', '关你屁事', '关你什么事', '你有什么资格', '你算老几', '少管我', '你以为你是谁', '你算个屁', '你算什么东西', '你配吗'];
 const REJECTION_WORDS = ['不行', '不要', '不能', '做不到', '走开', '别这样', '停下来', '放开', '拒绝', '不愿意', '不可以', '别碰', '停下'];
 const COMPLAINING_WORDS = ['加班', '老板', '作业', '考试', '累死', '烦死', '气死', '坑', '无语', '离谱', '绝了', '服了', '受不了', '崩溃了', '好烦', '好累', '好气', '吐槽', '抱怨'];
+const GAME_WORDS = ['下棋', '五子棋', '来一局', '来一盘', '玩游戏', '玩局游戏', '下盘棋', '陪我下棋', '下围棋', '博弈', '棋局', '对弈', '下一局'];
 
 function containsAny(text: string, words: string[]): boolean {
   return words.some((w) => text.includes(w));
@@ -71,6 +73,7 @@ function buildContext(text: string): MatchContext {
     hasProvocation: containsAny(text, PROVOCATION_WORDS),
     hasRejection: containsAny(text, REJECTION_WORDS),
     hasComplaining: containsAny(text, COMPLAINING_WORDS),
+    hasGame: containsAny(text, GAME_WORDS),
   };
 }
 
@@ -179,6 +182,7 @@ function classifyIntent(text: string, ctx: MatchContext): { intent: string; labe
   if (ctx.hasLeaving) return { intent: 'leaving', label: '要离开/结束' };
   if (ctx.hasProvocation) return { intent: 'provoke', label: '挑衅角色' };
   if (ctx.hasApology) return { intent: 'apologize', label: '道歉认错' };
+  if (ctx.hasGame) return { intent: 'game', label: '对弈邀约' };
   if (ctx.hasAffection) return { intent: 'affection', label: '示爱/亲昵' };
   if (ctx.hasFlirtation) return { intent: 'flirt', label: '挑逗/暧昧' };
   if (ctx.hasWeakness) return { intent: 'hurt', label: '示弱/求助' };
@@ -191,7 +195,7 @@ function classifyIntent(text: string, ctx: MatchContext): { intent: string; labe
 
 function classifySentiment(ctx: MatchContext): string {
   if (ctx.hasSelfHarm || ctx.hasLeaving || ctx.hasColdness) return 'negative';
-  if (ctx.hasAffection || ctx.hasFlirtation || ctx.hasApology) return 'positive';
+  if (ctx.hasAffection || ctx.hasFlirtation || ctx.hasApology || ctx.hasGame) return 'positive';
   if (ctx.hasProvocation || ctx.hasRejection) return 'negative';
   if (ctx.hasProfanity || ctx.hasComplaining) return 'negative';
   return 'neutral';
@@ -204,7 +208,7 @@ function extractEntities(text: string): string[] {
     ...PROFANITY_WORDS, ...FLIRTATION_WORDS, ...SELFHARM_WORDS,
     ...LEAVING_WORDS, ...APOLOGY_WORDS, ...AFFECTION_WORDS,
     ...WEAKNESS_WORDS, ...COLDNESS_WORDS, ...PROVOCATION_WORDS,
-    ...REJECTION_WORDS, ...COMPLAINING_WORDS,
+    ...REJECTION_WORDS, ...COMPLAINING_WORDS, ...GAME_WORDS,
   ];
   const found: string[] = [];
   const seen = new Set<string>();

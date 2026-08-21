@@ -84,9 +84,14 @@ function generateSpeech(
       `破防？${catchphrase}，你倒是说说谁让你破防了。`,
       `我不理解你天天嘴里都是什么词。`,
     ],
+    game: [
+      `想和我下五子棋？${catchphrase}，棋盘早就为你备好了。`,
+      `手谈一局？${catchphrase}，落子可要多看三步，输了别向我求饶。`,
+      `棋逢对手才有意思。${catchphrase}，过来，我让你先手。`,
+    ],
   };
 
-  if (intent.intent in intentResponses && Math.random() < 0.6) {
+  if (intent.intent in intentResponses && (intent.intent === 'game' || Math.random() < 0.6)) {
     return pick(intentResponses[intent.intent]);
   }
 
@@ -166,6 +171,13 @@ function generateThought(
     ],
   };
 
+  if (intent.intent === 'game') {
+    return pick([
+      '想和我下棋？等会儿输了可别向我求饶。',
+      '好久没人陪我手谈了，倒要看看你能撑过几步。',
+      '既然你主动提起，今天就陪你好好玩玩。',
+    ]);
+  }
   if (intent.intent === 'refuse') {
     return pick([
       '拒绝我？你想都别想。',

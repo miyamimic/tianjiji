@@ -139,3 +139,20 @@ canvas {
 .typing-dot {
   animation: typing-pulse 1.4s infinite ease-in-out;
 }
+
+/* Wind chime two-round swing animation */
+@keyframes chime-swing-anim {
+  0% { transform: rotate(0deg); }
+  15% { transform: rotate(18deg); }
+  35% { transform: rotate(-18deg); }
+  55% { transform: rotate(12deg); }
+  75% { transform: rotate(-10deg); }
+  90% { transform: rotate(4deg); }
+  100% { transform: rotate(0deg); }
+}
+
+.animate-chime-swing {
+  animation: chime-swing-anim 1.4s ease-in-out;
+  transform-origin: top center;
+}
+
