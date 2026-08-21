@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { MessageSegment, ChatMessage } from '../data/types';
-import { History, Clock, Edit2, CornerDownLeft, Plus, Check, X } from 'lucide-react';
+import { History, Clock, Edit2, CornerDownLeft, Plus, AlertCircle, RefreshCw } from 'lucide-react';
 import { loadUserAvatar, loadCharAvatar } from '../lib/customStore';
 
 interface Props {
@@ -28,22 +28,30 @@ function formatTime(ts: number) {
 }
 
 function SpeechSegment({ text }: { text: string }) {
-  return <p className="whitespace-pre-wrap leading-relaxed text-white/95 text-[14px]">{text}</p>;
+  // Render spoken lines cleanly
+  return <p className="whitespace-pre-wrap leading-relaxed text-white/95 text-[14px] font-normal">{text}</p>;
 }
 
 function ActionSegment({ text }: { text: string }) {
+  // Ensure actions are framed in action narration brackets
+  const clean = text.replace(/^[（(]|[\n）)]$/g, '').trim();
   return (
-    <p className="whitespace-pre-wrap italic leading-relaxed text-[hsl(28_85%_62%)] text-[14px] font-medium my-0.5">
-      {text}
+    <p className="whitespace-pre-wrap italic leading-relaxed text-[hsl(28_88%_64%)] text-[13.5px] font-medium my-0.5 select-text">
+      （{clean}）
     </p>
   );
 }
 
 function ThoughtSegment({ text }: { text: string }) {
+  // Ensure thoughts are framed in psychological inner monologue asterisks
+  const clean = text.replace(/^\*+|\*+$/g, '').replace(/^[（(]|[）)]$/g, '').trim();
   return (
-    <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-white/45 font-light pl-3 border-l border-white/10 my-1">
-      *（{text}）*
-    </p>
+    <div className="my-1.5 pl-2.5 pr-2 py-0.5 border-l-2 border-indigo-400/40 bg-indigo-500/10 rounded-r text-[13px] text-indigo-200/80 italic select-text flex items-baseline gap-1">
+      <span className="text-[11px] not-italic text-indigo-300/60 shrink-0 select-none">💭 [心声]</span>
+      <p className="whitespace-pre-wrap leading-relaxed font-light">
+        *{clean}*
+      </p>
+    </div>
   );
 }
 
@@ -76,6 +84,7 @@ export default function ChatBubble({
   const [editVal, setEditVal] = useState(message.content);
   const [isAddingUserMsg, setIsAddingUserMsg] = useState(false);
   const [userMsgVal, setUserMsgVal] = useState('');
+  const [showErrorDetail, setShowErrorDetail] = useState(false);
 
   const charAvatar = loadCharAvatar(characterId);
   const userAvatar = loadUserAvatar();
@@ -157,6 +166,40 @@ export default function ChatBubble({
               </div>
             )}
           </div>
+
+          {/* If LLM API Error occurred, show transparent banner with detail toggle and retry */}
+          {message.llmError && (
+            <div className="mt-1 p-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-200/90 text-xs space-y-1">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <AlertCircle className="size-3.5 text-amber-400 shrink-0" />
+                  <span className="font-medium text-[11px]">模型请求未成功，已使用本地引擎回复</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setShowErrorDetail(!showErrorDetail)}
+                    className="text-[10px] text-amber-300/80 hover:text-amber-200 underline cursor-pointer"
+                  >
+                    {showErrorDetail ? '收起原因' : '查看报错原因'}
+                  </button>
+                  {onTriggerReply && (
+                    <button
+                      onClick={() => onTriggerReply(message.id)}
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-[10px] text-amber-200 transition cursor-pointer"
+                    >
+                      <RefreshCw className="size-2.5" />
+                      <span>重试</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+              {showErrorDetail && (
+                <div className="p-1.5 rounded bg-black/40 text-[10px] font-mono text-amber-300/80 break-all select-text border border-amber-500/10">
+                  {message.llmError}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Avatar for user */}
@@ -171,7 +214,7 @@ export default function ChatBubble({
         )}
       </div>
 
-      {/* Meta Bar & Actions: ALWAYS VISIBLE beneath the bubble */}
+      {/* Meta Bar & Actions */}
       {!isWarning && (
         <div className={`flex flex-col w-full ${isUser ? 'items-end pr-10' : 'items-start pl-10'} gap-1.5 mt-0.5`}>
           {/* Action Row */}
@@ -190,7 +233,7 @@ export default function ChatBubble({
                 title="修改当前气泡的对话文本"
               >
                 <Edit2 className="size-2.5 text-blue-400" />
-                <span>编辑</span>
+                <span>编辑气泡</span>
               </button>
             )}
 
@@ -202,7 +245,7 @@ export default function ChatBubble({
                 title="回溯整个引擎状态到发送该气泡时的历史快照"
               >
                 <History className="size-2.5 text-white/40 group-hover/btn:text-[hsl(28_85%_62%)] group-hover/btn:rotate-[-45deg] transition-all duration-200" />
-                <span>回溯</span>
+                <span>回溯至此</span>
                 {message.snapshot ? (
                   <span className="text-[8px] text-white/30 pl-1 border-l border-white/10 ml-0.5">
                     {Object.entries(message.snapshot.emotion)
@@ -228,7 +271,7 @@ export default function ChatBubble({
                 title="在此气泡后直接插入我的下一句话（不触发AI自动回复，可形成连续发言）"
               >
                 <Plus className="size-2.5 text-emerald-400" />
-                <span>追加</span>
+                <span>追加我发言</span>
               </button>
             )}
 
@@ -240,7 +283,7 @@ export default function ChatBubble({
                 title="强制让角色在此处重新进行一轮推演与回复（即使该对话已被回溯或被编辑）"
               >
                 <CornerDownLeft className="size-2.5" />
-                <span>回复此句</span>
+                <span>角色回复此句</span>
               </button>
             )}
           </div>

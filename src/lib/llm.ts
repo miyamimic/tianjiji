@@ -180,8 +180,8 @@ export async function callLlm(
       model: config.model,
       messages,
       temperature: 0.82,
-      // Generous max_tokens (25000) ensures rich 100+ character RP responses and thoughts are never cut off
-      max_tokens: 25000,
+      // Generous max_tokens (2048) ensures rich 100+ character RP responses and thoughts are never cut off
+      max_tokens: 2048,
     }),
   });
 
@@ -339,19 +339,23 @@ function parseSingleStructuredItem(parsed: any): StructuredLlmResponse | null {
 
 /**
  * Intelligent unstructured narrative parser:
- * Extracts actions in brackets and dialogue if model outputs plain narrative text without JSON
+ * Extracts actions in brackets, thoughts in asterisks, and dialogue if model outputs plain narrative text without JSON
  */
 function extractFromUnstructuredNarrative(raw: string): StructuredLlmResponse {
   const text = cleanRawLlmOutput(raw);
   
-  // Extract actions inside （...） or (...) or *...*
-  const actionMatches = text.match(/(?:（|\(|\*)([\s\S]*?)(?:）|\)|\*)/g);
-  const actions = actionMatches ? actionMatches.map((m) => m.replace(/^[（(*]|[\n）)*]$/g, '').trim()).filter(Boolean) : [];
+  // Extract actions inside （...） or (...) or 【...】
+  const actionMatches = text.match(/(?:（|\(|【)([\s\S]*?)(?:）|\)|】)/g);
+  const actions = actionMatches ? actionMatches.map((m) => m.replace(/^[（(【]|[\n）)】]$/g, '').trim()).filter(Boolean) : [];
+
+  // Extract thoughts inside *...* or *（...）*
+  const thoughtMatches = text.match(/\*(?:（|\()?([\s\S]*?)(?:）|\))?\*/g);
+  const thoughts = thoughtMatches ? thoughtMatches.map((m) => m.replace(/^\*+|\*+$/g, '').replace(/^[（(]|[）)]$/g, '').trim()).filter(Boolean) : [];
 
   return {
     reply: text,
     action: actions.length > 0 ? actions.join('；') : undefined,
-    thought: undefined, // Keep thought clean without guessing
+    thought: thoughts.length > 0 ? thoughts.join('；') : undefined,
     emotion_intensity: 3,
     isStructured: false,
   };
@@ -577,7 +581,6 @@ export function buildSystemPrompt(
     userVisual?: string;
     backgroundThreads?: string[];
     dynamicMemoriesContext?: string;
-    relationPrompt?: string;
   }
 ): string {
   const structuredPrompt = loadStructuredJsonPrompt();
@@ -592,11 +595,13 @@ export function buildSystemPrompt(
 ${structuredPrompt}
 
 【⚠️ 关键输出与格式守则 ⚠️】
-1. 每次回复【只输出单个独立的 JSON 对象】，严禁输出 JSON 数组，严禁在前后添加任何客套废话。
-2. 【reply 正文字数必须在 100 字以上】：将肢体动作描写（全角括号）与说话台词（双引号）充分交织展开，写成一段信息量充沛、画面感极强的互动小说小文段。
-3. 【心理活动、动作与台词三者严禁混淆】：
-   - thought：纯内心潜意识，绝对禁止在此写动作和台词，不计入100字正文字数。
-   - reply：主界面交互正文，必须包含（动作细节）与"说话台词"，总字数不少于100字。`);
+1. 每次回复【优先输出单个标准的 JSON 对象】，严禁在前后添加任何客套废话。
+2. 【reply 正文字数在 100 字以上】：将肢体动作描写（全角括号）与说话台词（双引号）充分交织展开，写成一段信息量充沛、画面感极强的互动小说小文段。
+3. 【心理活动、动作描写与说话台词三者严禁混淆】：
+   - 心理活动 (thought / 脑内独白)：必须是像对话一样的完整想法/脑海里浮现出的话语（例如：*难道我让他不开心了？* 或 *要是被他发现我在紧张就完了*）。使用单星号包裹：*脑海浮现的话*。
+   - 动作与生理心理反应 (action / 客观叙述)：包含所有肢体动作、身体接触，以及“心里软了一块”、“心跳漏了一拍”、“喉结微微滚动”等客观反应叙述，必须使用全角括号（...）包裹（例如：（心里软了一块，指尖轻蹭过你的手背））。
+   - 说话台词 (dialogue)：角色真正从嘴里说出口的声音，必须使用双引号包裹 "..." 或 “...”（例如："为什么哭？过来。"）。
+   - reply 正文中可自然交织（动作细节）、"说话台词"与*心理活动*。`);
 
   // LAYER 2: Character Core & Persona Instructions
   if (extraLayers?.characterCore) {
@@ -623,24 +628,19 @@ ${visualParts.join('\n')}\n（在交互中可自然融入对彼此形象、微�
 ${extraLayers.userPersona}`);
   }
 
-  // LAYER 5: Relationship State Engine (外部关系状态与亲密边界引擎)
-  if (extraLayers?.relationPrompt) {
-    sections.push(extraLayers.relationPrompt);
-  }
-
-  // LAYER 6: Emotional Vector State & Memory Anchors
+  // LAYER 5: Emotional Vector State & Memory Anchors
   const memoryInfo = extraLayers?.backgroundThreads && extraLayers.backgroundThreads.length > 0
     ? `\n- 当前潜意识回忆碎片：${extraLayers.backgroundThreads.join('；')}`
     : '';
   const dynamicRecall = extraLayers?.dynamicMemoriesContext ? `\n\n【🌟 情绪记忆联动与深度回忆唤醒 🌟】\n${extraLayers.dynamicMemoriesContext}\n请务必在心理活动（thought）或细微动作/台词中流露出这种连续的关怀与记忆感（例如："你上次因为 XX 难过，所以这次我特别注意到了..."）！` : '';
 
-  sections.push(`【Layer 6: 角色当前情感中枢与心理状态】
+  sections.push(`【Layer 5: 角色当前情感中枢与心理状态】
 - 当前六维情绪状态：${emotionSummary}${memoryInfo}${dynamicRecall}
 请根据当前的情绪状态动态演化你的语气温差与细微反应，并在 JSON 中准确返回 emotion_intensity (1-5) 与真实的 emotion_delta。`);
 
-  // LAYER 7: Custom Global Overrides
+  // LAYER 6: Custom Global Overrides
   if (globalCustomPrompt.trim()) {
-    sections.push(`【Layer 7: 自定义全局系统提示词补充】
+    sections.push(`【Layer 6: 自定义全局系统提示词补充】
 ${globalCustomPrompt.trim()}`);
   }
 

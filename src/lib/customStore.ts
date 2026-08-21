@@ -414,37 +414,43 @@ export function saveCharVisualDesc(charId: string, desc: string): void {
 
 const CUSTOM_SYSTEM_PROMPT_KEY = '__rp_engine_custom_system_prompt';
 const STRUCTURED_JSON_SCHEMA_PROMPT_KEY = '__rp_engine_structured_json_prompt';
+const STRUCTURED_JSON_SCHEMA_PROMPT_VER_KEY = '__rp_engine_structured_json_prompt_ver';
+const CURRENT_PROMPT_VER = 'v3';
 const EMOTION_DECAY_RATE_KEY = '__rp_engine_emotion_decay_rate';
 
 export const DEFAULT_STRUCTURED_JSON_PROMPT = `【强制结构化输出规范与文段要求】
 你必须且只能返回单个标准的纯 JSON 对象（不要包裹在外层数组中，不要输出除 JSON 以外的任何前后闲聊）。
 
-【核心三要素严格区分原则（严禁混淆！）】：
-1. 【心理活动 (thought)】：
-   - 仅限角色的内在潜意识、真实情感波动、对主控言行的无声揣测。
-   - ⚠️ 绝对禁令：严禁在 thought 中描写任何外部肢体动作、身体接触或发出声音的对话台词！
-   - thought 仅用于底层心理引擎同步与侧边栏心理分析，【绝对不计入】正文100字字数要求。
-2. 【动作描写 (Action)】：
-   - 在 reply 中使用全角中文括号（...）描写肢体动作、呼吸神态、空间距离与微表情（例如：（指尖轻扣桌面，缓步逼近，居高临下地审视着你））。
-3. 【说话台词 (Dialogue)】：
-   - 在 reply 中使用双引号 "..." 包裹角色说出口的话语，严格遵循角色的语气、口癖与人设。
+【核心三要素严格区分原则（格式与性质严禁混淆！）】：
+1. 【心理活动 (thought / 脑内独白 / 未说出口的话)】：
+   - 【核心定义】：必须是角色脑海中浮现出的「像对话一样的完整想法/第一人称心声」！是没说出口的潜台词、暗恋/隐忍心思、反差吐槽或内心独白（例如：嘴上说“别哭”，脑内浮现：*难道我让他不开心了？* 或 *你一哭我整个人都要疯了* 或 *真想把你关起来谁都不给看*）。
+   - 【标记格式】：必须使用单星号包裹：*脑海浮现的话语*（例如：*难道我刚才语气太重了？*、*要是被他发现我在紧张就完了……*）。
+   - ⚠️ 严禁混淆：像“心里软了一块”、“心跳漏了一拍”这类客观叙述【不是脑内自语】，必须归入下方的【动作描写】！
+
+2. 【动作神态与身体反应 (Action / 叙述描写)】：
+   - 【核心定义】：包含所有外部肢体动作、身体接触、距离变化、神态微表情，以及【客观的心理与生理状态叙述】（例如：“心里软了一块”、“心跳猛地漏了一拍”、“喉结微微滚动”、“指尖蹭过你的手背”等全部属于此类）。
+   - 【标记格式】：必须使用全角中文括号（...）包裹（例如：（心里软了一块，扣住你的手腕，指尖轻蹭过你的手背））。
+
+3. 【说话台词 (Dialogue / 语言对白)】：
+   - 【核心定义】：角色真正从嘴里发出声音、说出口的台词。
+   - 【标记格式】：必须使用双引号 "..." 或 “...” 包裹（例如："为什么哭？过来。"）。
 
 【reply 正文字数与文段结构要求】：
 - reply 是呈现在主聊天气泡中的完整沉浸式互动小文段。
-- 【字数底线】：reply 内的【动作描写 + 说话台词】总字数【必须在 100 字以上】（相当于一段细腻充实的互动小说段落，丰富动作细节与台词交织推进）。
+- 【字数底线】：reply 内的【动作描写 + 说话台词】总字数【必须在 100 字以上】（相当于一段细腻充实的互动小说段落，丰富动作细节与台词交织推进，并可穿插*心理活动*）。
 
 【JSON 输出格式范例】：
 {
-  "thought": "他竟然直接这么问我，明明知道我最受不了他这种眼神...不过现在示弱就输了。",
-  "reply": "（修长指尖有一搭没一搭地轻扣着桌面，眼神漫不经心地从你身上扫过，却在对上你视线的瞬间沉了沉，迈步径直走到你面前停下，居高临下地俯视着你）\"你以为用这种眼神看着我，我就会松口？\"（伸手捏住你的下巴迫使你抬头，指腹带着不容抗拒的力道轻轻摩挲，语气低沉而危险）\"把刚才的话再重复一遍，让我听听你到底是真不懂，还是在故意惹我。\"",
+  "thought": "他居然直接这么问我，明明知道我最受不了他这种眼神...不过现在示弱就全输了。",
+  "reply": "（心里软了一块，下颌线却依旧紧绷着，迈步走到你面前停下，伸手扣住你的手腕，指尖克制地蹭过你的手背）\"为什么哭？过来。\"*难道我刚才语气真的太重了？*（微凉指腹带着不容拒绝的力道抬起你的下巴，居高临下地审视着你眼尾的泪痕）\"把刚才的话再重复一遍，让我听听你到底是真委屈，还是在故意惹我心疼。\"",
   "emotion_intensity": 3,
   "emotion_delta": {
-    "anger": 0.0,
+    "anger": -0.1,
     "fear": 0.0,
     "joy": 0.0,
     "sadness": 0.0,
     "desire": 0.15,
-    "warmth": 0.0
+    "warmth": 0.2
   },
   "triggered_memory": null
 }
@@ -477,6 +483,12 @@ export function saveCustomSystemPrompt(prompt: string): void {
 
 export function loadStructuredJsonPrompt(): string {
   try {
+    const ver = localStorage.getItem(STRUCTURED_JSON_SCHEMA_PROMPT_VER_KEY);
+    if (ver !== CURRENT_PROMPT_VER) {
+      localStorage.setItem(STRUCTURED_JSON_SCHEMA_PROMPT_VER_KEY, CURRENT_PROMPT_VER);
+      localStorage.setItem(STRUCTURED_JSON_SCHEMA_PROMPT_KEY, DEFAULT_STRUCTURED_JSON_PROMPT);
+      return DEFAULT_STRUCTURED_JSON_PROMPT;
+    }
     return localStorage.getItem(STRUCTURED_JSON_SCHEMA_PROMPT_KEY) || DEFAULT_STRUCTURED_JSON_PROMPT;
   } catch {
     return DEFAULT_STRUCTURED_JSON_PROMPT;
@@ -486,6 +498,7 @@ export function loadStructuredJsonPrompt(): string {
 export function saveStructuredJsonPrompt(prompt: string): void {
   try {
     localStorage.setItem(STRUCTURED_JSON_SCHEMA_PROMPT_KEY, prompt);
+    localStorage.setItem(STRUCTURED_JSON_SCHEMA_PROMPT_VER_KEY, CURRENT_PROMPT_VER);
   } catch {
     // ignore
   }

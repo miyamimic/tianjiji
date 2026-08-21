@@ -1,142 +1,140 @@
 import type { Character, MessageSegment } from '../data/types';
 
-const FORBIDDEN_ADVERBS = [
-  '冷静地', '温柔地', '愤怒地', '冷冷地', '淡淡地', '轻声地', '大声地',
-  '不悦地', '开心地', '悲伤地', '默默地', '缓缓地', '慢慢地', '快速地',
-  '突然地', '淡淡地说', '冷冷地说', '温柔地说', '愤怒地说',
-  '低声', '沉声', '冷声', '柔声',
-];
-
-const PRONOUN_PATTERNS: [RegExp, string][] = [
-  [/他说/g, '我说'],
-  [/她说/g, '我说'],
-  [/他想/g, '我想'],
-  [/她想/g, '我想'],
-  [/他的手/g, '我的手'],
-  [/她的手/g, '我的手'],
-  [/他的/g, '我的'],
-  [/她的/g, '我的'],
-  [/^他/m, '我'],
-  [/^她/m, '我'],
-];
-
-export function cleanPronouns(text: string): string {
-  let result = text;
-  for (const [pat, rep] of PRONOUN_PATTERNS) {
-    result = result.replace(pat, rep);
-  }
-  return result;
-}
-
-export function cleanAdverbs(text: string, touchActions: string[]): string {
-  if (touchActions.length === 0) return text;
-  let result = text;
-  for (const adverb of FORBIDDEN_ADVERBS) {
-    if (result.includes(adverb)) {
-      const touch = touchActions[Math.floor(Math.random() * touchActions.length)];
-      result = result.replace(new RegExp(escapeRegExp(adverb) + '[，,]?', 'g'), `*${touch}*，`);
-    }
-  }
-  result = result.replace(/，，+/g, '，');
-  result = result.replace(/\*，/g, '*，');
-  return result;
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
-const SEGMENT_REGEX = /(\*[^*]+\*)|(\([^)]+\))|(（[^）]+）)/g;
+/**
+ * Intelligent and robust segment parser for RP dialogue.
+ * 
+ * Rules:
+ * 1. Thought (心理活动 / 潜意识 / 内心独白):
+ *    - Wrapped in single asterisks: *...* (excluding **bold**)
+ *    - Wrapped in asterisk parentheses: *（...）* or *(...)* or （*...*）
+ *    - Examples: *难道我让他不开心了？*, *（心里软了一块）*
+ * 
+ * 2. Action (动作神态描写 / 空间体态细节):
+ *    - Wrapped in fullwidth parentheses: （...）
+ *    - Wrapped in halfwidth parentheses: (...)
+ *    - Wrapped in brackets: 【...】 or [...]
+ *    - Examples: （修长指尖轻扣桌面，居高临下地审视着你）, (拉住手腕)
+ * 
+ * 3. Speech (说话台词 / 口语对白):
+ *    - Wrapped in quotes: “...”, "...", 「...」, 『...』
+ *    - Or standard narrative conversational sentences
+ */
 
 export function parseSegments(rawText: string): MessageSegment[] {
-  const segments: MessageSegment[] = [];
+  if (!rawText) return [];
   const text = rawText.trim();
-  if (!text) return segments;
+  if (!text) return [];
+
+  const segments: MessageSegment[] = [];
+
+  // Match token patterns in order of priority:
+  // 1. Thought wrapped in *（...）* or *...* (ensuring not markdown bold **)
+  // 2. Action wrapped in （...） or (...) or 【...】
+  // 3. Speech wrapped in “...” or "..." or 「...」
+  const TOKEN_REGEX = /(\*(?:（|\()?([^*]+?)(?:）|\))?\*)|(（([^*）]+?)）|\(([^*)]+?)\)|【([^】]+?)】)|(“([^”]+?)”|"([^"]+?)"|「([^」]+?)」|『([^』]+?)』)/g;
 
   let lastIndex = 0;
-  let m: RegExpExecArray | null;
-  SEGMENT_REGEX.lastIndex = 0;
-  while ((m = SEGMENT_REGEX.exec(text)) !== null) {
-    if (m.index > lastIndex) {
-      const speech = text.slice(lastIndex, m.index).trim();
-      if (speech) segments.push({ type: 'speech', text: speech });
+  let match: RegExpExecArray | null;
+
+  while ((match = TOKEN_REGEX.exec(text)) !== null) {
+    // 1. Unmatched text before this token
+    if (match.index > lastIndex) {
+      const priorText = text.slice(lastIndex, match.index).trim();
+      if (priorText) {
+        // Classify loose text
+        classifyLooseText(priorText, segments);
+      }
     }
-    const matched = m[0];
-    if (matched.startsWith('*')) {
-      const inner = matched.slice(1, -1).trim();
-      if (inner) segments.push({ type: 'action', text: inner });
-    } else {
-      const inner = matched.slice(1, -1).trim();
-      if (inner) segments.push({ type: 'thought', text: inner });
+
+    const fullMatch = match[0];
+    
+    // Group 1: Thought (*...*)
+    if (match[1]) {
+      const thoughtContent = (match[2] || fullMatch.replace(/^\*|\*$/g, '')).trim();
+      if (thoughtContent) {
+        segments.push({ type: 'thought', text: thoughtContent });
+      }
     }
-    lastIndex = m.index + matched.length;
+    // Group 3: Action (（...） or (...) or 【...】)
+    else if (match[3]) {
+      const actionContent = (match[4] || match[5] || match[6] || fullMatch.replace(/^[（(【]|[）)】]$/g, '')).trim();
+      if (actionContent) {
+        // If content inside parentheses begins and ends with *, treat as thought
+        if (/^\*.*\*$/.test(actionContent)) {
+          segments.push({ type: 'thought', text: actionContent.replace(/^\*+|\*+$/g, '').trim() });
+        } else {
+          segments.push({ type: 'action', text: actionContent });
+        }
+      }
+    }
+    // Group 7: Speech (“...” or "..." or 「...」)
+    else if (match[7]) {
+      const speechContent = (match[8] || match[9] || match[10] || match[11] || fullMatch).trim();
+      if (speechContent) {
+        segments.push({ type: 'speech', text: speechContent });
+      }
+    }
+
+    lastIndex = match.index + fullMatch.length;
   }
 
+  // 2. Remaining tail text
   if (lastIndex < text.length) {
-    const speech = text.slice(lastIndex).trim();
-    if (speech) segments.push({ type: 'speech', text: speech });
+    const remaining = text.slice(lastIndex).trim();
+    if (remaining) {
+      classifyLooseText(remaining, segments);
+    }
   }
 
+  // Fallback: If nothing was matched, treat whole text as speech
   if (segments.length === 0) {
     segments.push({ type: 'speech', text });
   }
+
   return segments;
 }
 
-function containsAny(text: string, keywords: string[]): boolean {
-  return keywords.some((k) => text.includes(k));
-}
-
-export function validateActions(segments: MessageSegment[], character: Character) {
-  const actionTexts = segments.filter((s) => s.type === 'action').map((s) => s.text);
-  const fullText = actionTexts.join(' ');
-  const at = character.action_tendency;
-  const controlMatched = at.control_actions.filter((a) => containsAny(fullText, [a]));
-  const touchMatched = at.touch_actions.filter((a) => containsAny(fullText, [a]));
-  return {
-    has_control: controlMatched.length > 0,
-    has_touch: touchMatched.length > 0,
-    control_matched: controlMatched,
-    touch_matched: touchMatched,
-  };
-}
-
-export function appendMissingActions(segments: MessageSegment[], character: Character): MessageSegment[] {
-  const result = [...segments];
-  const v = validateActions(result, character);
-  if (!v.has_control) {
-    result.push({ type: 'action', text: '按住你的肩膀' });
+/**
+ * Helper to classify text outside explicit brackets/quotes
+ */
+function classifyLooseText(text: string, segments: MessageSegment[]) {
+  // Check if text is an unclosed thought like *心里一震
+  if (text.startsWith('*') && !text.endsWith('*')) {
+    segments.push({ type: 'thought', text: text.replace(/^\*+/, '').trim() });
+    return;
   }
-  if (!v.has_touch) {
-    result.push({ type: 'action', text: '指尖蹭过你的手背' });
+  // Check if text is an unclosed action like （走上前
+  if ((text.startsWith('（') || text.startsWith('(')) && !(text.endsWith('）') || text.endsWith(')'))) {
+    segments.push({ type: 'action', text: text.replace(/^[（(]/, '').trim() });
+    return;
   }
-  return result;
+
+  // If text is standard dialogue or narrative
+  segments.push({ type: 'speech', text });
 }
 
 export function segmentsToText(segments: MessageSegment[]): string {
   return segments
     .map((s) => {
-      if (s.type === 'action') return `*${s.text}*`;
-      if (s.type === 'thought') return `（${s.text}）`;
+      if (s.type === 'thought') return `*${s.text}*`;
+      if (s.type === 'action') return `（${s.text}）`;
       return s.text;
     })
-    .join('');
+    .join('\n');
 }
 
-export function runPostprocessor(rawText: string, character: Character) {
-  let text = cleanPronouns(rawText);
-  text = cleanAdverbs(text, character.action_tendency.touch_actions);
-  let segments = parseSegments(text);
-
-  const v = validateActions(segments, character);
-  if (!v.has_control || !v.has_touch) {
-    segments = appendMissingActions(segments, character);
-  }
-
+/**
+ * Non-destructive postprocessor:
+ * Parses segments cleanly without blindly overriding, corrupting pronouns,
+ * or forcibly injecting repetitive template phrases.
+ */
+export function runPostprocessor(rawText: string, _character?: Character) {
+  const segments = parseSegments(rawText);
   const cleaned = segmentsToText(segments);
+
   return {
     segments,
     cleaned_text: cleaned,
-    action_valid: v.has_control && v.has_touch,
+    action_valid: true,
   };
 }

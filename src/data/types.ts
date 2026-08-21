@@ -104,6 +104,7 @@ export type ChatMessage = {
   timestamp: number;
   character_id?: string;
   snapshot?: EngineSnapshot;
+  llmError?: string;
 };
 
 export type IntentAnalysis = {

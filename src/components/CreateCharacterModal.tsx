@@ -9,19 +9,11 @@ import {
   ShieldAlert, 
   MessageSquare,
   Eye,
-  Camera,
-  Heart
+  Camera
 } from 'lucide-react';
 import { createCustomCharacter, type CreateCharacterInput } from '../lib/customStore';
 import { INSTINCT_DESCRIPTIONS, SPEECH_FILTER_DESCRIPTIONS, type Character } from '../data/types';
 import { loadLlmConfig, analyzeVisualAvatar } from '../lib/llm';
-import { 
-  saveRelationState, 
-  getMentalOpenTierInfo, 
-  getPhysicalPhaseInfo, 
-  PHYSICAL_PHASES,
-  notifyRelationToast 
-} from '../lib/relationEngine';
 
 interface Props {
   isOpen: boolean;
@@ -40,8 +32,6 @@ export default function CreateCharacterModal({ isOpen, onClose, onCharacterCreat
   const [forbiddenPhrasesStr, setForbiddenPhrasesStr] = useState('对不起嘛、求求你、我不行');
   const [customPrompt, setCustomPrompt] = useState('');
   const [minBubbles, setMinBubbles] = useState<number>(2);
-  const [mentalOpen, setMentalOpen] = useState<number>(15);
-  const [physicalPhase, setPhysicalPhase] = useState<number>(0);
   const [analyzingVision, setAnalyzingVision] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -100,17 +90,6 @@ export default function CreateCharacterModal({ isOpen, onClose, onCharacterCreat
     };
 
     const newChar = createCustomCharacter(input);
-    saveRelationState(newChar.character_id, {
-      mentalOpen,
-      physicalPhase,
-      intimacyCooldown: 0,
-      milestones: [],
-    });
-    notifyRelationToast({
-      type: 'both',
-      mentalOpen,
-      physicalPhase,
-    });
     onCharacterCreated(newChar);
     onClose();
   };
@@ -271,89 +250,6 @@ export default function CreateCharacterModal({ isOpen, onClose, onCharacterCreat
             <p className="text-[10px] text-white/40 leading-relaxed">
               严格分离三要素：thought 仅记录纯心理（不计入字数/不写动作台词）；reply 输出包含（动作细节）与"对话台词"的丰满文段。
             </p>
-          </div>
-
-          {/* Relationship State Engine Initial Setup (初始心理开放度与身体亲密度设置) */}
-          <div className="space-y-3 p-3.5 rounded-xl border border-white/10 bg-white/[0.02]">
-            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-              <div className="flex items-center gap-2">
-                <Heart className="size-4 text-pink-400" />
-                <span className="text-xs font-bold text-white">
-                  初始关系状态引擎设定
-                </span>
-              </div>
-              <span className="text-[10px] text-white/40">
-                心理与身体独立错位
-              </span>
-            </div>
-
-            {/* 初始心理开放度 */}
-            <div className="p-3 rounded-xl border border-pink-500/20 bg-pink-950/10 space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-pink-200 flex items-center gap-1.5">
-                  <Heart className="size-3 text-pink-400 fill-pink-400/20" />
-                  初始心理开放度 (Mental Openness)
-                </label>
-                <span className="font-mono text-xs font-bold text-pink-300 bg-pink-500/20 px-2 py-0.5 rounded-md border border-pink-500/30">
-                  {mentalOpen} / 100
-                </span>
-              </div>
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={mentalOpen}
-                onChange={(e) => setMentalOpen(Number(e.target.value))}
-                className="w-full h-2 rounded-lg appearance-none cursor-pointer bg-white/10 accent-pink-400"
-              />
-              <div className="flex justify-between text-[9px] text-pink-300/60 font-mono">
-                <span>0 (心防)</span>
-                <span>25 (表层友善)</span>
-                <span>50 (小烦恼)</span>
-                <span>75 (吐露经历)</span>
-                <span>100 (剖白脆弱)</span>
-              </div>
-              <p className="text-[10px] text-pink-200/80 leading-relaxed bg-black/30 p-2 rounded-lg border border-pink-500/10">
-                <span className="font-medium text-pink-300">{getMentalOpenTierInfo(mentalOpen).name}：</span>
-                {getMentalOpenTierInfo(mentalOpen).promptText}
-              </p>
-            </div>
-
-            {/* 初始身体亲密阶段 */}
-            <div className="p-3 rounded-xl border border-purple-500/20 bg-purple-950/10 space-y-2">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-semibold text-purple-200 flex items-center gap-1.5">
-                  <Sparkles className="size-3 text-purple-400" />
-                  初始身体亲密阶段 (Physical Phase 0~5)
-                </label>
-                <span className="font-mono text-xs font-bold text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded-md border border-purple-500/30">
-                  Phase {physicalPhase} · {getPhysicalPhaseInfo(physicalPhase).name.split('（')[0]}
-                </span>
-              </div>
-
-              <div className="grid grid-cols-3 gap-1.5">
-                {PHYSICAL_PHASES.map((p) => (
-                  <button
-                    key={p.phase}
-                    type="button"
-                    onClick={() => setPhysicalPhase(p.phase)}
-                    className={`p-1.5 text-left rounded-lg border transition-all cursor-pointer ${
-                      physicalPhase === p.phase
-                        ? 'border-purple-400 bg-purple-500/25 text-white ring-1 ring-purple-400/50'
-                        : 'border-white/10 bg-black/40 text-white/60 hover:text-white hover:bg-white/5'
-                    }`}
-                  >
-                    <div className="text-[11px] font-bold text-purple-300">Phase {p.phase}</div>
-                    <div className="text-[10px] text-white/80 truncate">{p.name.split('（')[0]}</div>
-                  </button>
-                ))}
-              </div>
-              <p className="text-[10px] text-purple-200/80 leading-relaxed bg-black/30 p-2 rounded-lg border border-purple-500/10">
-                <span className="font-medium text-purple-300">{getPhysicalPhaseInfo(physicalPhase).name}：</span>
-                {getPhysicalPhaseInfo(physicalPhase).promptText}
-              </p>
-            </div>
           </div>
 
           {/* Custom LLM Prompt Override */}
