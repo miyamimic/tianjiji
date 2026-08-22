@@ -665,8 +665,263 @@ ${globalCustomPrompt.trim()}`);
 // 风铃·五子棋系统矫正补充协议 - LLM 决策层函数
 // -------------------------------------------------------------
 
-import type { CandidateMove, StrategyCandidateGroup, GomokuStrategy, Cell } from './gomokuProtocolEngine';
-import { sanitizeLlmDecision, getEmotionWeightingObjectiveInfo } from './gomokuProtocolEngine';
+import type {
+  CandidateMove,
+  StrategyCandidateGroup,
+  GomokuCandidatePools,
+  GomokuWeights,
+  GomokuLlmOutput,
+  GomokuStrategy,
+  Cell,
+  GomokuRank,
+} from './gomokuProtocolEngine';
+import {
+  sanitizeLlmDecision,
+  getEmotionWeightingObjectiveInfo,
+  cleanAndNormalizeWeights,
+} from './gomokuProtocolEngine';
+
+export type GomokuTriggerType =
+  | 'game_start'
+  | 'player_chat'
+  | 'board_crisis'
+  | 'player_sandbagging'
+  | 'consecutive_losses'
+  | 'game_over';
+
+export interface GomokuLlmContext {
+  trigger: GomokuTriggerType;
+  character: Character;
+  currentEmotionSnapshot: EmotionVector;
+  charRank: GomokuRank;
+  aiColor: 'B' | 'W';
+  is_playdate_invite?: boolean;
+  candidatePools: GomokuCandidatePools;
+  oldWeights?: GomokuWeights;
+  previousThoughtNote?: string;
+  opponentImpression?: string;
+  playerChatText?: string;
+  stepNumber: number;
+  recentMoves?: Array<{ step: number; r: number; c: number; color: 'B' | 'W' }>;
+  inGameChats?: Array<{ sender: 'user' | 'character' | 'system'; text: string }>;
+  isPlayerSandbagging?: boolean;
+  abandonedBestPoints?: Array<{ coord: [number, number]; reason: string }>;
+  crisisReason?: string;
+  gameResult?: 'player' | 'character' | 'draw' | 'surrender';
+  consecutiveLossCount?: number;
+}
+
+export function sanitizeGomokuLlmOutput(
+  rawJson: any,
+  fallbackWeights?: GomokuWeights
+): GomokuLlmOutput {
+  const weights = cleanAndNormalizeWeights({
+    weight_attack: rawJson?.weight_attack ?? fallbackWeights?.weight_attack,
+    weight_defend: rawJson?.weight_defend ?? fallbackWeights?.weight_defend,
+    weight_steady: rawJson?.weight_steady ?? fallbackWeights?.weight_steady,
+  });
+
+  return {
+    weight_attack: weights.weight_attack,
+    weight_defend: weights.weight_defend,
+    weight_steady: weights.weight_steady,
+    opponent_impression:
+      typeof rawJson?.opponent_impression === 'string' && rawJson.opponent_impression.trim()
+        ? rawJson.opponent_impression.trim()
+        : '下法稳健，落子有章法',
+    thought_note:
+      typeof rawJson?.thought_note === 'string' && rawJson.thought_note.trim()
+        ? rawJson.thought_note.trim()
+        : '观察对手棋路，按当前重心推进。',
+    opening_dialog:
+      typeof rawJson?.opening_dialog === 'string'
+        ? rawJson.opening_dialog.trim()
+        : '',
+    speech_text:
+      typeof rawJson?.speech_text === 'string'
+        ? rawJson.speech_text.trim()
+        : '',
+    ending_dialog:
+      typeof rawJson?.ending_dialog === 'string'
+        ? rawJson.ending_dialog.trim()
+        : '',
+  };
+}
+
+/**
+ * 五子棋AI v4.1 LLM 决策响应生成器
+ * 严格遵照 8 条 System Prompt 强制约束指令
+ */
+export async function generateGomokuLlmResponse(
+  config: LlmConfig,
+  ctx: GomokuLlmContext
+): Promise<GomokuLlmOutput> {
+  const {
+    trigger,
+    character,
+    currentEmotionSnapshot,
+    charRank,
+    aiColor,
+    is_playdate_invite = false,
+    candidatePools,
+    oldWeights = { weight_attack: 0.33, weight_defend: 0.34, weight_steady: 0.33 },
+    previousThoughtNote = '',
+    opponentImpression = '',
+    playerChatText = '',
+    stepNumber,
+    recentMoves = [],
+    inGameChats = [],
+    isPlayerSandbagging = false,
+    abandonedBestPoints = [],
+    crisisReason = '',
+    gameResult,
+    consecutiveLossCount = 0,
+  } = ctx;
+
+  const systemPrompt = `你是「${character.name}」。你正在与主控进行五子棋对弈。
+
+约束规则：
+1. is_playdate_invite是业务侧给到的场景标记：true=双方约好下棋；false=普通对局。它只是背景信息，不是给你填充的模板文案。所有对外对话内容全部由你现场创作，不存在系统预置好的句子。
+2. 输出weight_attack、weight_defend、weight_steady为0‑1区间的浮点数，代表内心下棋偏好概率；不需要严格相加等于1，后端JS会自动做清洗与归一化。
+3. 更新权重时优先做小幅微调原有配比；只有发生重大局势冲击，才允许大幅度改写权重；避免思路反复横跳。
+4. thought_note是你的内部心理笔记，只留给你后续调用读取，绝对不能直接展示给用户；内心想法与对外言语可以不完全一致。
+5. 权重数值只控制落子行为倾向；说话语气、情绪表达独立写在对话字段中，不要机械式绑定权重高低和说话态度。
+6. opening_dialog、ending_dialog严禁使用通用客套套话，要结合当前情绪、场景标记、棋盘实际情况写出像真人一样的话，可以简短，可以吐槽，可以闲聊。
+7. 如果本次触发是因为玩家发送聊天消息，则speech_text尽量不为空；局势突变、检测放水触发时允许speech_text为空字符串，代表默默调整下棋思路，选择沉默不回话。
+8. 不要输出棋盘坐标，不要输出点位下标；点位选择全部交给后端JS逻辑处理。`;
+
+  const emotionStr = Object.entries(currentEmotionSnapshot)
+    .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
+    .join(', ');
+
+  const formatList = (title: string, list: CandidateMove[]) => {
+    const items = list
+      .map((c, i) => `  ${i + 1}. [${c.coord[0]}, ${c.coord[1]}] | 评估: ${c.reason} (打分: ${c.score})`)
+      .join('\n');
+    return `【${title}】\n${items || '  （暂无特殊点位）'}`;
+  };
+
+  const poolSummary = `当前三候选池概览：
+${formatList('attack_candidates（进攻候选池）', candidatePools.attack_candidates)}
+${formatList('defend_candidates（防守候选池）', candidatePools.defend_candidates)}
+${formatList('steady_candidates（稳健候选池）', candidatePools.steady_candidates)}`;
+
+  const recentMovesText =
+    recentMoves.slice(-4).map((m) => `第 ${m.step} 手: ${m.color === aiColor ? character.name : '主控'} 落于 [${m.r}, ${m.c}]`).join('\n') || '无';
+
+  const chatsText =
+    inGameChats.slice(-4).map((c) => `${c.sender === 'user' ? '主控' : character.name}: ${c.text}`).join('\n') || '无';
+
+  let triggerContext = '';
+
+  if (trigger === 'game_start') {
+    triggerContext = `【触发事件：对局开局】
+- 场景上下文标记 is_playdate_invite: ${is_playdate_invite ? 'true (双方提前约好一起下棋)' : 'false (普通随机开局对局)'}
+- 对弈身份与手顺: 你执${aiColor === 'B' ? '黑棋 (先行)' : '白棋 (后手)'}
+- 角色五子棋棋力等级: ${charRank}
+${consecutiveLossCount >= 2 ? `- 特别注意：你此前已连续遭遇 ${consecutiveLossCount} 次战败，本次为新一局。` : ''}
+- 指令：输出初始权重 (weight_attack, weight_defend, weight_steady)、对对手的初步印象 (opponent_impression)、内部心理笔记 (thought_note)、原创开场白 (opening_dialog)。
+- 注意：speech_text 与 ending_dialog 必须置为空字符串 ""。opening_dialog 必须完全原创，结合 is_playdate_invite 与你的人设情绪生成。`;
+  } else if (trigger === 'player_chat') {
+    triggerContext = `【触发事件：主控在对局中途发送聊天消息】
+- 主控最新聊天内容: "${playerChatText}"
+- 当前已进行手数: 第 ${stepNumber} 手
+- 当前持久权重记忆: weight_attack=${oldWeights.weight_attack}, weight_defend=${oldWeights.weight_defend}, weight_steady=${oldWeights.weight_steady}
+- 上次内心心理笔记: "${previousThoughtNote}"
+- 对主控印象: "${opponentImpression}"
+- 指令：更新三组权重、更新对手印象、更新内部笔记，并输出 speech_text 进行回话（因主控发消息触发，speech_text 尽量不要为空，至少给出简短生动回应）。
+- 注意：opening_dialog 与 ending_dialog 必须置为空字符串 ""。`;
+  } else if (trigger === 'board_crisis') {
+    triggerContext = `【触发事件：JS 检测到重大局势拐点 / 生死危机】
+- 局势特征: ${crisisReason || '对手活四或即将五连，或我方即将五连'}
+- 当前已进行手数: 第 ${stepNumber} 手
+- 当前持久权重记忆: weight_attack=${oldWeights.weight_attack}, weight_defend=${oldWeights.weight_defend}, weight_steady=${oldWeights.weight_steady}
+- 上次内心心理笔记: "${previousThoughtNote}"
+- 指令：评估局势冲击，更新三组权重、内部笔记与对手印象；speech_text 允许为空字符串（代表默默调整思路沉着应对）。
+- 注意：opening_dialog 与 ending_dialog 必须置为空字符串 ""。`;
+  } else if (trigger === 'player_sandbagging') {
+    triggerContext = `【触发事件：JS 识别到主控明显放水让棋行为】
+- 放弃的绝佳点位: ${abandonedBestPoints.map((p) => `[${p.coord[0]}, ${p.coord[1]}] ${p.reason}`).join('、')}
+- 当前已进行手数: 第 ${stepNumber} 手
+- 上次内心心理笔记: "${previousThoughtNote}"
+- 指令：重评估主控意图，更新权重与内心笔记。注意：这不等于你必须回让对手下棋；可在 speech_text 中有反应或保持沉默（speech_text 可为空字符串）。
+- 注意：opening_dialog 与 ending_dialog 必须置为空字符串 ""。`;
+  } else if (trigger === 'consecutive_losses') {
+    triggerContext = `【触发事件：连续战败后开局】
+- 连续战败次数: ${consecutiveLossCount}
+- 场景上下文标记 is_playdate_invite: ${is_playdate_invite}
+- 指令：结合屡败屡战的心境，输出开局权重、心理笔记与原创开场白 opening_dialog。`;
+  } else if (trigger === 'game_over') {
+    const outcomeLabel =
+      gameResult === 'player'
+        ? '主控获胜（你战败）'
+        : gameResult === 'character'
+        ? '你获得胜利（五子连珠）'
+        : gameResult === 'surrender'
+        ? '投子认负'
+        : '双方平局和棋';
+    triggerContext = `【触发事件：对局结束分出胜负】
+- 最终结果: ${outcomeLabel}
+- 总对局手数: ${stepNumber} 手
+- 对手下棋印象: "${opponentImpression}"
+- 上次内心心理笔记: "${previousThoughtNote}"
+- 指令：输出最终权重（记录人格状态）、更新对手印象、更新内部心理笔记、原创 ending_dialog 结算台词。
+- 注意：ending_dialog 严禁通用套话，结合本局过程、情绪状态原创生成；opening_dialog 与 speech_text 必须置为空字符串 ""。`;
+  }
+
+  const prompt = `【角色核心特质】
+- 人物性格与价值观: ${character.core.values.join('、')}
+- 语言风格与习惯: ${character.core.speech_filter}
+- 直觉本能: ${character.core.instinct_base}
+- 当前情绪快照: ${emotionStr}
+
+${triggerContext}
+
+${poolSummary}
+
+近期走子记录:
+${recentMovesText}
+
+近期对话记录:
+${chatsText}
+
+【输出格式要求】
+请必须且仅输出单个合法 JSON 对象，严格包含以下全部 8 个字段：
+\`\`\`json
+{
+  "weight_attack": 0.35,
+  "weight_defend": 0.40,
+  "weight_steady": 0.25,
+  "opponent_impression": "简短文字：对对手下棋风格的印象",
+  "thought_note": "【仅供LLM后续自己读取，永远不对用户展示】内部心理备忘录；心里想法和对外说话允许不一致，可以克制、委婉",
+  "opening_dialog": "${trigger === 'game_start' || trigger === 'consecutive_losses' ? '原创开场白' : ''}",
+  "speech_text": "${trigger === 'player_chat' ? '回复主控的话语' : ''}",
+  "ending_dialog": "${trigger === 'game_over' ? '原创胜负结束语' : ''}"
+}
+\`\`\``;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: prompt },
+    ]);
+
+    let parsed: any = null;
+    try {
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) {
+        parsed = JSON.parse(match[0]);
+      }
+    } catch {
+      // ignore
+    }
+
+    return sanitizeGomokuLlmOutput(parsed, oldWeights);
+  } catch (err) {
+    console.warn('Gomoku v4.1 LLM call failed, using fallback:', err);
+    return sanitizeGomokuLlmOutput(null, oldWeights);
+  }
+}
 
 export interface GomokuMoveContext {
   character: Character;

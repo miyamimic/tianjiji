@@ -35,6 +35,29 @@ export interface StrategyCandidateGroup {
   passive: CandidateMove[];
 }
 
+export interface GomokuCandidatePools {
+  attack_candidates: CandidateMove[];
+  defend_candidates: CandidateMove[];
+  steady_candidates: CandidateMove[];
+}
+
+export interface GomokuWeights {
+  weight_attack: number;
+  weight_defend: number;
+  weight_steady: number;
+}
+
+export interface GomokuLlmOutput {
+  weight_attack: number;
+  weight_defend: number;
+  weight_steady: number;
+  opponent_impression: string;
+  thought_note: string;
+  opening_dialog: string;
+  speech_text: string;
+  ending_dialog: string;
+}
+
 export interface SandbaggingReport {
   isPlayerSandbagging: boolean;
   abandonedBestPoints: Array<{
@@ -50,6 +73,9 @@ export interface StepLogItem {
   coord: [number, number];
   color: 'B' | 'W';
   strategy?: GomokuStrategy;
+  weights?: GomokuWeights;
+  chosenPool?: 'attack' | 'defend' | 'steady';
+  isEmergencyOverride?: boolean;
   emotionLabel?: string;
   innerThought?: string;
   spokenDialogue?: string;
@@ -452,6 +478,190 @@ export function generateStrategyCandidateGroups(
   }
 
   return applyRankAndEmotionWeighting(finalAggressive, finalBalanced, finalPassive, charRank, emotionSnapshot);
+}
+
+/**
+ * Generates the 3 candidate pools for Gomoku v4.1:
+ * - attack_candidates: aggressive points building AI attack / winning lines
+ * - defend_candidates: defensive points blocking opponent lines & lethal threats
+ * - steady_candidates: balanced / positional points for solid development
+ */
+export function generateGomokuCandidatePools(
+  board: Cell[][],
+  aiColor: 'B' | 'W',
+  charRank: GomokuRank = 'gold',
+  emotionSnapshot?: Partial<EmotionVector>
+): GomokuCandidatePools {
+  const groups = generateStrategyCandidateGroups(board, aiColor, charRank, emotionSnapshot);
+  return {
+    attack_candidates: groups.aggressive,
+    defend_candidates: groups.balanced,
+    steady_candidates: groups.passive,
+  };
+}
+
+/**
+ * JS Weight Cleaning & Normalization (v4.1):
+ * 1. Clamp negative values to 0
+ * 2. Calculate sum
+ * 3. If sum <= 0: fallback to { weight_attack: 0.33, weight_defend: 0.34, weight_steady: 0.33 }
+ * 4. If sum > 0: normalize each by sum
+ */
+export function cleanAndNormalizeWeights(raw?: Partial<GomokuWeights> | null): GomokuWeights {
+  let wAttack = Math.max(0, typeof raw?.weight_attack === 'number' && !isNaN(raw.weight_attack) ? raw.weight_attack : 0);
+  let wDefend = Math.max(0, typeof raw?.weight_defend === 'number' && !isNaN(raw.weight_defend) ? raw.weight_defend : 0);
+  let wSteady = Math.max(0, typeof raw?.weight_steady === 'number' && !isNaN(raw.weight_steady) ? raw.weight_steady : 0);
+
+  const sum = wAttack + wDefend + wSteady;
+  if (sum <= 0) {
+    return {
+      weight_attack: 0.33,
+      weight_defend: 0.34,
+      weight_steady: 0.33,
+    };
+  }
+
+  return {
+    weight_attack: Math.round((wAttack / sum) * 1000) / 1000,
+    weight_defend: Math.round((wDefend / sum) * 1000) / 1000,
+    weight_steady: Math.round((wSteady / sum) * 1000) / 1000,
+  };
+}
+
+/**
+ * Weighted Random Sampling across the 3 Candidate Pools (v4.1):
+ * - Uses normalized weights to pick a pool (attack / defend / steady).
+ * - Inside the selected pool, picks the candidate with the highest algorithm score.
+ * - Emergency Hard Protection: If lethal crisis detected (human has live 4 or winning shot),
+ *   temporarily ignores persistent weights and forces the defense pool!
+ * - Empty Pool Fallback: Automatically degrades to non-empty pools if sampled pool is empty.
+ */
+export function sampleMoveFromPools(
+  pools: GomokuCandidatePools,
+  weights: GomokuWeights,
+  isEmergencyDefense: boolean = false
+): {
+  coord: [number, number];
+  candidate: CandidateMove;
+  chosenPool: 'attack' | 'defend' | 'steady';
+  isEmergencyOverride: boolean;
+  wasFallback: boolean;
+} {
+  // Emergency Hard Protection Rule
+  if (isEmergencyDefense && pools.defend_candidates && pools.defend_candidates.length > 0) {
+    const topDefend = pools.defend_candidates[0];
+    return {
+      coord: topDefend.coord,
+      candidate: topDefend,
+      chosenPool: 'defend',
+      isEmergencyOverride: true,
+      wasFallback: false,
+    };
+  }
+
+  const norm = cleanAndNormalizeWeights(weights);
+
+  // Weighted random sampling to select pool
+  const rand = Math.random();
+  let poolName: 'attack' | 'defend' | 'steady' = 'steady';
+  if (rand < norm.weight_attack) {
+    poolName = 'attack';
+  } else if (rand < norm.weight_attack + norm.weight_defend) {
+    poolName = 'defend';
+  } else {
+    poolName = 'steady';
+  }
+
+  let selectedList =
+    poolName === 'attack'
+      ? pools.attack_candidates
+      : poolName === 'defend'
+      ? pools.defend_candidates
+      : pools.steady_candidates;
+
+  let wasFallback = false;
+
+  if (!selectedList || selectedList.length === 0) {
+    wasFallback = true;
+    if (pools.defend_candidates && pools.defend_candidates.length > 0) {
+      selectedList = pools.defend_candidates;
+      poolName = 'defend';
+    } else if (pools.steady_candidates && pools.steady_candidates.length > 0) {
+      selectedList = pools.steady_candidates;
+      poolName = 'steady';
+    } else if (pools.attack_candidates && pools.attack_candidates.length > 0) {
+      selectedList = pools.attack_candidates;
+      poolName = 'attack';
+    } else {
+      const fallbackCand: CandidateMove = {
+        coord: [7, 7],
+        score: 100,
+        reason: '落子天元',
+        threatLevel: 'position',
+      };
+      return {
+        coord: fallbackCand.coord,
+        candidate: fallbackCand,
+        chosenPool: 'steady',
+        isEmergencyOverride: false,
+        wasFallback: true,
+      };
+    }
+  }
+
+  // Top scored candidate within the chosen pool
+  const chosenCand = selectedList[0];
+
+  return {
+    coord: chosenCand.coord,
+    candidate: chosenCand,
+    chosenPool: poolName,
+    isEmergencyOverride: false,
+    wasFallback,
+  };
+}
+
+/**
+ * Detects major board turning points / inflection points (v4.1 trigger 3):
+ * - Opponent live four or winning threat (crisis)
+ * - AI about to complete 5-in-a-row (inflection)
+ */
+export function detectBoardInflection(
+  board: Cell[][],
+  aiColor: 'B' | 'W'
+): {
+  hasCrisis: boolean;
+  isEmergencyDefense: boolean;
+  reason?: string;
+} {
+  const pools = generateGomokuCandidatePools(board, aiColor);
+
+  // 1. AI is about to complete 5-in-a-row (immediate win)
+  const aiWin = pools.attack_candidates.find((c) => c.threatLevel === 'win' || c.score >= 500000);
+  if (aiWin) {
+    return {
+      hasCrisis: true,
+      isEmergencyDefense: false,
+      reason: '我方即将达成五连绝杀',
+    };
+  }
+
+  // 2. Opponent is about to complete 5-in-a-row or has live 4 (life-or-death crisis)
+  const humanLethal = pools.defend_candidates.find(
+    (c) => c.threatLevel === 'block_win' || c.threatLevel === 'block_four' || c.score >= 150000
+  );
+  if (humanLethal) {
+    return {
+      hasCrisis: true,
+      isEmergencyDefense: true,
+      reason: humanLethal.reason || '对手形成活四或绝杀威胁，进入生死危机',
+    };
+  }
+
+  return {
+    hasCrisis: false,
+    isEmergencyDefense: false,
+  };
 }
 
 /**

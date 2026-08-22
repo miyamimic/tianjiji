@@ -61,19 +61,28 @@ import {
   BOARD_SIZE,
   checkWinner,
   generateStrategyCandidateGroups,
+  generateGomokuCandidatePools,
+  cleanAndNormalizeWeights,
+  sampleMoveFromPools,
+  detectBoardInflection,
   selectMoveByStrategy,
   generateTop5CandidateMoves,
   analyzePlayerSandbagging,
   accumulateGameEmotionDelta,
   checkIfCharacterShouldSurrender,
+  getEmotionWeightingObjectiveInfo,
   type Cell,
   type CandidateMove,
   type StrategyCandidateGroup,
+  type GomokuCandidatePools,
+  type GomokuWeights,
+  type GomokuLlmOutput,
   type GomokuStrategy,
   type SandbaggingReport,
   type StepLogItem
 } from '../../lib/gomokuProtocolEngine';
 import { 
+  generateGomokuLlmResponse,
   generateGomokuMoveDecision,
   loadLlmConfig,
   isLlmConfigured
@@ -230,7 +239,21 @@ export default function GomokuApp({
   const [winner, setWinner] = useState<Cell | 'draw' | 'surrender' | null>(null);
   const [winningLine, setWinningLine] = useState<[number, number][] | null>(null);
 
-  // Mechanical Protocol Layer State
+  // Mechanical Protocol Layer State (v4.1)
+  const [candidatePools, setCandidatePools] = useState<GomokuCandidatePools | null>(null);
+  const [currentWeights, setCurrentWeights] = useState<GomokuWeights>({
+    weight_attack: 0.33,
+    weight_defend: 0.34,
+    weight_steady: 0.33,
+  });
+  const [thoughtNote, setThoughtNote] = useState<string>('【心智备忘】观察对手棋路，按当前重心推进。');
+  const [opponentImpression, setOpponentImpression] = useState<string>('下法稳健，落子有章法');
+  const [isPlaydateInvite, setIsPlaydateInvite] = useState<boolean>(false);
+  const [lastCrisisTriggerStep, setLastCrisisTriggerStep] = useState<number>(-1);
+  const [lastChosenPool, setLastChosenPool] = useState<'attack' | 'defend' | 'steady'>('steady');
+  const [isEmergencyActive, setIsEmergencyActive] = useState<boolean>(false);
+
+  // Backward compatibility state for inspector / logs
   const [top5Candidates, setTop5Candidates] = useState<CandidateMove[]>([]);
   const [strategyGroups, setStrategyGroups] = useState<StrategyCandidateGroup | null>(null);
   const [lastEmotionLabel, setLastEmotionLabel] = useState<string>('');
@@ -487,121 +510,91 @@ export default function GomokuApp({
     }
   }, [winner, playerColor, prepareGameSettlement]);
 
-  // AI Move Execution: Protocol Mechanical Strategy Clustering -> LLM Intent Decision -> Mechanical Sanitization
+  // AI Move Execution (v4.1): JS Candidate Pools -> Fast Weighted Sampling (No LLM unless event-triggered)
   const triggerAiMove = useCallback(
     async (currentBoard: Cell[][], aiCol: 'B' | 'W') => {
       setIsAiThinking(true);
 
       const humanColor: 'B' | 'W' = aiCol === 'B' ? 'W' : 'B';
-      // 1. JS Mechanical Layer: Check if AI should surrender due to hopeless multi-threats
-      const mechSurrender = checkIfCharacterShouldSurrender(currentBoard, aiCol, moveHistory.length);
-
-      // 2. JS Mechanical Layer: Generate Strategy Candidate Groups (Aggressive, Balanced, Passive)
-      // Applies character skill rank capping and intra-group emotional soft weighting
       const activeRank = loadCharGomokuRank(currentCharacterId);
-      const groups = generateStrategyCandidateGroups(currentBoard, aiCol, activeRank, initialEmotionSnapshot);
-      setStrategyGroups(groups);
-      // Flatten top 5 for inspector / legacy reference
-      setTop5Candidates([...groups.aggressive, ...groups.balanced, ...groups.passive].slice(0, 5));
 
-      // 3. JS Mechanical Layer: Detect sandbagging facts (independent of strategy intent)
+      // 1. JS Mechanical Layer: Generate the 3 Candidate Pools (with rank ceiling & emotion soft weighting)
+      const pools = generateGomokuCandidatePools(currentBoard, aiCol, activeRank, initialEmotionSnapshot);
+      setCandidatePools(pools);
+      setStrategyGroups({
+        aggressive: pools.attack_candidates,
+        balanced: pools.defend_candidates,
+        passive: pools.steady_candidates,
+      });
+      setTop5Candidates([...pools.attack_candidates, ...pools.defend_candidates, ...pools.steady_candidates].slice(0, 5));
+
+      // 2. JS Mechanical Layer: Inflection / Crisis Detection & Sandbagging Analysis
+      const inflection = detectBoardInflection(currentBoard, aiCol);
       const sandbagReport = analyzePlayerSandbagging(currentBoard, humanColor, moveHistory);
       setSandbaggingReport(sandbagReport);
 
       const llmConfig = loadLlmConfig();
-      let chosenCoord: [number, number];
-      let selectedStrategy: GomokuStrategy = 'balanced';
-      let emotionLabel = '';
-      let innerThought = '';
-      let spokenDialogue = '';
-      let stepDelta: Partial<EmotionVector> = {};
-      let isAiSurrender = mechSurrender.shouldSurrender;
+      let activeWeights = { ...currentWeights };
+      let activeThought = thoughtNote;
+      let activeImpression = opponentImpression;
+      let spokenText = '';
 
-      if (isLlmConfigured(llmConfig)) {
+      // Check if event triggers an LLM update:
+      const currentStepCount = moveHistory.length + 1;
+      const isNewCrisis = inflection.hasCrisis && lastCrisisTriggerStep !== moveHistory.length;
+      const isNewSandbagging = sandbagReport.isPlayerSandbagging && !sandbaggingReport.isPlayerSandbagging;
+
+      if (isLlmConfigured(llmConfig) && (isNewCrisis || isNewSandbagging)) {
         try {
-          const decision = await generateGomokuMoveDecision(
-            llmConfig,
-            {
-              character: activeChar,
-              currentEmotionSnapshot: initialEmotionSnapshot,
-              aiColor: aiCol,
-              stepNumber: moveHistory.length + 1,
-              recentMoves: moveHistory.map((m) => ({ step: m.step, r: m.r, c: m.c, color: m.color })),
-              strategyGroups: groups,
-              isPlayerSandbagging: sandbagReport.isPlayerSandbagging,
-              abandonedBestPoints: sandbagReport.abandonedBestPoints,
-              inGameChats: inGameChats.map((c) => ({ sender: c.sender, text: c.text })),
-            },
-            currentBoard
-          );
-          chosenCoord = decision.coord;
-          selectedStrategy = decision.strategy;
-          emotionLabel = decision.emotionLabel;
-          innerThought = decision.innerThought;
-          spokenDialogue = decision.spokenDialogue;
-          stepDelta = decision.stepEmotionDelta;
-          if (decision.surrender && moveHistory.length >= 12) {
-            isAiSurrender = true;
+          const triggerType = isNewCrisis ? 'board_crisis' : 'player_sandbagging';
+          const llmRes = await generateGomokuLlmResponse(llmConfig, {
+            trigger: triggerType,
+            character: activeChar,
+            currentEmotionSnapshot: initialEmotionSnapshot,
+            charRank: activeRank,
+            aiColor: aiCol,
+            is_playdate_invite: isPlaydateInvite,
+            candidatePools: pools,
+            oldWeights: currentWeights,
+            previousThoughtNote: thoughtNote,
+            opponentImpression,
+            stepNumber: currentStepCount,
+            recentMoves: moveHistory.map((m) => ({ step: m.step, r: m.r, c: m.c, color: m.color })),
+            inGameChats: inGameChats.map((c) => ({ sender: c.sender, text: c.text })),
+            isPlayerSandbagging: sandbagReport.isPlayerSandbagging,
+            abandonedBestPoints: sandbagReport.abandonedBestPoints,
+            crisisReason: inflection.reason,
+          });
+
+          activeWeights = {
+            weight_attack: llmRes.weight_attack,
+            weight_defend: llmRes.weight_defend,
+            weight_steady: llmRes.weight_steady,
+          };
+          activeThought = llmRes.thought_note;
+          activeImpression = llmRes.opponent_impression;
+          spokenText = llmRes.speech_text;
+
+          setCurrentWeights(activeWeights);
+          setThoughtNote(activeThought);
+          setOpponentImpression(activeImpression);
+          if (isNewCrisis) {
+            setLastCrisisTriggerStep(moveHistory.length);
           }
         } catch (err) {
-          console.warn('LLM move error, fallback to balanced strategy selection:', err);
-          const fallbackRes = selectMoveByStrategy(groups, 'balanced');
-          chosenCoord = fallbackRes.coord;
-          selectedStrategy = 'balanced';
-          emotionLabel = '沉稳攻守';
-          innerThought = `*${fallbackRes.candidate.reason}，按常规棋理推演。*`;
-          spokenDialogue = `（从容落子）"请继续。"`;
-          stepDelta = { warmth: 0.02 };
+          console.warn('LLM Gomoku update error, using existing weights:', err);
         }
-      } else {
-        // Deterministic protocol engine fallback
-        const fallbackRes = selectMoveByStrategy(groups, 'balanced');
-        chosenCoord = fallbackRes.coord;
-        selectedStrategy = 'balanced';
-        emotionLabel = '沉稳攻守';
-        innerThought = `*${fallbackRes.candidate.reason}，按常规棋理推演。*`;
-        spokenDialogue = `（沉稳落子）"轮到你了。"`;
-        stepDelta = { warmth: 0.02 };
       }
 
-      setLastSelectedStrategy(selectedStrategy);
-      setLastEmotionLabel(emotionLabel);
-
-      // Check if Character Surrenders!
-      if (isAiSurrender) {
-        const surrenderDialogue =
-          spokenDialogue ||
-          `（端详棋局良久，轻叹一声放下手中棋子）"大势已去，这一局是你技高一筹，我认输了。"`;
-        const surrenderThought =
-          innerThought || `*无力回天了，认输也是应有之理。*`;
-
-        setCharacterSpeech(surrenderDialogue);
-        setCharacterInnerThought(surrenderThought);
-
-        setInGameChats((prev) => [
-          ...prev,
-          {
-            id: `chat_event_${Date.now()}`,
-            sender: 'system',
-            text: `🏳️ 「${characterName}」已投子认负！你获得了本局胜利！`,
-            timestamp: Date.now(),
-          },
-          {
-            id: `chat_char_surrender_${Date.now() + 1}`,
-            sender: 'character',
-            text: surrenderDialogue,
-            thought: surrenderThought,
-            tactic: currentTactic,
-            strategy: selectedStrategy,
-            emotionLabel: emotionLabel || undefined,
-            timestamp: Date.now() + 1,
-          },
-        ]);
-
-        setWinner(playerColor);
-        setIsAiThinking(false);
-        return;
-      }
+      // 3. JS Mechanical Layer: Weighted Sampling across the 3 Candidate Pools
+      // (Fast 0-delay execution with Emergency Hard Protection override if lethal threat exists)
+      const sampleRes = sampleMoveFromPools(pools, activeWeights, inflection.isEmergencyDefense);
+      const chosenCoord = sampleRes.coord;
+      setLastChosenPool(sampleRes.chosenPool);
+      setIsEmergencyActive(sampleRes.isEmergencyOverride);
+      setLastSelectedStrategy(
+        sampleRes.chosenPool === 'attack' ? 'aggressive' : sampleRes.chosenPool === 'defend' ? 'balanced' : 'passive'
+      );
 
       const [r, c] = chosenCoord;
 
@@ -609,40 +602,34 @@ export default function GomokuApp({
         playStoneSound(aiCol === 'B');
       }
 
-      // Update in-game dialogue & thought
-      if (spokenDialogue) {
-        setCharacterSpeech(spokenDialogue);
+      if (spokenText) {
+        setCharacterSpeech(spokenText);
+        setInGameChats((prev) => [
+          ...prev,
+          {
+            id: `chat_event_speech_${Date.now()}`,
+            sender: 'character',
+            text: spokenText,
+            thought: activeThought,
+            tactic: currentTactic,
+            timestamp: Date.now(),
+          },
+        ]);
       }
-      if (innerThought) {
-        setCharacterInnerThought(innerThought);
+      if (activeThought) {
+        setCharacterInnerThought(activeThought);
       }
-
-      // Add to scrollable chat stream
-      const charMoveMsg: InGameChatMessage = {
-        id: `chat_move_${Date.now()}`,
-        sender: 'character',
-        text: spokenDialogue || '（从容落子）"请继续。"',
-        thought: innerThought || undefined,
-        moveStep: moveHistory.length + 1,
-        coord: [r, c],
-        tactic: currentTactic,
-        strategy: selectedStrategy,
-        emotionLabel: emotionLabel || undefined,
-        timestamp: Date.now(),
-      };
-      setInGameChats((prev) => [...prev, charMoveMsg]);
-
-      // Accumulate isolated local emotion delta
-      setGameTotalDelta((prev) => accumulateGameEmotionDelta(prev, stepDelta));
 
       // Record step log
       const newStepLog: StepLogItem = {
-        step: moveHistory.length + 1,
+        step: currentStepCount,
         coord: [r, c],
         color: aiCol,
-        innerThought,
-        spokenDialogue,
-        emotionDelta: stepDelta,
+        weights: activeWeights,
+        chosenPool: sampleRes.chosenPool,
+        isEmergencyOverride: sampleRes.isEmergencyOverride,
+        innerThought: activeThought,
+        spokenDialogue: spokenText,
         timestamp: Date.now(),
       };
       setStepLogs((prev) => [...prev, newStepLog]);
@@ -652,7 +639,7 @@ export default function GomokuApp({
       setBoard(nextBoard);
 
       const newHistoryItem = {
-        step: moveHistory.length + 1,
+        step: currentStepCount,
         r,
         c,
         color: aiCol,
@@ -692,7 +679,22 @@ export default function GomokuApp({
       }
       setIsAiThinking(false);
     },
-    [moveHistory, activeChar, initialEmotionSnapshot, inGameChats, soundEnabled, currentTactic, characterName, playerColor, currentCharacterId]
+    [
+      moveHistory,
+      activeChar,
+      initialEmotionSnapshot,
+      inGameChats,
+      soundEnabled,
+      currentTactic,
+      characterName,
+      currentCharacterId,
+      currentWeights,
+      thoughtNote,
+      opponentImpression,
+      isPlaydateInvite,
+      lastCrisisTriggerStep,
+      sandbaggingReport.isPlayerSandbagging,
+    ]
   );
 
   // Human Cell Click
@@ -765,8 +767,8 @@ export default function GomokuApp({
     triggerAiMove(nextBoard, aiColor);
   };
 
-  // Restart / Reset
-  const handleRestart = (newPlayerColor = playerColor) => {
+  // Restart / Reset (v4.1: Calls LLM with trigger='game_start' and passes is_playdate_invite)
+  const handleRestart = async (newPlayerColor = playerColor, isPlaydate = false) => {
     gameFinalizedRef.current = false;
     clearActiveGameSession(currentCharacterId);
     const emptyBoard = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
@@ -784,23 +786,69 @@ export default function GomokuApp({
     setCurrentTurn('B');
     setIsAiThinking(false);
     setCurrentTactic('balanced');
-    setCharacterInnerThought('');
+    setIsPlaydateInvite(isPlaydate);
+    setLastCrisisTriggerStep(-1);
 
-    const openingText =
+    const aiCol: 'B' | 'W' = newPlayerColor === 'B' ? 'W' : 'B';
+    const activeRank = loadCharGomokuRank(currentCharacterId);
+    const initialPools = generateGomokuCandidatePools(emptyBoard, aiCol, activeRank, initialEmotionSnapshot);
+    setCandidatePools(initialPools);
+
+    const llmConfig = loadLlmConfig();
+    let initialOpeningText =
       newPlayerColor === 'W'
         ? `（黑子先落，轻扣天元）"既然你让我先行，那我就不客气了。"`
+        : isPlaydate
+        ? `（拂袖落座，含笑相迎）"你如期赴约了。请吧，执黑先行。"`
         : `（棋盘归整如初）"请吧，执黑先行。这次可要全力以赴。"`;
 
-    setCharacterSpeech(openingText);
+    if (isLlmConfigured(llmConfig)) {
+      try {
+        const startRes = await generateGomokuLlmResponse(llmConfig, {
+          trigger: 'game_start',
+          character: activeChar,
+          currentEmotionSnapshot: initialEmotionSnapshot,
+          charRank: activeRank,
+          aiColor: aiCol,
+          is_playdate_invite: isPlaydate,
+          candidatePools: initialPools,
+          oldWeights: currentWeights,
+          previousThoughtNote: thoughtNote,
+          opponentImpression,
+          stepNumber: 1,
+          recentMoves: [],
+          inGameChats: [],
+          isPlayerSandbagging: false,
+          abandonedBestPoints: [],
+        });
+
+        const newWeights: GomokuWeights = {
+          weight_attack: startRes.weight_attack,
+          weight_defend: startRes.weight_defend,
+          weight_steady: startRes.weight_steady,
+        };
+        setCurrentWeights(newWeights);
+        setThoughtNote(startRes.thought_note);
+        setOpponentImpression(startRes.opponent_impression);
+        if (startRes.opening_dialog) {
+          initialOpeningText = startRes.opening_dialog;
+        }
+      } catch (err) {
+        console.warn('Game start LLM error, using local defaults:', err);
+      }
+    }
+
+    setCharacterSpeech(initialOpeningText);
     setInGameChats([
       {
         id: `chat_init_${Date.now()}`,
         sender: 'character',
-        text: openingText,
+        text: initialOpeningText,
         timestamp: Date.now(),
       },
     ]);
 
+    // If AI is Black, AI plays Move 1 immediately with local JS weighted sampling
     if (newPlayerColor === 'W') {
       triggerAiMove(emptyBoard, 'B');
     }
@@ -895,7 +943,7 @@ export default function GomokuApp({
     });
   };
 
-  // In-Game Live Chat Sender
+  // In-Game Live Chat Sender (v4.1: Calls LLM with trigger='player_chat' to update weights and dialogue)
   const handleSendInGameChat = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const text = chatInputText.trim();
@@ -912,8 +960,53 @@ export default function GomokuApp({
     setChatInputText('');
     setIsChatSending(true);
 
+    const llmConfig = loadLlmConfig();
+    const aiCol: 'B' | 'W' = playerColor === 'B' ? 'W' : 'B';
+    const activeRank = loadCharGomokuRank(currentCharacterId);
+    const pools = candidatePools || generateGomokuCandidatePools(board, aiCol, activeRank, initialEmotionSnapshot);
+
     try {
-      if (onInGameChat) {
+      if (isLlmConfigured(llmConfig)) {
+        const chatRes = await generateGomokuLlmResponse(llmConfig, {
+          trigger: 'player_chat',
+          character: activeChar,
+          currentEmotionSnapshot: initialEmotionSnapshot,
+          charRank: activeRank,
+          aiColor: aiCol,
+          is_playdate_invite: isPlaydateInvite,
+          candidatePools: pools,
+          oldWeights: currentWeights,
+          previousThoughtNote: thoughtNote,
+          opponentImpression,
+          stepNumber: moveHistory.length + 1,
+          recentMoves: moveHistory.map((m) => ({ step: m.step, r: m.r, c: m.c, color: m.color })),
+          inGameChats: updatedChats.map((c) => ({ sender: c.sender, text: c.text })),
+          isPlayerSandbagging: sandbaggingReport.isPlayerSandbagging,
+          abandonedBestPoints: sandbaggingReport.abandonedBestPoints,
+          playerChatText: text,
+        });
+
+        setCurrentWeights({
+          weight_attack: chatRes.weight_attack,
+          weight_defend: chatRes.weight_defend,
+          weight_steady: chatRes.weight_steady,
+        });
+        setThoughtNote(chatRes.thought_note);
+        setOpponentImpression(chatRes.opponent_impression);
+
+        if (chatRes.speech_text) {
+          setCharacterSpeech(chatRes.speech_text);
+          const charMsg: InGameChatMessage = {
+            id: `chat_char_${Date.now() + 1}`,
+            sender: 'character',
+            text: chatRes.speech_text,
+            thought: chatRes.thought_note,
+            tactic: currentTactic,
+            timestamp: Date.now() + 1,
+          };
+          setInGameChats((prev) => [...prev, charMsg]);
+        }
+      } else if (onInGameChat) {
         const res = await onInGameChat(
           text,
           {
@@ -964,12 +1057,11 @@ export default function GomokuApp({
     }
   };
 
-  // Handle invitation actions in "Pending Invites" tab
+  // Handle invitation actions in "Pending Invites" tab (passes isPlaydate=true)
   const handleAcceptPendingInvite = (invite: GameInvitation) => {
     acceptGameInvite(invite.id);
     setScreenMode('arena');
-    handleRestart('B');
-    setCharacterSpeech(`（含笑执子相待）"你赴约了，请执黑先行。"`);
+    handleRestart('B', true);
     refreshLists();
   };
 
@@ -1191,6 +1283,83 @@ export default function GomokuApp({
                 </button>
               </div>
 
+              {/* v4.1 Persistent Weights & Sampling Status */}
+              <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 space-y-2">
+                <div className="flex items-center justify-between text-[11px] font-bold text-amber-200">
+                  <span>三维偏好权重 (v4.1)</span>
+                  {isEmergencyActive ? (
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-red-500/20 text-red-300 border border-red-500/40 animate-pulse">
+                      🚨 生死防守强制锁定
+                    </span>
+                  ) : (
+                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-400/30">
+                      上次落子: {lastChosenPool === 'attack' ? '进攻' : lastChosenPool === 'defend' ? '防守' : '稳健'}
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-1.5 text-[10px]">
+                  {/* Attack weight */}
+                  <div className="space-y-0.5">
+                    <div className="flex justify-between text-red-300 font-medium">
+                      <span>🔥 进攻权重 (weight_attack)</span>
+                      <span className="font-mono">{(currentWeights.weight_attack * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-black/40 rounded-full overflow-hidden border border-white/10">
+                      <div
+                        className="h-full bg-gradient-to-r from-red-500 to-rose-400 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min(100, Math.max(0, currentWeights.weight_attack * 100))}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Defend weight */}
+                  <div className="space-y-0.5">
+                    <div className="flex justify-between text-amber-300 font-medium">
+                      <span>🛡️ 防守权重 (weight_defend)</span>
+                      <span className="font-mono">{(currentWeights.weight_defend * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-black/40 rounded-full overflow-hidden border border-white/10">
+                      <div
+                        className="h-full bg-gradient-to-r from-amber-500 to-yellow-400 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min(100, Math.max(0, currentWeights.weight_defend * 100))}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Steady weight */}
+                  <div className="space-y-0.5">
+                    <div className="flex justify-between text-blue-300 font-medium">
+                      <span>⚖️ 稳健权重 (weight_steady)</span>
+                      <span className="font-mono">{(currentWeights.weight_steady * 100).toFixed(0)}%</span>
+                    </div>
+                    <div className="h-1.5 w-full bg-black/40 rounded-full overflow-hidden border border-white/10">
+                      <div
+                        className="h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min(100, Math.max(0, currentWeights.weight_steady * 100))}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Opponent Impression & Thought Note */}
+              <div className="p-2 rounded-xl bg-white/5 border border-white/10 space-y-1.5">
+                <div className="text-[10px] text-amber-200/90 font-bold flex items-center gap-1">
+                  <span>🧠 心智备忘与对手印象:</span>
+                </div>
+                <div className="text-[9.5px] text-white/80 bg-black/30 p-1.5 rounded-lg space-y-1 border border-white/5">
+                  <div>
+                    <span className="text-amber-400/90 font-medium">对手印象: </span>
+                    <span className="italic">{opponentImpression || '观察中...'}</span>
+                  </div>
+                  <div>
+                    <span className="text-blue-400/90 font-medium">思维笔记: </span>
+                    <span className="italic text-white/70">{thoughtNote || '按当前策略推演中。'}</span>
+                  </div>
+                </div>
+              </div>
+
               {/* Character Rank and Sandbagging fact */}
               <div className="p-2 rounded-xl bg-white/5 border border-white/10 space-y-1.5">
                 <div className="text-[11px] font-bold text-white flex items-center justify-between">
@@ -1239,8 +1408,52 @@ export default function GomokuApp({
 
               {/* Strategy Candidate Groups Pool */}
               <div className="space-y-2">
-                <span className="text-[11px] font-bold text-amber-200 block">机械层策略聚类候选池:</span>
-                {strategyGroups ? (
+                <span className="text-[11px] font-bold text-amber-200 block">机械层三组候选池 (v4.1):</span>
+                {candidatePools ? (
+                  <div className="space-y-1.5">
+                    {/* Attack pool */}
+                    <div className="p-1.5 rounded-lg bg-red-500/10 border border-red-500/20 space-y-1">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-red-300">
+                        <span>🔥 进攻池 (attack_candidates)</span>
+                        <span className="text-[9px] font-normal text-red-300/70">{candidatePools.attack_candidates.length} 项</span>
+                      </div>
+                      {candidatePools.attack_candidates.map((c, i) => (
+                        <div key={i} className="text-[9.5px] text-white/80 flex justify-between">
+                          <span>[{c.coord[0]},{c.coord[1]}] {c.reason}</span>
+                          <span className="font-mono text-red-300/70">{c.score}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Defend pool */}
+                    <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 space-y-1">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-amber-300">
+                        <span>🛡️ 防守池 (defend_candidates)</span>
+                        <span className="text-[9px] font-normal text-amber-300/70">{candidatePools.defend_candidates.length} 项</span>
+                      </div>
+                      {candidatePools.defend_candidates.map((c, i) => (
+                        <div key={i} className="text-[9.5px] text-white/80 flex justify-between">
+                          <span>[{c.coord[0]},{c.coord[1]}] {c.reason}</span>
+                          <span className="font-mono text-amber-300/70">{c.score}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Steady pool */}
+                    <div className="p-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 space-y-1">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-blue-300">
+                        <span>⚖️ 稳健池 (steady_candidates)</span>
+                        <span className="text-[9px] font-normal text-blue-300/70">{candidatePools.steady_candidates.length} 项</span>
+                      </div>
+                      {candidatePools.steady_candidates.map((c, i) => (
+                        <div key={i} className="text-[9.5px] text-white/80 flex justify-between">
+                          <span>[{c.coord[0]},{c.coord[1]}] {c.reason}</span>
+                          <span className="font-mono text-blue-300/70">{c.score}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : strategyGroups ? (
                   <div className="space-y-1.5">
                     {/* Aggressive group */}
                     <div className="p-1.5 rounded-lg bg-red-500/10 border border-red-500/20 space-y-1">
