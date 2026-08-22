@@ -56,7 +56,7 @@ import {
   type ActiveGomokuSession,
   type InGameChatMessage
 } from '../../lib/gameStore';
-import { loadCharAvatar } from '../../lib/customStore';
+import { loadCharAvatar, loadCharGomokuRank, saveCharGomokuRank, type GomokuRank } from '../../lib/customStore';
 import { 
   BOARD_SIZE,
   checkWinner,
@@ -290,6 +290,9 @@ export default function GomokuApp({
   const [pendingInvitesList, setPendingInvitesList] = useState<GameInvitation[]>([]);
   const [expandedMatchId, setExpandedMatchId] = useState<string | null>(null);
 
+  // Character Gomoku Skill Level
+  const [charRank, setCharRank] = useState<GomokuRank>(() => loadCharGomokuRank(currentCharacterId));
+
   // Debug mode switch
   const [debugShortcutEnabled, setDebugShortcutEnabled] = useState(isGameDebugShortcutEnabled);
 
@@ -494,7 +497,9 @@ export default function GomokuApp({
       const mechSurrender = checkIfCharacterShouldSurrender(currentBoard, aiCol, moveHistory.length);
 
       // 2. JS Mechanical Layer: Generate Strategy Candidate Groups (Aggressive, Balanced, Passive)
-      const groups = generateStrategyCandidateGroups(currentBoard, aiCol);
+      // Applies character skill rank capping and intra-group emotional soft weighting
+      const activeRank = loadCharGomokuRank(currentCharacterId);
+      const groups = generateStrategyCandidateGroups(currentBoard, aiCol, activeRank, initialEmotionSnapshot);
       setStrategyGroups(groups);
       // Flatten top 5 for inspector / legacy reference
       setTop5Candidates([...groups.aggressive, ...groups.balanced, ...groups.passive].slice(0, 5));
@@ -687,7 +692,7 @@ export default function GomokuApp({
       }
       setIsAiThinking(false);
     },
-    [moveHistory, activeChar, initialEmotionSnapshot, inGameChats, soundEnabled, currentTactic, characterName, playerColor]
+    [moveHistory, activeChar, initialEmotionSnapshot, inGameChats, soundEnabled, currentTactic, characterName, playerColor, currentCharacterId]
   );
 
   // Human Cell Click
@@ -1184,6 +1189,37 @@ export default function GomokuApp({
                 >
                   <X className="size-3.5" />
                 </button>
+              </div>
+
+              {/* Character Rank and Sandbagging fact */}
+              <div className="p-2 rounded-xl bg-white/5 border border-white/10 space-y-1.5">
+                <div className="text-[11px] font-bold text-white flex items-center justify-between">
+                  <span className="flex items-center gap-1">
+                    <Swords className="size-3 text-amber-400" />
+                    <span>角色对局等级:</span>
+                  </span>
+                  <span className="text-amber-300 font-mono">
+                    {charRank === 'bronze' ? '青铜(×0.6封顶)' : charRank === 'silver' ? '白银(×0.8封顶)' : charRank === 'gold' ? '黄金(无封顶)' : '王者(×1.2上限)'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-4 gap-1 pt-0.5">
+                  {(['bronze', 'silver', 'gold', 'master'] as GomokuRank[]).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => {
+                        setCharRank(r);
+                        saveCharGomokuRank(currentCharacterId, r);
+                      }}
+                      className={`py-0.5 text-[9px] rounded font-medium border transition cursor-pointer ${
+                        charRank === r
+                          ? 'border-amber-400 bg-amber-500/20 text-amber-300'
+                          : 'border-white/10 text-white/40 hover:text-white/70'
+                      }`}
+                    >
+                      {r === 'bronze' ? '青铜' : r === 'silver' ? '白银' : r === 'gold' ? '黄金' : '王者'}
+                    </button>
+                  ))}
+                </div>
               </div>
 
               {/* Sandbagging fact */}
@@ -1975,6 +2011,42 @@ export default function GomokuApp({
             </h4>
 
             <div className="space-y-2 text-xs text-white/80">
+              <div className="p-2.5 rounded-xl bg-white/5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-semibold text-white flex items-center gap-1">
+                      <Swords className="size-3.5 text-amber-400" />
+                      <span>{characterName} 的对局棋力等级</span>
+                    </div>
+                    <div className="text-[10px] text-white/40">约束进攻算力上限（不限制保守意图）</div>
+                  </div>
+                  <span className="text-[10px] font-bold text-amber-300 bg-amber-500/15 border border-amber-400/30 px-2 py-0.5 rounded">
+                    {charRank === 'bronze' ? '青铜 (上限×0.6)' : charRank === 'silver' ? '白银 (上限×0.8)' : charRank === 'gold' ? '黄金 (标准高手)' : '王者 (杀招上限×1.2)'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-4 gap-1.5 pt-1">
+                  {(['bronze', 'silver', 'gold', 'master'] as GomokuRank[]).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => {
+                        setCharRank(r);
+                        saveCharGomokuRank(currentCharacterId, r);
+                      }}
+                      className={`py-1.5 text-[10px] font-bold rounded-lg border transition cursor-pointer flex flex-col items-center gap-0.5 ${
+                        charRank === r
+                          ? 'border-amber-400 bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/40'
+                          : 'border-white/10 bg-black/30 text-white/40 hover:text-white/80'
+                      }`}
+                    >
+                      <span>{r === 'bronze' ? '青铜' : r === 'silver' ? '白银' : r === 'gold' ? '黄金' : '王者'}</span>
+                      <span className="text-[8px] font-normal opacity-70 scale-90">
+                        {r === 'bronze' ? '×0.6封顶' : r === 'silver' ? '×0.8封顶' : r === 'gold' ? '无封顶' : '×1.2上限'}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div className="flex items-center justify-between p-2 rounded-xl bg-white/5">
                 <div>
                   <div className="font-semibold text-white">落子音效</div>

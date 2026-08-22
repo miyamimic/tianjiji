@@ -653,6 +653,35 @@ export function clearDynamicMemories(charId: string): void {
   }
 }
 
+// -------------------------------------------------------------
+// 10. Gomoku Character Rank / Skill Level Configuration
+// -------------------------------------------------------------
+
+export type GomokuRank = 'bronze' | 'silver' | 'gold' | 'master';
+
+const CHAR_GOMOKU_RANK_PREFIX = '__rp_engine_char_gomoku_rank_';
+
+export function loadCharGomokuRank(charId: string): GomokuRank {
+  try {
+    const val = localStorage.getItem(`${CHAR_GOMOKU_RANK_PREFIX}${charId}`);
+    if (val === 'bronze' || val === 'silver' || val === 'gold' || val === 'master') {
+      return val;
+    }
+  } catch {
+    // ignore
+  }
+  return 'gold';
+}
+
+export function saveCharGomokuRank(charId: string, rank: GomokuRank): void {
+  try {
+    localStorage.setItem(`${CHAR_GOMOKU_RANK_PREFIX}${charId}`, rank);
+  } catch {
+    // ignore
+  }
+}
+
+
 
 
 

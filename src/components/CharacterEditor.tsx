@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, ShieldAlert, Heart, MessageSquare, Clipboard, RotateCcw, Check, Sparkles, HelpCircle, Layers } from 'lucide-react';
+import { User, ShieldAlert, Heart, MessageSquare, Clipboard, RotateCcw, Check, Sparkles, HelpCircle, Layers, Swords } from 'lucide-react';
 import { 
   loadSavedCharacters, 
   saveCharacterEdit, 
@@ -7,7 +7,10 @@ import {
   loadUserPromptProfile, 
   saveUserPromptProfile,
   loadCharMinBubbles,
-  saveCharMinBubbles
+  saveCharMinBubbles,
+  loadCharGomokuRank,
+  saveCharGomokuRank,
+  type GomokuRank
 } from '../lib/customStore';
 import type { Character, CharacterCore } from '../data/types';
 import { INSTINCT_DESCRIPTIONS, SPEECH_FILTER_DESCRIPTIONS } from '../data/types';
@@ -35,6 +38,7 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
   // Custom system prompt additions & min bubbles
   const [customPrompt, setCustomPrompt] = useState('');
   const [minBubbles, setMinBubbles] = useState<number>(1);
+  const [gomokuRank, setGomokuRank] = useState<GomokuRank>('gold');
 
   // Speech and Actions lists
   const [catchphrases, setCatchphrases] = useState('');
@@ -63,6 +67,7 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
       setInstinct(current.core.instinct_base);
       setSpeechFilter(current.core.speech_filter);
       setMinBubbles(loadCharMinBubbles(current.character_id));
+      setGomokuRank(loadCharGomokuRank(current.character_id));
       
       // Load custom instructions
       setCustomPrompt((current as any).custom_system_prompt || '');
@@ -121,6 +126,7 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
     // Attach custom system prompt & min bubbles
     (updatedChar as any).custom_system_prompt = customPrompt.trim();
     saveCharMinBubbles(editingChar.character_id, minBubbles);
+    saveCharGomokuRank(editingChar.character_id, gomokuRank);
 
     saveCharacterEdit(updatedChar);
     
@@ -282,6 +288,44 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
                     <span className="text-[9px] font-normal opacity-70">
                       {count === 1 ? '单句' : count === 2 ? '动作+句' : count === 3 ? '连发3句' : count === 4 ? '多句连发' : '长篇连发'}
                     </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Gomoku Skill Level / Rank Configuration (五子棋对局棋力等级) */}
+            <div className="p-3.5 rounded-xl border border-white/10 bg-white/[0.02] space-y-2.5">
+              <div className="flex items-center justify-between">
+                <label className="text-[11px] font-semibold text-white/90 flex items-center gap-1.5">
+                  <Swords className="size-3.5 text-amber-400" />
+                  五子棋角色实力等级 (实力天花板)
+                </label>
+                <span className="text-xs font-bold text-amber-300 bg-amber-500/15 border border-amber-400/30 px-2 py-0.5 rounded-md">
+                  {gomokuRank === 'bronze' ? '青铜段位' : gomokuRank === 'silver' ? '白银段位' : gomokuRank === 'gold' ? '黄金段位' : '王者段位'}
+                </span>
+              </div>
+              <p className="text-[10px] text-white/40 leading-relaxed">
+                作为角色进攻杀伤力的上限天花板（仅约束 aggressive 原始算力分数，不限制 LLM 自主选择保守/进攻策略）。
+              </p>
+              <div className="grid grid-cols-4 gap-1.5 pt-1">
+                {[
+                  { key: 'bronze', label: '青铜', sub: '上限×0.6 (克制攻势)' },
+                  { key: 'silver', label: '白银', sub: '上限×0.8 (常规业余)' },
+                  { key: 'gold', label: '黄金', sub: '无封顶 (标准高手)' },
+                  { key: 'master', label: '王者', sub: '上限×1.2 (杀招凌厉)' },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => setGomokuRank(item.key as GomokuRank)}
+                    className={`py-2 px-1 text-xs font-semibold rounded-lg border transition-all flex flex-col items-center gap-0.5 ${
+                      gomokuRank === item.key
+                        ? 'border-amber-400 bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/50 shadow-sm'
+                        : 'border-white/10 bg-black/40 hover:bg-white/5 text-white/50 hover:text-white/80'
+                    }`}
+                  >
+                    <span>{item.label}</span>
+                    <span className="text-[8.5px] font-normal opacity-70 scale-90">{item.sub}</span>
                   </button>
                 ))}
               </div>

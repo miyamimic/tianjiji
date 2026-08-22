@@ -1,17 +1,26 @@
 // ============================================================================
 // 风铃·五子棋系统矫正补充协议 - JS 机械层核心引擎
+// ----------------------------------------------------------------------------
+// 顶层红线：等级与情绪加权属于机械层的“能力与偏好微调”，永远不能替代 LLM 的策略意图决策。
+// JS 侧一切加权、封顶，不能变成硬编码人格行为脚本。
+// 核心原则：
+// 情绪、等级只调整 JS 侧候选池内部分数与能力上限；不会删减三组集合；不会强制限定 LLM 的 selected_strategy 策略选择；主观策略意图完全交由 LLM 决策。
+// 
 // 职责：
 // 1. 规则校验、落子合法性检查、胜负判定
 // 2. 计算全部合法落子并打分，按棋风聚类为三组 (aggressive / balanced / passive)，每组提供 2-3 条候选项
-// 3. 统计历史步数，产出客观事实标记：isPlayerSandbagging (放水检测) 及 放弃优质点位记录
-// 4. 防幻觉与容错校验：根据 LLM 策略意图反选落子，校验失败自动降级到 balanced
+// 3. 执行角色棋力等级上限裁切（仅限 aggressive 原始分）及主世界情绪组内软加权（乘法偏移+封顶）
+// 4. 统计历史步数，产出客观事实标记：isPlayerSandbagging (放水检测) 及 放弃优质点位记录（仅做文本客观信息传递，严禁改动算法打分）
+// 5. 防幻觉与容错校验：根据 LLM 策略意图反选落子，校验失败自动降级到 balanced
 // ============================================================================
 
 import type { EmotionVector } from '../data/types';
+import type { GomokuRank } from './customStore';
 
 export const BOARD_SIZE = 15;
 export type Cell = 'B' | 'W' | null;
 export type GomokuStrategy = 'aggressive' | 'balanced' | 'passive';
+export type { GomokuRank } from './customStore';
 
 export interface CandidateMove {
   coord: [number, number]; // [r, c]
@@ -197,11 +206,18 @@ function evaluateDirection(
  * - balanced: blocks opponent live three / rush four while establishing AI presence (>= live two)
  * - passive: far points (Manhattan dist >= 8 from center) or quiet low-threat positions
  *
- * Each group maintains 2-3 candidate moves.
+ * Execution Pipeline (Strictly Preserves LLM Choice & Groups):
+ * 1. Base clustering & candidate extraction (each group maintains 2-3 candidates).
+ * 2. Character Rank Cap on aggressive original scores (bronze/silver/gold/master).
+ * 3. Emotion intra-group soft-weighting (multipliers capped at 1.5x) reading main world snapshot.
+ *
+ * Each group maintains at least 2 candidates; passive is never empty.
  */
 export function generateStrategyCandidateGroups(
   board: Cell[][],
-  aiColor: 'B' | 'W'
+  aiColor: 'B' | 'W',
+  charRank: GomokuRank = 'gold',
+  emotionSnapshot?: Partial<EmotionVector>
 ): StrategyCandidateGroup {
   const humanColor: 'B' | 'W' = aiColor === 'B' ? 'W' : 'B';
   const directions = [
@@ -214,23 +230,23 @@ export function generateStrategyCandidateGroups(
   // Check if board is completely empty -> Center & near-center layout
   const isBoardEmpty = board.every((row) => row.every((c) => c === null));
   if (isBoardEmpty) {
-    return {
-      aggressive: [
-        { coord: [7, 7], score: 1000, reason: '占据天元全局中心', threatLevel: 'position' },
-        { coord: [7, 8], score: 850, reason: '紧邻天元开局', threatLevel: 'position' },
-        { coord: [8, 7], score: 850, reason: '紧邻天元开局', threatLevel: 'position' },
-      ],
-      balanced: [
-        { coord: [6, 7], score: 800, reason: '中腹均衡占位', threatLevel: 'position' },
-        { coord: [7, 6], score: 800, reason: '中腹均衡占位', threatLevel: 'position' },
-        { coord: [8, 8], score: 750, reason: '斜向星位占角', threatLevel: 'position' },
-      ],
-      passive: [
-        { coord: [3, 3], score: 300, reason: '边角星位起手（保守开局）', threatLevel: 'position' },
-        { coord: [11, 11], score: 300, reason: '外围边角开局', threatLevel: 'position' },
-        { coord: [3, 11], score: 280, reason: '远端外势开局', threatLevel: 'position' },
-      ],
-    };
+    const rawAggressive: CandidateMove[] = [
+      { coord: [7, 7], score: 1000, reason: '占据天元全局中心', threatLevel: 'position' },
+      { coord: [7, 8], score: 850, reason: '紧邻天元开局', threatLevel: 'position' },
+      { coord: [8, 7], score: 850, reason: '紧邻天元开局', threatLevel: 'position' },
+    ];
+    const rawBalanced: CandidateMove[] = [
+      { coord: [6, 7], score: 800, reason: '中腹均衡占位', threatLevel: 'position' },
+      { coord: [7, 6], score: 800, reason: '中腹均衡占位', threatLevel: 'position' },
+      { coord: [8, 8], score: 750, reason: '斜向星位占角', threatLevel: 'position' },
+    ];
+    const rawPassive: CandidateMove[] = [
+      { coord: [3, 3], score: 300, reason: '边角星位起手（保守开局）', threatLevel: 'position' },
+      { coord: [11, 11], score: 300, reason: '外围边角开局', threatLevel: 'position' },
+      { coord: [3, 11], score: 280, reason: '远端外势开局', threatLevel: 'position' },
+    ];
+
+    return applyRankAndEmotionWeighting(rawAggressive, rawBalanced, rawPassive, charRank, emotionSnapshot);
   }
 
   const aggressiveList: CandidateMove[] = [];
@@ -380,7 +396,6 @@ export function generateStrategyCandidateGroups(
 
   // Guarantee passive group has true low-threat / corner points if needed
   if (passiveList.length < 2) {
-    // Find empty cells with Manhattan dist >= 8
     for (let r = 0; r < BOARD_SIZE; r++) {
       for (let c = 0; c < BOARD_SIZE; c++) {
         if (board[r][c] === null && Math.abs(r - 7) + Math.abs(c - 7) >= 8) {
@@ -436,11 +451,184 @@ export function generateStrategyCandidateGroups(
     }
   }
 
+  return applyRankAndEmotionWeighting(finalAggressive, finalBalanced, finalPassive, charRank, emotionSnapshot);
+}
+
+/**
+ * Applies Character Rank ceiling (on aggressive original scores) followed by
+ * Emotion intra-group soft-weighting.
+ *
+ * Guarantees:
+ * - Does NOT delete any group.
+ * - Does NOT force or constrain LLM selected_strategy.
+ * - Caps multiplier at 1.5x max.
+ * - Each group preserves >= 2 candidates.
+ */
+function applyRankAndEmotionWeighting(
+  rawAggressive: CandidateMove[],
+  rawBalanced: CandidateMove[],
+  rawPassive: CandidateMove[],
+  charRank: GomokuRank = 'gold',
+  emotionSnapshot?: Partial<EmotionVector>
+): StrategyCandidateGroup {
+  // Deep clone candidates so we don't mutate input objects unexpectedly
+  const aggressive = rawAggressive.map((m) => ({ ...m }));
+  const balanced = rawBalanced.map((m) => ({ ...m }));
+  const passive = rawPassive.map((m) => ({ ...m }));
+
+  // =========================================================================
+  // STEP A: Character Rank Capacity Ceiling (applied to aggressive original score)
+  // =========================================================================
+  const balancedMax = balanced.length > 0 ? Math.max(...balanced.map((m) => m.score)) : 1000;
+  let aggressiveCap = Infinity;
+
+  if (charRank === 'bronze') {
+    aggressiveCap = Math.round(balancedMax * 0.6);
+  } else if (charRank === 'silver') {
+    aggressiveCap = Math.round(balancedMax * 0.8);
+  } else if (charRank === 'master') {
+    aggressiveCap = Math.round(balancedMax * 1.2);
+  } else {
+    // gold: no cap (Infinity)
+    aggressiveCap = Infinity;
+  }
+
+  if (aggressiveCap !== Infinity) {
+    for (let i = 0; i < aggressive.length; i++) {
+      if (aggressive[i].score > aggressiveCap) {
+        aggressive[i].score = Math.max(1, aggressiveCap - i * 10);
+      }
+    }
+  }
+
+  // =========================================================================
+  // STEP B: Emotion Intra-Group Soft Weighting (Reading Main World Snapshot)
+  // =========================================================================
+  const isAbove60 = (val?: number) => typeof val === 'number' && (val > 60 || val > 0.6);
+
+  let aggressiveMult = 1.0;
+  let balancedMult = 1.0;
+  let passiveMult = 1.0;
+
+  if (isAbove60(emotionSnapshot?.warmth)) {
+    passiveMult *= 1.2;
+  }
+  if (isAbove60(emotionSnapshot?.sadness)) {
+    passiveMult *= 1.15;
+  }
+  if (isAbove60(emotionSnapshot?.joy)) {
+    balancedMult *= 1.15;
+  }
+  if (isAbove60(emotionSnapshot?.fear)) {
+    balancedMult *= 1.1;
+  }
+  if (isAbove60(emotionSnapshot?.anger)) {
+    aggressiveMult *= 1.2;
+  }
+  if (isAbove60(emotionSnapshot?.desire)) {
+    aggressiveMult *= 1.15;
+  }
+
+  // Multiplier ceiling cap at 1.5x max
+  aggressiveMult = Math.min(1.5, Math.round(aggressiveMult * 1000) / 1000);
+  balancedMult = Math.min(1.5, Math.round(balancedMult * 1000) / 1000);
+  passiveMult = Math.min(1.5, Math.round(passiveMult * 1000) / 1000);
+
+  // Apply intra-group multipliers
+  aggressive.forEach((m) => {
+    m.score = Math.round(m.score * aggressiveMult);
+  });
+  balanced.forEach((m) => {
+    m.score = Math.round(m.score * balancedMult);
+  });
+  passive.forEach((m) => {
+    m.score = Math.round(m.score * passiveMult);
+  });
+
+  // Re-sort within each group
+  aggressive.sort((a, b) => b.score - a.score);
+  balanced.sort((a, b) => b.score - a.score);
+  passive.sort((a, b) => b.score - a.score);
+
   return {
-    aggressive: finalAggressive,
-    balanced: finalBalanced,
-    passive: finalPassive,
+    aggressive: aggressive.slice(0, 3),
+    balanced: balanced.slice(0, 3),
+    passive: passive.slice(0, 3),
   };
+}
+
+/**
+ * Produces purely objective information regarding emotion weighting for the LLM prompt.
+ * STRICTLY FORBIDS suggestive or directive statements (e.g. "you should choose passive").
+ */
+export function getEmotionWeightingObjectiveInfo(
+  emotionSnapshot?: Partial<EmotionVector>
+): { statusText: string; adjustmentText: string; fullPromptHint: string } {
+  if (!emotionSnapshot) {
+    return {
+      statusText: '处于均衡区间',
+      adjustmentText: '各策略分组内部候选项保持基线算法评估相对排序',
+      fullPromptHint: '候选池信息提示：当前情绪状态：处于均衡区间。算法层面：各策略分组内部候选项保持基线算法评估相对排序；你依然拥有完整自由，可以任意选择 aggressive / balanced / passive 的策略意图。',
+    };
+  }
+
+  const isAbove60 = (val?: number) => typeof val === 'number' && (val > 60 || val > 0.6);
+  const isBelow30 = (val?: number) => typeof val === 'number' && (val < 30 || val < 0.3);
+
+  const getNormVal = (val?: number) => {
+    if (typeof val !== 'number') return 0;
+    return val > 1 ? Math.round(val) : Math.round(val * 100);
+  };
+
+  const statusParts: string[] = [];
+  const adjustParts: string[] = [];
+
+  // Check warmth
+  if (isAbove60(emotionSnapshot.warmth)) {
+    statusParts.push(`温情 ${getNormVal(emotionSnapshot.warmth)} (高)`);
+    adjustParts.push('因你的温情情绪，passive 分组内部候选项相对分数已上调');
+  } else if (isBelow30(emotionSnapshot.warmth)) {
+    statusParts.push(`温情 ${getNormVal(emotionSnapshot.warmth)} (低)`);
+  }
+
+  // Check anger
+  if (isAbove60(emotionSnapshot.anger)) {
+    statusParts.push(`愤怒 ${getNormVal(emotionSnapshot.anger)} (高)`);
+    adjustParts.push('因你的愤怒情绪，aggressive 分组内部候选项相对分数已上调');
+  } else if (isBelow30(emotionSnapshot.anger)) {
+    statusParts.push(`愤怒 ${getNormVal(emotionSnapshot.anger)} (低)`);
+  }
+
+  // Check joy
+  if (isAbove60(emotionSnapshot.joy)) {
+    statusParts.push(`喜悦 ${getNormVal(emotionSnapshot.joy)} (高)`);
+    adjustParts.push('因你的喜悦情绪，balanced 分组内部候选项相对分数已上调');
+  }
+
+  // Check sadness
+  if (isAbove60(emotionSnapshot.sadness)) {
+    statusParts.push(`悲伤 ${getNormVal(emotionSnapshot.sadness)} (高)`);
+    adjustParts.push('因你的悲伤情绪，passive 分组内部候选项相对分数已上调');
+  }
+
+  // Check desire
+  if (isAbove60(emotionSnapshot.desire)) {
+    statusParts.push(`好胜 ${getNormVal(emotionSnapshot.desire)} (高)`);
+    adjustParts.push('因你的好胜情绪，aggressive 分组内部候选项相对分数已上调');
+  }
+
+  // Check fear
+  if (isAbove60(emotionSnapshot.fear)) {
+    statusParts.push(`恐惧 ${getNormVal(emotionSnapshot.fear)} (高)`);
+    adjustParts.push('因你的恐惧情绪，balanced 分组内部候选项相对分数已上调');
+  }
+
+  const statusText = statusParts.length > 0 ? statusParts.join('，') : '各维度处于标准平稳区间';
+  const adjustmentText = adjustParts.length > 0 ? adjustParts.join('；') : '各策略分组内部候选项保持基线算法评估相对排序';
+
+  const fullPromptHint = `候选池信息提示：当前情绪状态：${statusText}。算法层面：${adjustmentText}；你依然拥有完整自由，可以任意选择 aggressive / balanced / passive 的策略意图。`;
+
+  return { statusText, adjustmentText, fullPromptHint };
 }
 
 /**

@@ -12,7 +12,8 @@ import {
   RefreshCw,
   Sliders,
   ShieldAlert,
-  Clipboard
+  Clipboard,
+  Swords
 } from 'lucide-react';
 import { 
   loadSavedCharacters, 
@@ -29,7 +30,10 @@ import {
   loadCharVisualDesc,
   saveCharVisualDesc,
   loadCharMinBubbles,
-  saveCharMinBubbles
+  saveCharMinBubbles,
+  loadCharGomokuRank,
+  saveCharGomokuRank,
+  type GomokuRank
 } from '../../lib/customStore';
 import { loadLlmConfig, analyzeVisualAvatar } from '../../lib/llm';
 import type { Character } from '../../data/types';
@@ -64,6 +68,7 @@ export default function PersonaApp({ currentCharacterId = 'char_001', onEngineRe
   const [speechFilter, setSpeechFilter] = useState<'rough' | 'gentle' | 'formal' | 'casual'>('casual');
   const [customPrompt, setCustomPrompt] = useState('');
   const [minBubbles, setMinBubbles] = useState<number>(1);
+  const [gomokuRank, setGomokuRank] = useState<GomokuRank>('gold');
   const [catchphrases, setCatchphrases] = useState('');
   const [forbiddenPhrases, setForbiddenPhrases] = useState('');
   const [controlActions, setControlActions] = useState('');
@@ -92,6 +97,7 @@ export default function PersonaApp({ currentCharacterId = 'char_001', onEngineRe
     setCharAvatar(loadCharAvatar(c.character_id));
     setCharVisualDesc(loadCharVisualDesc(c.character_id));
     setMinBubbles(loadCharMinBubbles(c.character_id));
+    setGomokuRank(loadCharGomokuRank(c.character_id));
     setCoreValues(c.core.values.join('、'));
     setInstinct(c.core.instinct_base);
     setSpeechFilter(c.core.speech_filter);
@@ -206,6 +212,7 @@ export default function PersonaApp({ currentCharacterId = 'char_001', onEngineRe
 
     saveCharacterEdit(updatedChar);
     saveCharMinBubbles(editingChar.character_id, minBubbles);
+    saveCharGomokuRank(editingChar.character_id, gomokuRank);
     saveCharAvatar(editingChar.character_id, charAvatar);
     saveCharVisualDesc(editingChar.character_id, charVisualDesc);
 
@@ -514,6 +521,44 @@ export default function PersonaApp({ currentCharacterId = 'char_001', onEngineRe
                         }`}
                       >
                         {cnt} 条
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Gomoku Rank Selector */}
+                <div className="p-2.5 rounded-xl border border-white/10 bg-black/30 space-y-1.5">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="font-semibold text-white/90 flex items-center gap-1">
+                      <Swords className="size-3 text-amber-400" />
+                      五子棋对局等级上限
+                    </span>
+                    <span className="font-bold text-amber-300 bg-amber-500/15 border border-amber-400/30 px-2 py-0.5 rounded text-[10px]">
+                      {gomokuRank === 'bronze' ? '青铜段位' : gomokuRank === 'silver' ? '白银段位' : gomokuRank === 'gold' ? '黄金段位' : '王者段位'}
+                    </span>
+                  </div>
+                  <p className="text-[9px] text-white/40">
+                    约束角色进攻杀伤力的上限天花板（不干涉保守/稳健选点与 LLM 自主策略意图）。
+                  </p>
+                  <div className="grid grid-cols-4 gap-1 pt-0.5">
+                    {[
+                      { key: 'bronze', label: '青铜', sub: '上限×0.6' },
+                      { key: 'silver', label: '白银', sub: '上限×0.8' },
+                      { key: 'gold', label: '黄金', sub: '无封顶' },
+                      { key: 'master', label: '王者', sub: '上限×1.2' },
+                    ].map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => setGomokuRank(item.key as GomokuRank)}
+                        className={`py-1 text-[10px] font-bold rounded-lg border transition-all flex flex-col items-center ${
+                          gomokuRank === item.key
+                            ? 'border-amber-400 bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/40'
+                            : 'border-white/10 bg-black/40 text-white/40 hover:text-white/80'
+                        }`}
+                      >
+                        <span>{item.label}</span>
+                        <span className="text-[8px] font-normal opacity-70 scale-90">{item.sub}</span>
                       </button>
                     ))}
                   </div>

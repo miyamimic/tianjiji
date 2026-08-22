@@ -666,7 +666,7 @@ ${globalCustomPrompt.trim()}`);
 // -------------------------------------------------------------
 
 import type { CandidateMove, StrategyCandidateGroup, GomokuStrategy, Cell } from './gomokuProtocolEngine';
-import { sanitizeLlmDecision } from './gomokuProtocolEngine';
+import { sanitizeLlmDecision, getEmotionWeightingObjectiveInfo } from './gomokuProtocolEngine';
 
 export interface GomokuMoveContext {
   character: Character;
@@ -733,6 +733,8 @@ export async function generateGomokuMoveDecision(
     ? `【⚠️ 客观事实标记：主控有放水/让子迹象】\n检测到主控在上一手放弃了极佳的胜势/防守点位（${abandonedBestPoints.map(p => `[${p.coord[0]}, ${p.coord[1]}] ${p.reason}`).join('、')}）。请结合你的人设性格（是骄傲戳穿、嗔怪、还是装作不知道乘胜追击），在内心活动和台词中体现。`
     : '【客观事实标记：正常对弈对抗】双方走子均在合理推演范围内。';
 
+  const emotionWeightingInfo = getEmotionWeightingObjectiveInfo(currentEmotionSnapshot);
+
   const prompt = `【风铃·五子棋 LLM 决策层指令】
 你正在以「${character.name}」的身份与主控进行实盘五子棋对弈。你执${colorLabel}，当前为全局第 ${stepNumber} 手。
 
@@ -748,6 +750,9 @@ ${sandbaggingFact}
 ${recentMovesList}
 棋局边聊记录:
 ${chatsList}
+
+【机械层候选池状态提示（纯信息告知）】
+${emotionWeightingInfo.fullPromptHint}
 
 【机械层聚类的三大棋风策略选项（你只需选择策略意图，JS 引擎将为你执行对应落子）】
 ${aggressiveText}
