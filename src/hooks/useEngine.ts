@@ -658,7 +658,8 @@ export function useEngine() {
         }
 
         // 5. Game Invitation Trigger with Frequency Cooldown and Debug Switch
-        const isGameKeyword = /下棋|五子棋|来一局|来一盘|玩游戏|玩局游戏|下盘棋|陪我下棋|对弈|下一局/.test(triggerInput);
+        const isGomokuKeyword = /下棋|五子棋|下盘棋|陪我下棋|对弈|下一局/.test(triggerInput);
+        const isGhostCardKeyword = /捉鬼牌|抽鬼牌|鬼牌|抽牌游戏|玩捉鬼牌|来局捉鬼牌/.test(triggerInput);
         const gameInviteItem = structuredList.find((st) => st.game_invite);
         
         // Character Active Invite: must obey turn frequency limit
@@ -674,7 +675,18 @@ export function useEngine() {
           };
           recordCharacterInviteSent(character.character_id);
           setPendingGameInvite(invite);
-        } else if (isGameKeyword && isGameDebugShortcutEnabled()) {
+        } else if (isGhostCardKeyword && isGameDebugShortcutEnabled()) {
+          const invite: GameInvitation = {
+            id: `invite_ghost_${Date.now()}`,
+            gameType: 'ghost_card',
+            characterId: character.character_id,
+            characterName: character.name,
+            inviteText: `“牌已经洗好了，要不要来一局惊险刺激的捉鬼牌？看看谁会把鬼牌留在手里🐾”`,
+            timestamp: Date.now(),
+            status: 'pending',
+          };
+          setPendingGameInvite(invite);
+        } else if (isGomokuKeyword && isGameDebugShortcutEnabled()) {
           // Local debug shortcut mode
           const invite: GameInvitation = {
             id: `invite_${Date.now()}`,
@@ -723,8 +735,20 @@ export function useEngine() {
     }
 
     // Trigger game invite in mock / fallback ONLY if debug shortcut enabled
-    const isGameKeywordFallback = /下棋|五子棋|来一局|来一盘|玩游戏|玩局游戏|下盘棋|陪我下棋|对弈|下一局/.test(triggerInput);
-    if (isGameKeywordFallback && isGameDebugShortcutEnabled()) {
+    const isGhostCardKeywordFallback = /捉鬼牌|抽鬼牌|鬼牌|抽牌游戏|玩捉鬼牌|来局捉鬼牌/.test(triggerInput);
+    const isGomokuKeywordFallback = /下棋|五子棋|来一局|来一盘|玩游戏|玩局游戏|下盘棋|陪我下棋|对弈|下一局/.test(triggerInput);
+    if (isGhostCardKeywordFallback && isGameDebugShortcutEnabled()) {
+      const invite: GameInvitation = {
+        id: `invite_ghost_${Date.now()}`,
+        gameType: 'ghost_card',
+        characterId: character.character_id,
+        characterName: character.name,
+        inviteText: `“牌已经洗好啦，来和我玩一局捉鬼牌吧🐾～”`,
+        timestamp: Date.now(),
+        status: 'pending',
+      };
+      setPendingGameInvite(invite);
+    } else if (isGomokuKeywordFallback && isGameDebugShortcutEnabled()) {
       const invite: GameInvitation = {
         id: `invite_${Date.now()}`,
         gameType: 'gomoku',

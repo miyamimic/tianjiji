@@ -6,12 +6,14 @@ const DB_VERSION = 2;
 
 export interface DBGameMatchRecord {
   id: string;
+  gameType?: 'gomoku' | 'ghost_card';
   characterId: string;
   characterName: string;
-  playerColor: 'B' | 'W';
+  playerColor?: 'B' | 'W';
   winner: 'player' | 'character' | 'draw' | 'surrender';
   totalMoves: number;
-  moves: Array<{
+  totalRounds?: number;
+  moves?: Array<{
     step: number;
     r: number;
     c: number;
@@ -31,9 +33,11 @@ export interface DBGameMatchRecord {
   gameTotalDelta?: Record<string, number>;
   emotionApplied?: boolean;
   stepLogs?: Array<{
-    step: number;
-    coord: [number, number];
-    color: 'B' | 'W';
+    step?: number;
+    round?: number;
+    coord?: [number, number];
+    color?: 'B' | 'W';
+    drawnCard?: any;
     innerThought?: string;
     spokenDialogue?: string;
     emotionDelta?: Record<string, number>;
@@ -47,11 +51,22 @@ export interface DBGameMatchRecord {
       missedAdvantage: number;
     }>;
   };
+  rewardOrPunishment?: string;
+  keyMoments?: Array<{
+    round: number;
+    event: string;
+    detail: string;
+  }>;
+  bluffStats?: {
+    userBluffCount: number;
+    charBluffCount: number;
+    charBelievedCount: number;
+  };
 }
 
 export interface DBGameInvite {
   id: string;
-  gameType: 'gomoku';
+  gameType: 'gomoku' | 'ghost_card';
   characterId: string;
   characterName: string;
   inviteText: string;

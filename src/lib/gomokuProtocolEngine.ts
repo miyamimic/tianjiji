@@ -2,21 +2,28 @@
 // 风铃·五子棋系统矫正补充协议 - JS 机械层核心引擎
 // 职责：
 // 1. 规则校验、落子合法性检查、胜负判定
-// 2. 对所有合法落子打分，输出 Top-5 候选落子集合 (含得分与战术意图)
+// 2. 计算全部合法落子并打分，按棋风聚类为三组 (aggressive / balanced / passive)，每组提供 2-3 条候选项
 // 3. 统计历史步数，产出客观事实标记：isPlayerSandbagging (放水检测) 及 放弃优质点位记录
-// 4. 防幻觉与容错校验：验证 LLM 选择的落子坐标，校验失败自动降级到 Top-1
+// 4. 防幻觉与容错校验：根据 LLM 策略意图反选落子，校验失败自动降级到 balanced
 // ============================================================================
 
 import type { EmotionVector } from '../data/types';
 
 export const BOARD_SIZE = 15;
 export type Cell = 'B' | 'W' | null;
+export type GomokuStrategy = 'aggressive' | 'balanced' | 'passive';
 
 export interface CandidateMove {
   coord: [number, number]; // [r, c]
   score: number;
   reason: string;
   threatLevel: 'win' | 'block_win' | 'four' | 'block_four' | 'three' | 'block_three' | 'position' | 'neutral';
+}
+
+export interface StrategyCandidateGroup {
+  aggressive: CandidateMove[];
+  balanced: CandidateMove[];
+  passive: CandidateMove[];
 }
 
 export interface SandbaggingReport {
@@ -33,6 +40,8 @@ export interface StepLogItem {
   step: number;
   coord: [number, number];
   color: 'B' | 'W';
+  strategy?: GomokuStrategy;
+  emotionLabel?: string;
   innerThought?: string;
   spokenDialogue?: string;
   emotionDelta?: Partial<EmotionVector>;
@@ -40,10 +49,11 @@ export interface StepLogItem {
 }
 
 export interface LlmMoveDecision {
-  selected_move: [number, number];
+  selected_strategy: GomokuStrategy;
   inner_thought: string;
   spoken_dialogue: string;
   step_emotion_delta: Partial<EmotionVector>;
+  emotion_label?: string;
   surrender?: boolean;
 }
 
@@ -178,13 +188,21 @@ function evaluateDirection(
 }
 
 // -------------------------------------------------------------
-// 3. Top-5 Candidate Generator (JS Mechanical Layer)
+// 3. Strategy Candidate Groups Generator (JS Mechanical Layer)
 // -------------------------------------------------------------
 
-export function generateTop5CandidateMoves(
+/**
+ * Computes all legal moves, scores them, and clusters them into 3 distinct tactical groups:
+ * - aggressive: threatening moves (forms AI threat >= live three / rush four / win)
+ * - balanced: blocks opponent live three / rush four while establishing AI presence (>= live two)
+ * - passive: far points (Manhattan dist >= 8 from center) or quiet low-threat positions
+ *
+ * Each group maintains 2-3 candidate moves.
+ */
+export function generateStrategyCandidateGroups(
   board: Cell[][],
   aiColor: 'B' | 'W'
-): CandidateMove[] {
+): StrategyCandidateGroup {
   const humanColor: 'B' | 'W' = aiColor === 'B' ? 'W' : 'B';
   const directions = [
     [0, 1],  // horizontal
@@ -193,29 +211,41 @@ export function generateTop5CandidateMoves(
     [1, -1], // diagonal /
   ];
 
-  // Check if board is completely empty -> Center point [7, 7]
+  // Check if board is completely empty -> Center & near-center layout
   const isBoardEmpty = board.every((row) => row.every((c) => c === null));
   if (isBoardEmpty) {
-    return [
-      { coord: [7, 7], score: 1000, reason: '天元开局占据全局中心', threatLevel: 'position' },
-      { coord: [7, 8], score: 800, reason: '近中腹开局', threatLevel: 'position' },
-      { coord: [8, 7], score: 800, reason: '近中腹开局', threatLevel: 'position' },
-      { coord: [6, 7], score: 800, reason: '近中腹开局', threatLevel: 'position' },
-      { coord: [7, 6], score: 800, reason: '近中腹开局', threatLevel: 'position' },
-    ];
+    return {
+      aggressive: [
+        { coord: [7, 7], score: 1000, reason: '占据天元全局中心', threatLevel: 'position' },
+        { coord: [7, 8], score: 850, reason: '紧邻天元开局', threatLevel: 'position' },
+        { coord: [8, 7], score: 850, reason: '紧邻天元开局', threatLevel: 'position' },
+      ],
+      balanced: [
+        { coord: [6, 7], score: 800, reason: '中腹均衡占位', threatLevel: 'position' },
+        { coord: [7, 6], score: 800, reason: '中腹均衡占位', threatLevel: 'position' },
+        { coord: [8, 8], score: 750, reason: '斜向星位占角', threatLevel: 'position' },
+      ],
+      passive: [
+        { coord: [3, 3], score: 300, reason: '边角星位起手（保守开局）', threatLevel: 'position' },
+        { coord: [11, 11], score: 300, reason: '外围边角开局', threatLevel: 'position' },
+        { coord: [3, 11], score: 280, reason: '远端外势开局', threatLevel: 'position' },
+      ],
+    };
   }
 
+  const aggressiveList: CandidateMove[] = [];
+  const balancedList: CandidateMove[] = [];
+  const passiveList: CandidateMove[] = [];
   const allScoredMoves: CandidateMove[] = [];
 
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
       if (board[r][c] !== null) continue;
 
-      // Distance from center factor
-      const centerDist = Math.abs(r - 7) + Math.abs(c - 7);
-      const positionalBonus = (14 - centerDist) * 2;
+      const manhattanDist = Math.abs(r - 7) + Math.abs(c - 7);
+      const positionalBonus = (14 - manhattanDist) * 2;
 
-      // Neighbor pruning (within 2 cells)
+      // Neighbor check (within 2 cells)
       let hasNeighbor = false;
       for (let dr = -2; dr <= 2; dr++) {
         for (let dc = -2; dc <= 2; dc++) {
@@ -228,7 +258,11 @@ export function generateTop5CandidateMoves(
         }
         if (hasNeighbor) break;
       }
-      if (!hasNeighbor) continue;
+
+      // If far without neighbors, it qualifies naturally for passive if distance >= 8
+      if (!hasNeighbor && manhattanDist < 8) {
+        continue;
+      }
 
       let totalAiScore = 0;
       let totalHumanScore = 0;
@@ -267,9 +301,9 @@ export function generateTop5CandidateMoves(
         }
       }
 
-      // Priority calculation
+      // Overall Score Calculation
       let finalScore = positionalBonus;
-      let primaryReason = '拓展外势';
+      let primaryReason = '拓展阵型';
       let threatLevel: CandidateMove['threatLevel'] = 'position';
 
       if (totalAiScore >= 500000) {
@@ -278,7 +312,7 @@ export function generateTop5CandidateMoves(
         threatLevel = 'win';
       } else if (totalHumanScore >= 500000) {
         finalScore += 600000;
-        primaryReason = '紧急防守！封堵对手下一步必胜点';
+        primaryReason = '紧急防守！封堵对手胜势点';
         threatLevel = 'block_win';
       } else if (totalAiScore >= 50000) {
         finalScore += 200000 + totalAiScore;
@@ -286,11 +320,11 @@ export function generateTop5CandidateMoves(
         threatLevel = 'four';
       } else if (totalHumanScore >= 50000) {
         finalScore += 150000 + totalHumanScore;
-        primaryReason = '关键防守：瓦解对手活四/冲四攻势';
+        primaryReason = '关键防守：瓦解对手冲四/活四攻势';
         threatLevel = 'block_four';
-      } else if (totalAiScore >= 10000 && totalHumanScore >= 10000) {
+      } else if (totalAiScore >= 6000 && totalHumanScore >= 6000) {
         finalScore += 80000 + totalAiScore + totalHumanScore;
-        primaryReason = '攻防兼备点：同时开拓己方并压制对手';
+        primaryReason = '攻防兼备点：开拓己方并压制对手';
         threatLevel = 'three';
       } else if (totalHumanScore >= 6000) {
         finalScore += 30000 + totalHumanScore;
@@ -306,24 +340,234 @@ export function generateTop5CandidateMoves(
         threatLevel = 'position';
       }
 
-      allScoredMoves.push({
+      const candidateItem: CandidateMove = {
         coord: [r, c],
         score: Math.round(finalScore),
         reason: primaryReason,
         threatLevel,
-      });
+      };
+      allScoredMoves.push(candidateItem);
+
+      // -------------------------------------------------------------
+      // Clustering Criteria (Strict JS Mechanical Rules)
+      // -------------------------------------------------------------
+      // 1. Aggressive: AI forms threat >= live three / rush four, or direct win
+      const isAggressive = totalAiScore >= 6000 || threatLevel === 'win' || threatLevel === 'four';
+
+      // 2. Balanced: Blocks human live three / rush four / win, AND AI forms at least live two (>=400)
+      const isBalanced = totalHumanScore >= 6000 && totalAiScore >= 400;
+
+      // 3. Passive: Distance >= 8 from center OR neither aggressive nor balanced (low threat / quiet)
+      const isPassive = manhattanDist >= 8 || (!isAggressive && totalHumanScore < 6000);
+
+      if (isAggressive) {
+        aggressiveList.push(candidateItem);
+      }
+      if (isBalanced || (totalHumanScore >= 6000 && !isAggressive)) {
+        balancedList.push(candidateItem);
+      }
+      if (isPassive) {
+        passiveList.push(candidateItem);
+      }
     }
   }
 
-  // Sort descending by score
+  // Sort each group descending by score
+  aggressiveList.sort((a, b) => b.score - a.score);
+  balancedList.sort((a, b) => b.score - a.score);
+  passiveList.sort((a, b) => b.score - a.score);
   allScoredMoves.sort((a, b) => b.score - a.score);
 
-  // Return Top-5 (or up to 5)
-  return allScoredMoves.slice(0, 5);
+  // Guarantee passive group has true low-threat / corner points if needed
+  if (passiveList.length < 2) {
+    // Find empty cells with Manhattan dist >= 8
+    for (let r = 0; r < BOARD_SIZE; r++) {
+      for (let c = 0; c < BOARD_SIZE; c++) {
+        if (board[r][c] === null && Math.abs(r - 7) + Math.abs(c - 7) >= 8) {
+          const exists = passiveList.some((p) => p.coord[0] === r && p.coord[1] === c);
+          if (!exists) {
+            passiveList.push({
+              coord: [r, c],
+              score: 50,
+              reason: '边角远点闲棋（低威胁）',
+              threatLevel: 'neutral',
+            });
+          }
+        }
+        if (passiveList.length >= 3) break;
+      }
+      if (passiveList.length >= 3) break;
+    }
+  }
+
+  // Fallback Fill Rules: Ensure each group has at least 2 candidate moves
+  const finalAggressive = aggressiveList.slice(0, 3);
+  const finalBalanced = balancedList.slice(0, 3);
+  const finalPassive = passiveList.slice(0, 3);
+
+  // Fill aggressive if < 2
+  if (finalAggressive.length < 2) {
+    for (const move of allScoredMoves) {
+      if (!finalAggressive.some((m) => m.coord[0] === move.coord[0] && m.coord[1] === move.coord[1])) {
+        finalAggressive.push(move);
+      }
+      if (finalAggressive.length >= 2) break;
+    }
+  }
+
+  // Fill balanced if < 2
+  if (finalBalanced.length < 2) {
+    for (const move of allScoredMoves) {
+      if (!finalBalanced.some((m) => m.coord[0] === move.coord[0] && m.coord[1] === move.coord[1])) {
+        finalBalanced.push(move);
+      }
+      if (finalBalanced.length >= 2) break;
+    }
+  }
+
+  // Fill passive if < 2: borrow lowest score candidates
+  if (finalPassive.length < 2) {
+    const reversedMoves = [...allScoredMoves].reverse();
+    for (const move of reversedMoves) {
+      if (!finalPassive.some((m) => m.coord[0] === move.coord[0] && m.coord[1] === move.coord[1])) {
+        finalPassive.push(move);
+      }
+      if (finalPassive.length >= 2) break;
+    }
+  }
+
+  return {
+    aggressive: finalAggressive,
+    balanced: finalBalanced,
+    passive: finalPassive,
+  };
+}
+
+/**
+ * Retains Top-5 candidates generator for backward compatibility
+ */
+export function generateTop5CandidateMoves(
+  board: Cell[][],
+  aiColor: 'B' | 'W'
+): CandidateMove[] {
+  const groups = generateStrategyCandidateGroups(board, aiColor);
+  const pool = [...groups.aggressive, ...groups.balanced, ...groups.passive];
+  const unique: CandidateMove[] = [];
+  for (const item of pool) {
+    if (!unique.some((u) => u.coord[0] === item.coord[0] && u.coord[1] === item.coord[1])) {
+      unique.push(item);
+    }
+  }
+  unique.sort((a, b) => b.score - a.score);
+  return unique.slice(0, 5);
 }
 
 // -------------------------------------------------------------
-// 4. Sandbagging (Letting / 放水) Objective Fact Detector
+// 4. Select Move by Strategy (JS Execution Layer)
+// -------------------------------------------------------------
+
+/**
+ * Maps LLM strategy intent to concrete candidate move:
+ * - aggressive: highest scored candidate in aggressive group
+ * - balanced: highest scored candidate in balanced group
+ * - passive: weighted random draw from passive group (weighted towards higher scores in group)
+ *
+ * Anti-hallucination: invalid strategy gracefully falls back to balanced.
+ */
+export function selectMoveByStrategy(
+  strategyGroups: StrategyCandidateGroup,
+  strategy: GomokuStrategy | string | undefined | null
+): {
+  coord: [number, number];
+  candidate: CandidateMove;
+  effectiveStrategy: GomokuStrategy;
+  wasFallback: boolean;
+  warning?: string;
+} {
+  let effectiveStrategy: GomokuStrategy = 'balanced';
+  let wasFallback = false;
+  let warning: string | undefined = undefined;
+
+  if (strategy === 'aggressive' || strategy === 'balanced' || strategy === 'passive') {
+    effectiveStrategy = strategy;
+  } else {
+    effectiveStrategy = 'balanced';
+    wasFallback = true;
+    warning = `LLM 返回的策略 "${strategy}" 不在枚举集合内，已自动安全回退至 balanced 策略。`;
+    console.warn(`[Gomoku Strategy Fallback] ${warning}`);
+  }
+
+  const groupCandidates = strategyGroups[effectiveStrategy];
+
+  if (!groupCandidates || groupCandidates.length === 0) {
+    // Safety fallback to any available group
+    const fallbackGroup = strategyGroups.balanced.length > 0
+      ? strategyGroups.balanced
+      : strategyGroups.aggressive.length > 0
+      ? strategyGroups.aggressive
+      : strategyGroups.passive;
+    const fallbackCand = fallbackGroup[0] || { coord: [7, 7], score: 100, reason: '落子天元', threatLevel: 'position' };
+    return {
+      coord: fallbackCand.coord,
+      candidate: fallbackCand,
+      effectiveStrategy: 'balanced',
+      wasFallback: true,
+      warning: '候选池为空，安全降级至中腹点位',
+    };
+  }
+
+  if (effectiveStrategy === 'aggressive') {
+    // Pick highest score in aggressive
+    const candidate = groupCandidates[0];
+    return {
+      coord: candidate.coord,
+      candidate,
+      effectiveStrategy,
+      wasFallback,
+      warning,
+    };
+  }
+
+  if (effectiveStrategy === 'balanced') {
+    // Pick highest score in balanced
+    const candidate = groupCandidates[0];
+    return {
+      coord: candidate.coord,
+      candidate,
+      effectiveStrategy,
+      wasFallback,
+      warning,
+    };
+  }
+
+  // Passive: Weighted random draw (weighted towards higher scores within passive group)
+  // Ensures variety while avoiding repeatedly landing in the exact same dead corner
+  const minScore = Math.min(...groupCandidates.map((c) => c.score));
+  const weights = groupCandidates.map((c) => Math.max(1, c.score - minScore + 50));
+  const totalWeight = weights.reduce((sum, w) => sum + w, 0);
+  let randomVal = Math.random() * totalWeight;
+
+  let chosenIndex = 0;
+  for (let i = 0; i < groupCandidates.length; i++) {
+    randomVal -= weights[i];
+    if (randomVal <= 0) {
+      chosenIndex = i;
+      break;
+    }
+  }
+
+  const candidate = groupCandidates[chosenIndex] || groupCandidates[0];
+  return {
+    coord: candidate.coord,
+    candidate,
+    effectiveStrategy,
+    wasFallback,
+    warning,
+  };
+}
+
+// -------------------------------------------------------------
+// 5. Sandbagging (Letting / 放水) Objective Fact Detector
 // -------------------------------------------------------------
 
 export function analyzePlayerSandbagging(
@@ -383,7 +627,7 @@ export function analyzePlayerSandbagging(
 }
 
 // -------------------------------------------------------------
-// 5. Accumulate Isolated Game Emotion Delta
+// 6. Accumulate Isolated Game Emotion Delta
 // -------------------------------------------------------------
 
 export function accumulateGameEmotionDelta(
@@ -403,72 +647,7 @@ export function accumulateGameEmotionDelta(
 }
 
 // -------------------------------------------------------------
-// 5. Anti-Hallucination Fallback & Validator (JS Mechanical Layer)
-// -------------------------------------------------------------
-
-export function validateAndSanitizeLlmMove(
-  llmSelectedMove: [number, number] | undefined | null,
-  top5Candidates: CandidateMove[],
-  board: Cell[][]
-): { validCoord: [number, number]; wasFallback: boolean; warning?: string } {
-  if (top5Candidates.length === 0) {
-    // Ultimate fallback to center or first empty
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (board[r][c] === null) return { validCoord: [r, c], wasFallback: true, warning: '棋盘满盘回退' };
-      }
-    }
-    return { validCoord: [7, 7], wasFallback: true };
-  }
-
-  const top1 = top5Candidates[0].coord;
-
-  if (!llmSelectedMove || !Array.isArray(llmSelectedMove) || llmSelectedMove.length !== 2) {
-    return {
-      validCoord: top1,
-      wasFallback: true,
-      warning: 'LLM 未返回有效坐标格式，已安全降级至候选池 Top-1 最优手',
-    };
-  }
-
-  const [r, c] = llmSelectedMove;
-
-  // Check bounds
-  if (r < 0 || r >= BOARD_SIZE || c < 0 || c >= BOARD_SIZE) {
-    return {
-      validCoord: top1,
-      wasFallback: true,
-      warning: `LLM 返回越界坐标 [${r}, ${c}]，已安全降级至候选池 Top-1 最优手`,
-    };
-  }
-
-  // Check if cell is already occupied
-  if (board[r][c] !== null) {
-    return {
-      validCoord: top1,
-      wasFallback: true,
-      warning: `LLM 选择的点位 [${r}, ${c}] 已有棋子，已安全降级至候选池 Top-1 最优手`,
-    };
-  }
-
-  // Check if it belongs to Top-5 candidate pool
-  const isInsideTop5 = top5Candidates.some((cand) => cand.coord[0] === r && cand.coord[1] === c);
-  if (!isInsideTop5) {
-    return {
-      validCoord: top1,
-      wasFallback: true,
-      warning: `LLM 选择的点位 [${r}, ${c}] 不在 Top-5 候选集合中，已安全校准为 Top-1 最优手`,
-    };
-  }
-
-  return {
-    validCoord: [r, c],
-    wasFallback: false,
-  };
-}
-
-// -------------------------------------------------------------
-// 6. Character Surrender Detection
+// 7. Character Surrender Detection (Mechanical Layer)
 // -------------------------------------------------------------
 
 /**
@@ -487,11 +666,17 @@ export function checkIfCharacterShouldSurrender(
 }
 
 // -------------------------------------------------------------
-// 7. Missing Fields Sanitizer for LLM Decision Layer
+// 8. Missing Fields & Strategy Sanitizer for LLM Decision Layer
 // -------------------------------------------------------------
 
-export function sanitizeLlmDecision(rawJson: any, top5Candidates: CandidateMove[], board: Cell[][]): {
+export function sanitizeLlmDecision(
+  rawJson: any,
+  strategyGroups: StrategyCandidateGroup,
+  rawTextFallback?: string
+): {
   coord: [number, number];
+  strategy: GomokuStrategy;
+  emotionLabel: string;
   innerThought: string;
   spokenDialogue: string;
   stepEmotionDelta: Partial<EmotionVector>;
@@ -504,37 +689,66 @@ export function sanitizeLlmDecision(rawJson: any, top5Candidates: CandidateMove[
     rawJson?.action === 'resign' ||
     rawJson?.surrendered === true;
 
-  const moveCheck = validateAndSanitizeLlmMove(rawJson?.selected_move, top5Candidates, board);
+  // 1. Strategy selection
+  const rawStrategy = rawJson?.selected_strategy || rawJson?.strategy;
+  const moveResolution = selectMoveByStrategy(strategyGroups, rawStrategy);
 
-  const innerThought = typeof rawJson?.inner_thought === 'string' && rawJson.inner_thought.trim()
-    ? rawJson.inner_thought.trim()
-    : isSurrender
-    ? '*此局已无解，我投子认负了。*'
-    : '无内心活动记录';
+  // 2. Monologue extraction priority:
+  // Priority 1: JSON inner_thought field
+  // Priority 2: Regex match *...* or (...) from rawTextFallback only if JSON lacked it
+  // Priority 3: '无内心活动记录' placeholder
+  let innerThought = '';
+  if (typeof rawJson?.inner_thought === 'string' && rawJson.inner_thought.trim().length >= 2) {
+    innerThought = rawJson.inner_thought.trim();
+  } else if (rawTextFallback) {
+    const starMatch = rawTextFallback.match(/\*([^*]+)\*/);
+    const parenMatch = rawTextFallback.match(/[（(]([^）)]+)[）)]/);
+    if (starMatch && starMatch[1]?.trim().length >= 3) {
+      innerThought = `*${starMatch[1].trim()}*`;
+    } else if (parenMatch && parenMatch[1]?.trim().length >= 3) {
+      innerThought = `*${parenMatch[1].trim()}*`;
+    }
+  }
 
+  if (!innerThought) {
+    innerThought = isSurrender ? '*此局已无解，我投子认负了。*' : '无内心活动记录';
+  }
+
+  // 3. Spoken Dialogue
   const spokenDialogue = typeof rawJson?.spoken_dialogue === 'string' && rawJson.spoken_dialogue.trim()
     ? rawJson.spoken_dialogue.trim()
     : isSurrender
     ? '（端详棋局良久，轻叹一声放下手中棋子）"大势已去，这一局是你技高一筹，我认输了。"'
     : '……';
 
+  // 4. Emotion Label (Fully dynamic from LLM, never overwritten by JS)
+  let emotionLabel = typeof rawJson?.emotion_label === 'string' && rawJson.emotion_label.trim()
+    ? rawJson.emotion_label.trim()
+    : moveResolution.effectiveStrategy === 'aggressive'
+    ? '沉着强攻'
+    : moveResolution.effectiveStrategy === 'passive'
+    ? '棋风偏保守'
+    : '稳健应对';
+
+  // 5. Step Emotion Delta
   const stepEmotionDelta: Partial<EmotionVector> = {};
   if (rawJson?.step_emotion_delta && typeof rawJson.step_emotion_delta === 'object') {
     for (const key of ['anger', 'fear', 'joy', 'sadness', 'desire', 'warmth'] as const) {
       const val = rawJson.step_emotion_delta[key];
       if (typeof val === 'number' && !isNaN(val)) {
-        // Clamp step delta between -0.3 and +0.3
         stepEmotionDelta[key] = Math.max(-0.3, Math.min(0.3, Math.round(val * 1000) / 1000));
       }
     }
   }
 
   return {
-    coord: moveCheck.validCoord,
+    coord: moveResolution.coord,
+    strategy: moveResolution.effectiveStrategy,
+    emotionLabel,
     innerThought,
     spokenDialogue,
     stepEmotionDelta,
-    wasFallback: moveCheck.wasFallback,
+    wasFallback: moveResolution.wasFallback,
     surrender: isSurrender,
   };
 }

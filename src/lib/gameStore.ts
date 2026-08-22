@@ -14,12 +14,20 @@ import {
 
 import type { EmotionVector } from '../data/types';
 import type { SandbaggingReport, StepLogItem } from './gomokuProtocolEngine';
+import type {
+  Card,
+  DiscardedPair,
+  UserBluffHistoryItem,
+  CharBluffHistoryItem,
+  GhostCardKeyMoment
+} from './ghostCardEngine';
 
 export type GameInvitation = DBGameInvite;
 export type GomokuMatchRecord = DBGameMatchRecord;
 
 const PENDING_INVITE_KEY = '__rp_engine_pending_game_invite';
 const ACTIVE_SESSION_KEY_PREFIX = '__rp_active_gomoku_session_';
+const ACTIVE_GHOST_SESSION_KEY_PREFIX = '__rp_active_ghost_card_session_';
 const GAME_HISTORY_KEY = '__rp_engine_gomoku_history';
 const DEBUG_SHORTCUT_KEY = '__rp_game_debug_shortcut';
 const LAST_INVITE_TIMESTAMP_PREFIX = '__rp_last_invite_ts_';
@@ -32,6 +40,7 @@ export interface GameEmotionImpactRecord {
   matchId: string;
   characterId: string;
   characterName: string;
+  gameType?: 'gomoku' | 'ghost_card';
   timestamp: number;
   winner: 'player' | 'character' | 'draw' | 'surrender';
   totalMoves: number;
@@ -49,6 +58,8 @@ export interface InGameChatMessage {
   moveStep?: number;
   coord?: [number, number];
   tactic?: string;
+  strategy?: string;
+  emotionLabel?: string;
   timestamp: number;
 }
 
@@ -68,6 +79,62 @@ export interface ActiveGomokuSession {
   gameTotalDelta?: Partial<EmotionVector>;
   stepLogs?: StepLogItem[];
   sandbaggingReport?: SandbaggingReport;
+}
+
+export interface ActiveGhostCardSession {
+  characterId: string;
+  characterName: string;
+  userHand: Card[];
+  charHand: Card[];
+  discardPile: DiscardedPair[];
+  ghostCardId: string;
+  currentTurn: 'user' | 'character';
+  turnCount: number;
+  userBluffHistory: UserBluffHistoryItem[];
+  charBluffHistory: CharBluffHistoryItem[];
+  keyMoments: GhostCardKeyMoment[];
+  inGameChats: InGameChatMessage[];
+  characterSpeech: string;
+  characterInnerThought?: string;
+  currentOptions?: { option_a: string; option_b: string };
+  isPaused: boolean;
+  lastUpdated: number;
+  gameTotalDelta?: Partial<EmotionVector>;
+  winner?: 'user' | 'character' | null;
+  stepLogs?: any[];
+}
+
+export function saveActiveGhostCardSession(session: ActiveGhostCardSession): void {
+  try {
+    localStorage.setItem(
+      `${ACTIVE_GHOST_SESSION_KEY_PREFIX}${session.characterId}`,
+      JSON.stringify(session)
+    );
+  } catch {
+    // ignore
+  }
+}
+
+export function loadActiveGhostCardSession(characterId: string): ActiveGhostCardSession | null {
+  try {
+    const raw = localStorage.getItem(`${ACTIVE_GHOST_SESSION_KEY_PREFIX}${characterId}`);
+    if (!raw) return null;
+    const session: ActiveGhostCardSession = JSON.parse(raw);
+    if (session && Array.isArray(session.userHand) && Array.isArray(session.charHand)) {
+      return session;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+export function clearActiveGhostCardSession(characterId: string): void {
+  try {
+    localStorage.removeItem(`${ACTIVE_GHOST_SESSION_KEY_PREFIX}${characterId}`);
+  } catch {
+    // ignore
+  }
 }
 
 export function saveActiveGameSession(session: ActiveGomokuSession): void {

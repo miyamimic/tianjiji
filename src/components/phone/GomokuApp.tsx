@@ -60,12 +60,16 @@ import { loadCharAvatar } from '../../lib/customStore';
 import { 
   BOARD_SIZE,
   checkWinner,
+  generateStrategyCandidateGroups,
+  selectMoveByStrategy,
   generateTop5CandidateMoves,
   analyzePlayerSandbagging,
   accumulateGameEmotionDelta,
   checkIfCharacterShouldSurrender,
   type Cell,
   type CandidateMove,
+  type StrategyCandidateGroup,
+  type GomokuStrategy,
   type SandbaggingReport,
   type StepLogItem
 } from '../../lib/gomokuProtocolEngine';
@@ -228,6 +232,9 @@ export default function GomokuApp({
 
   // Mechanical Protocol Layer State
   const [top5Candidates, setTop5Candidates] = useState<CandidateMove[]>([]);
+  const [strategyGroups, setStrategyGroups] = useState<StrategyCandidateGroup | null>(null);
+  const [lastEmotionLabel, setLastEmotionLabel] = useState<string>('');
+  const [lastSelectedStrategy, setLastSelectedStrategy] = useState<GomokuStrategy | null>(null);
   const [sandbaggingReport, setSandbaggingReport] = useState<SandbaggingReport>({
     isPlayerSandbagging: false,
     abandonedBestPoints: [],
@@ -477,7 +484,7 @@ export default function GomokuApp({
     }
   }, [winner, playerColor, prepareGameSettlement]);
 
-  // AI Move Execution: Protocol Mechanical Top-5 -> LLM Decision -> Mechanical Sanitization
+  // AI Move Execution: Protocol Mechanical Strategy Clustering -> LLM Intent Decision -> Mechanical Sanitization
   const triggerAiMove = useCallback(
     async (currentBoard: Cell[][], aiCol: 'B' | 'W') => {
       setIsAiThinking(true);
@@ -486,16 +493,20 @@ export default function GomokuApp({
       // 1. JS Mechanical Layer: Check if AI should surrender due to hopeless multi-threats
       const mechSurrender = checkIfCharacterShouldSurrender(currentBoard, aiCol, moveHistory.length);
 
-      // 2. JS Mechanical Layer: Generate Top-5 Candidate Moves
-      const candidates = generateTop5CandidateMoves(currentBoard, aiCol);
-      setTop5Candidates(candidates);
+      // 2. JS Mechanical Layer: Generate Strategy Candidate Groups (Aggressive, Balanced, Passive)
+      const groups = generateStrategyCandidateGroups(currentBoard, aiCol);
+      setStrategyGroups(groups);
+      // Flatten top 5 for inspector / legacy reference
+      setTop5Candidates([...groups.aggressive, ...groups.balanced, ...groups.passive].slice(0, 5));
 
-      // 3. JS Mechanical Layer: Detect sandbagging facts
+      // 3. JS Mechanical Layer: Detect sandbagging facts (independent of strategy intent)
       const sandbagReport = analyzePlayerSandbagging(currentBoard, humanColor, moveHistory);
       setSandbaggingReport(sandbagReport);
 
       const llmConfig = loadLlmConfig();
       let chosenCoord: [number, number];
+      let selectedStrategy: GomokuStrategy = 'balanced';
+      let emotionLabel = '';
       let innerThought = '';
       let spokenDialogue = '';
       let stepDelta: Partial<EmotionVector> = {};
@@ -511,7 +522,7 @@ export default function GomokuApp({
               aiColor: aiCol,
               stepNumber: moveHistory.length + 1,
               recentMoves: moveHistory.map((m) => ({ step: m.step, r: m.r, c: m.c, color: m.color })),
-              top5Candidates: candidates,
+              strategyGroups: groups,
               isPlayerSandbagging: sandbagReport.isPlayerSandbagging,
               abandonedBestPoints: sandbagReport.abandonedBestPoints,
               inGameChats: inGameChats.map((c) => ({ sender: c.sender, text: c.text })),
@@ -519,6 +530,8 @@ export default function GomokuApp({
             currentBoard
           );
           chosenCoord = decision.coord;
+          selectedStrategy = decision.strategy;
+          emotionLabel = decision.emotionLabel;
           innerThought = decision.innerThought;
           spokenDialogue = decision.spokenDialogue;
           stepDelta = decision.stepEmotionDelta;
@@ -526,21 +539,28 @@ export default function GomokuApp({
             isAiSurrender = true;
           }
         } catch (err) {
-          console.warn('LLM move error, fallback to candidate top-1:', err);
-          const topOne = candidates[0] || { coord: [7, 7], reason: '落于天元' };
-          chosenCoord = topOne.coord;
-          innerThought = `*局势复杂，先守住核心要道。*`;
+          console.warn('LLM move error, fallback to balanced strategy selection:', err);
+          const fallbackRes = selectMoveByStrategy(groups, 'balanced');
+          chosenCoord = fallbackRes.coord;
+          selectedStrategy = 'balanced';
+          emotionLabel = '沉稳攻守';
+          innerThought = `*${fallbackRes.candidate.reason}，按常规棋理推演。*`;
           spokenDialogue = `（从容落子）"请继续。"`;
           stepDelta = { warmth: 0.02 };
         }
       } else {
         // Deterministic protocol engine fallback
-        const topOne = candidates[0] || { coord: [7, 7], reason: '落于天元' };
-        chosenCoord = topOne.coord;
-        innerThought = `*${topOne.reason}，按常规棋理推演。*`;
+        const fallbackRes = selectMoveByStrategy(groups, 'balanced');
+        chosenCoord = fallbackRes.coord;
+        selectedStrategy = 'balanced';
+        emotionLabel = '沉稳攻守';
+        innerThought = `*${fallbackRes.candidate.reason}，按常规棋理推演。*`;
         spokenDialogue = `（沉稳落子）"轮到你了。"`;
         stepDelta = { warmth: 0.02 };
       }
+
+      setLastSelectedStrategy(selectedStrategy);
+      setLastEmotionLabel(emotionLabel);
 
       // Check if Character Surrenders!
       if (isAiSurrender) {
@@ -567,6 +587,8 @@ export default function GomokuApp({
             text: surrenderDialogue,
             thought: surrenderThought,
             tactic: currentTactic,
+            strategy: selectedStrategy,
+            emotionLabel: emotionLabel || undefined,
             timestamp: Date.now() + 1,
           },
         ]);
@@ -599,6 +621,8 @@ export default function GomokuApp({
         moveStep: moveHistory.length + 1,
         coord: [r, c],
         tactic: currentTactic,
+        strategy: selectedStrategy,
+        emotionLabel: emotionLabel || undefined,
         timestamp: Date.now(),
       };
       setInGameChats((prev) => [...prev, charMoveMsg]);
@@ -1177,26 +1201,70 @@ export default function GomokuApp({
                 )}
               </div>
 
-              {/* Top-5 Candidate Pool */}
-              <div className="space-y-1.5">
-                <span className="text-[11px] font-bold text-amber-200 block">机械层 Top-5 候选落子池:</span>
-                {top5Candidates.length === 0 ? (
-                  <p className="text-[10px] text-white/40 italic">等待下一手演算...</p>
-                ) : (
+              {/* Strategy Candidate Groups Pool */}
+              <div className="space-y-2">
+                <span className="text-[11px] font-bold text-amber-200 block">机械层策略聚类候选池:</span>
+                {strategyGroups ? (
+                  <div className="space-y-1.5">
+                    {/* Aggressive group */}
+                    <div className="p-1.5 rounded-lg bg-red-500/10 border border-red-500/20 space-y-1">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-red-300">
+                        <span>🔥 进攻组 (aggressive)</span>
+                        <span className="text-[9px] font-normal text-red-300/70">{strategyGroups.aggressive.length} 项</span>
+                      </div>
+                      {strategyGroups.aggressive.map((c, i) => (
+                        <div key={i} className="text-[9.5px] text-white/80 flex justify-between">
+                          <span>[{c.coord[0]},{c.coord[1]}] {c.reason}</span>
+                          <span className="font-mono text-red-300/60">{c.score}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Balanced group */}
+                    <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/20 space-y-1">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-amber-300">
+                        <span>⚖️ 稳健组 (balanced)</span>
+                        <span className="text-[9px] font-normal text-amber-300/70">{strategyGroups.balanced.length} 项</span>
+                      </div>
+                      {strategyGroups.balanced.map((c, i) => (
+                        <div key={i} className="text-[9.5px] text-white/80 flex justify-between">
+                          <span>[{c.coord[0]},{c.coord[1]}] {c.reason}</span>
+                          <span className="font-mono text-amber-300/60">{c.score}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Passive group */}
+                    <div className="p-1.5 rounded-lg bg-blue-500/10 border border-blue-500/20 space-y-1">
+                      <div className="flex items-center justify-between text-[10px] font-bold text-blue-300">
+                        <span>🍃 保守/闲棋组 (passive)</span>
+                        <span className="text-[9px] font-normal text-blue-300/70">{strategyGroups.passive.length} 项</span>
+                      </div>
+                      {strategyGroups.passive.map((c, i) => (
+                        <div key={i} className="text-[9.5px] text-white/80 flex justify-between">
+                          <span>[{c.coord[0]},{c.coord[1]}] {c.reason}</span>
+                          <span className="font-mono text-blue-300/60">{c.score}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : top5Candidates.length > 0 ? (
                   top5Candidates.map((cand, idx) => (
                     <div
                       key={idx}
-                      className="p-2 rounded-xl bg-white/[0.04] border border-white/5 space-y-0.5"
+                      className="p-1.5 rounded-lg bg-white/[0.04] border border-white/5 space-y-0.5"
                     >
-                      <div className="flex items-center justify-between text-[11px]">
+                      <div className="flex items-center justify-between text-[10px]">
                         <span className="font-bold text-amber-300">
-                          #{idx + 1} 坐标 [{cand.coord[0]}, {cand.coord[1]}]
+                          #{idx + 1} [{cand.coord[0]}, {cand.coord[1]}]
                         </span>
-                        <span className="text-[9px] font-mono text-white/50">权重 {cand.score}</span>
+                        <span className="text-[9px] font-mono text-white/50">{cand.score}</span>
                       </div>
-                      <p className="text-[10px] text-white/70">{cand.reason}</p>
+                      <p className="text-[9.5px] text-white/70">{cand.reason}</p>
                     </div>
                   ))
+                ) : (
+                  <p className="text-[10px] text-white/40 italic">等待下一手演算...</p>
                 )}
               </div>
 
@@ -1263,16 +1331,25 @@ export default function GomokuApp({
                   </div>
 
                   <div className="flex-1 space-y-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                       <span className="font-bold text-amber-300 text-[11px]">{characterName}</span>
                       {c.moveStep && (
                         <span className="text-[9px] bg-white/10 text-white/70 px-1.5 py-0.2 rounded font-mono">
                           第 {c.moveStep} 手
                         </span>
                       )}
-                      {c.tactic && TACTIC_INFO[c.tactic as AiTactic] && (
+                      {c.emotionLabel ? (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-200 border border-amber-400/30 font-medium">
+                          {c.emotionLabel}
+                        </span>
+                      ) : c.tactic && TACTIC_INFO[c.tactic as AiTactic] ? (
                         <span className={`text-[9px] px-1.5 py-0.2 rounded border ${TACTIC_INFO[c.tactic as AiTactic].color}`}>
                           {TACTIC_INFO[c.tactic as AiTactic].label}
+                        </span>
+                      ) : null}
+                      {c.strategy === 'passive' && (
+                        <span className="text-[9px] px-1.5 py-0.2 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                          棋风偏保守
                         </span>
                       )}
                     </div>

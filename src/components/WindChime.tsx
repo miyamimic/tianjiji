@@ -20,12 +20,14 @@ import AmbienceApp from './phone/AmbienceApp';
 import DictionaryApp from './phone/DictionaryApp';
 import CssApp from './phone/CssApp';
 import GomokuApp from './phone/GomokuApp';
+import { GhostCardApp } from './phone/GhostCardApp';
 import type { LlmConfig } from '../lib/llm';
 import { 
   subscribeGameInvite, 
   getPendingGameInvite, 
   playInviteVoiceNotification,
   loadActiveGameSession,
+  loadActiveGhostCardSession,
   type GameInvitation,
   type GomokuMatchRecord 
 } from '../lib/gameStore';
@@ -44,7 +46,7 @@ interface Props {
   onClearForceOpenApp?: () => void;
   onGameFinished?: (
     summary: string, 
-    rawRecord: GomokuMatchRecord, 
+    rawRecord: any, 
     applyEmotionDelta?: boolean, 
     customDelta?: Partial<EmotionVector>
   ) => void;
@@ -57,7 +59,7 @@ interface Props {
   onRejectGameInvite?: (invite: GameInvitation) => void;
 }
 
-export type AppId = 'persona' | 'wallpaper' | 'llm' | 'ambience' | 'dictionary' | 'css' | 'game';
+export type AppId = 'persona' | 'wallpaper' | 'llm' | 'ambience' | 'dictionary' | 'css' | 'game' | 'ghost_card';
 
 const APPS: Array<{
   id: AppId;
@@ -67,6 +69,21 @@ const APPS: Array<{
   gradient: string;
   badge?: string;
 }> = [
+  {
+    id: 'ghost_card',
+    name: '捉鬼牌',
+    subtitle: '心理博弈纸牌',
+    icon: Sparkles,
+    gradient: 'from-purple-600 via-stone-800 to-amber-600',
+    badge: '🐾 读心',
+  },
+  {
+    id: 'game',
+    name: '对弈棋局',
+    subtitle: '五子棋小游戏',
+    icon: Gamepad2,
+    gradient: 'from-amber-500 via-orange-600 to-rose-600',
+  },
   {
     id: 'persona',
     name: '人设档案',
@@ -110,13 +127,6 @@ const APPS: Array<{
     subtitle: '滤镜与CSS',
     icon: Palette,
     gradient: 'from-cyan-500 to-blue-600',
-  },
-  {
-    id: 'game',
-    name: '对弈棋局',
-    subtitle: '五子棋小游戏',
-    icon: Gamepad2,
-    gradient: 'from-amber-500 via-orange-600 to-rose-600',
   },
 ];
 
@@ -481,9 +491,12 @@ export default function WindChime({
                   <div className="grid grid-cols-3 gap-2.5 pt-1">
                     {APPS.map((app) => {
                       const Icon = app.icon;
-                      const isGameWithInvite = app.id === 'game' && !!pendingInvite;
-                      const activeSession = app.id === 'game' ? loadActiveGameSession(currentCharacterId) : null;
-                      const hasPausedGame = !!activeSession && activeSession.moveHistory.length > 0;
+                      const isGameWithInvite = app.id === 'game' && !!pendingInvite && pendingInvite.gameType !== 'ghost_card';
+                      const isGhostWithInvite = app.id === 'ghost_card' && !!pendingInvite && pendingInvite.gameType === 'ghost_card';
+                      const activeGomokuSession = app.id === 'game' ? loadActiveGameSession(currentCharacterId) : null;
+                      const activeGhostSession = app.id === 'ghost_card' ? loadActiveGhostCardSession(currentCharacterId) : null;
+                      const hasPausedGomoku = !!activeGomokuSession && activeGomokuSession.moveHistory.length > 0;
+                      const hasPausedGhost = !!activeGhostSession && (activeGhostSession.userHand.length > 0 || activeGhostSession.charHand.length > 0);
 
                       return (
                         <button
@@ -492,17 +505,25 @@ export default function WindChime({
                           className="group relative flex flex-col items-center p-2.5 rounded-2xl bg-black/40 hover:bg-white/[0.08] border border-white/10 hover:border-[hsl(28_85%_62%/0.4)] transition-all duration-200 text-center shadow-md hover:shadow-[hsl(28_85%_62%/0.15)] active:scale-95 cursor-pointer"
                         >
                           {/* Badge (e.g. AI视觉, 新邀请, 暂停中) */}
-                          {(app.badge || isGameWithInvite || hasPausedGame) && (
+                          {(app.badge || isGameWithInvite || isGhostWithInvite || hasPausedGomoku || hasPausedGhost) && (
                             <span
                               className={`absolute -top-1 -right-1 text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow-md z-10 ${
-                                isGameWithInvite
+                                isGameWithInvite || isGhostWithInvite
                                   ? 'bg-red-500 text-white animate-pulse'
-                                  : hasPausedGame
+                                  : hasPausedGomoku
                                   ? 'bg-amber-500 text-amber-950 font-bold'
+                                  : hasPausedGhost
+                                  ? 'bg-purple-500 text-white font-bold'
                                   : 'text-amber-950 bg-[hsl(28_85%_62%)]'
                               }`}
                             >
-                              {isGameWithInvite ? '新邀约' : hasPausedGame ? `暂停中(${activeSession?.moveHistory.length}手)` : app.badge}
+                              {isGameWithInvite || isGhostWithInvite
+                                ? '新邀约'
+                                : hasPausedGomoku
+                                ? `进行中(${activeGomokuSession?.moveHistory.length}手)`
+                                : hasPausedGhost
+                                ? `进行中(第${activeGhostSession?.turnCount}轮)`
+                                : app.badge}
                             </span>
                           )}
 
@@ -557,6 +578,18 @@ export default function WindChime({
                       onGameFinished={onGameFinished}
                       onApplyGameEmotionDelta={onApplyGameEmotionDelta}
                       onInGameChat={onInGameChat}
+                      onRejectInvite={onRejectGameInvite}
+                      onExit={() => setActiveApp(null)}
+                    />
+                  )}
+                  {activeApp === 'ghost_card' && (
+                    <GhostCardApp
+                      currentCharacterId={currentCharacterId}
+                      characterName={characterName}
+                      character={character}
+                      currentEmotionSnapshot={currentEmotionSnapshot}
+                      onGameFinished={onGameFinished}
+                      onApplyGameEmotionDelta={onApplyGameEmotionDelta}
                       onRejectInvite={onRejectGameInvite}
                       onExit={() => setActiveApp(null)}
                     />
