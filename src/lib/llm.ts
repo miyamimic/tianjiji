@@ -683,6 +683,9 @@ import {
 
 export type GomokuTriggerType =
   | 'game_start'
+  | 'first_move'
+  | 'ai_three_in_a_row'
+  | 'rhythm_alternate'
   | 'player_chat'
   | 'board_crisis'
   | 'player_sandbagging'
@@ -707,6 +710,7 @@ export interface GomokuLlmContext {
   isPlayerSandbagging?: boolean;
   abandonedBestPoints?: Array<{ coord: [number, number]; reason: string }>;
   crisisReason?: string;
+  threeInARowDescription?: string;
   gameResult?: 'player' | 'character' | 'draw' | 'surrender';
   consecutiveLossCount?: number;
 }
@@ -774,6 +778,7 @@ export async function generateGomokuLlmResponse(
     isPlayerSandbagging = false,
     abandonedBestPoints = [],
     crisisReason = '',
+    threeInARowDescription = '',
     gameResult,
     consecutiveLossCount = 0,
   } = ctx;
@@ -822,6 +827,30 @@ ${formatList('steady_candidates（稳健候选池）', candidatePools.steady_can
 ${consecutiveLossCount >= 2 ? `- 特别注意：你此前已连续遭遇 ${consecutiveLossCount} 次战败，本次为新一局。` : ''}
 - 指令：输出初始权重 (weight_attack, weight_defend, weight_steady)、对对手的初步印象 (opponent_impression)、内部心理笔记 (thought_note)、原创开场白 (opening_dialog)。
 - 注意：speech_text 与 ending_dialog 必须置为空字符串 ""。opening_dialog 必须完全原创，结合 is_playdate_invite 与你的人设情绪生成。`;
+  } else if (trigger === 'first_move') {
+    triggerContext = `【触发事件：AI 角色首次下棋落子（首手起势）】
+- 场景上下文标记 is_playdate_invite: ${is_playdate_invite ? 'true (约局对弈)' : 'false (常规对弈)'}
+- 手顺与执子: 你执${aiColor === 'B' ? '黑棋 (开局第1手先行)' : '白棋 (回应主控第1手开局)'}
+- 角色五子棋棋力等级: ${charRank}
+- 当前已进行手数: 第 ${stepNumber} 手
+- 指令：由你直接决断开局战略与三维偏好权重，输出初始心理笔记 (thought_note) 与首步落子台词 (speech_text，简短生动，体现起手气势或对局态度)。
+- 注意：opening_dialog 与 ending_dialog 必须置为空字符串 ""。`;
+  } else if (trigger === 'ai_three_in_a_row') {
+    triggerContext = `【触发事件：AI 角色已形成三子连线（三连攻势 / 活三蓄力）】
+- 局势特征: ${threeInARowDescription || '我方三子连线成型，攻势已具雏形'}
+- 当前已进行手数: 第 ${stepNumber} 手
+- 当前持久权重记忆: weight_attack=${oldWeights.weight_attack}, weight_defend=${oldWeights.weight_defend}, weight_steady=${oldWeights.weight_steady}
+- 上次内心心理笔记: "${previousThoughtNote}"
+- 指令：你已连成三子！必须触发说话：在 speech_text 中生动发言（可以从容自信、戏谑主控、冷峻施压或含蓄提醒），并由你自主决断下一步权重与偏好（通常大幅提高 weight_attack 进攻偏好以展开连环攻杀，或按你的心境决策）。speech_text 严禁为空！
+- 注意：opening_dialog 与 ending_dialog 必须置为空字符串 ""。`;
+  } else if (trigger === 'rhythm_alternate') {
+    triggerContext = `【触发事件：快慢交替节奏（大模型战略沉思与落子决策）】
+- 当前已进行手数: 第 ${stepNumber} 手
+- 当前持久权重记忆: weight_attack=${oldWeights.weight_attack}, weight_defend=${oldWeights.weight_defend}, weight_steady=${oldWeights.weight_steady}
+- 上次内心心理笔记: "${previousThoughtNote}"
+- 对主控印象: "${opponentImpression}"
+- 指令：快慢节奏交替触发此战略沉思回合。重新评估全局棋路，微调三维偏好权重与内部笔记。speech_text 可根据心境简短发言或留空（留空表示凝神静思落子）。
+- 注意：opening_dialog 与 ending_dialog 必须置为空字符串 ""。`;
   } else if (trigger === 'player_chat') {
     triggerContext = `【触发事件：主控在对局中途发送聊天消息】
 - 主控最新聊天内容: "${playerChatText}"

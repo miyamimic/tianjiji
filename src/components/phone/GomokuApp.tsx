@@ -65,6 +65,7 @@ import {
   cleanAndNormalizeWeights,
   sampleMoveFromPools,
   detectBoardInflection,
+  detectAiConsecutiveThree,
   selectMoveByStrategy,
   generateTop5CandidateMoves,
   analyzePlayerSandbagging,
@@ -85,7 +86,8 @@ import {
   generateGomokuLlmResponse,
   generateGomokuMoveDecision,
   loadLlmConfig,
-  isLlmConfigured
+  isLlmConfigured,
+  type GomokuTriggerType
 } from '../../lib/llm';
 import { getCharacterById, MOCK_CHARACTERS } from '../../data/characters';
 import { EMOTION_NAMES } from '../../data/types';
@@ -250,6 +252,8 @@ export default function GomokuApp({
   const [opponentImpression, setOpponentImpression] = useState<string>('下法稳健，落子有章法');
   const [isPlaydateInvite, setIsPlaydateInvite] = useState<boolean>(false);
   const [lastCrisisTriggerStep, setLastCrisisTriggerStep] = useState<number>(-1);
+  const [lastThreeTriggerKey, setLastThreeTriggerKey] = useState<string>('');
+  const [lastAiWasLlm, setLastAiWasLlm] = useState<boolean>(false);
   const [lastChosenPool, setLastChosenPool] = useState<'attack' | 'defend' | 'steady'>('steady');
   const [isEmergencyActive, setIsEmergencyActive] = useState<boolean>(false);
 
@@ -510,7 +514,7 @@ export default function GomokuApp({
     }
   }, [winner, playerColor, prepareGameSettlement]);
 
-  // AI Move Execution (v4.1): JS Candidate Pools -> Fast Weighted Sampling (No LLM unless event-triggered)
+  // AI Move Execution (v4.1): Fast & Slow Alternation (LLM strategic turns & human-paced JS turns)
   const triggerAiMove = useCallback(
     async (currentBoard: Cell[][], aiCol: 'B' | 'W') => {
       setIsAiThinking(true);
@@ -528,10 +532,11 @@ export default function GomokuApp({
       });
       setTop5Candidates([...pools.attack_candidates, ...pools.defend_candidates, ...pools.steady_candidates].slice(0, 5));
 
-      // 2. JS Mechanical Layer: Inflection / Crisis Detection & Sandbagging Analysis
+      // 2. JS Mechanical Layer: Inflection / Crisis Detection, 3-in-a-row Detection, & Sandbagging Analysis
       const inflection = detectBoardInflection(currentBoard, aiCol);
       const sandbagReport = analyzePlayerSandbagging(currentBoard, humanColor, moveHistory);
       setSandbaggingReport(sandbagReport);
+      const threeCheck = detectAiConsecutiveThree(currentBoard, aiCol);
 
       const llmConfig = loadLlmConfig();
       let activeWeights = { ...currentWeights };
@@ -539,14 +544,35 @@ export default function GomokuApp({
       let activeImpression = opponentImpression;
       let spokenText = '';
 
-      // Check if event triggers an LLM update:
+      // Count moves made by AI
+      const aiMovesCount = moveHistory.filter((m) => m.color === aiCol).length;
+      const isAiFirstMove = aiMovesCount === 0;
       const currentStepCount = moveHistory.length + 1;
+
+      // Event-driven triggers for LLM
+      const isNewThreeInARow = threeCheck.hasThree && lastThreeTriggerKey !== threeCheck.key;
       const isNewCrisis = inflection.hasCrisis && lastCrisisTriggerStep !== moveHistory.length;
       const isNewSandbagging = sandbagReport.isPlayerSandbagging && !sandbaggingReport.isPlayerSandbagging;
+      // Pacing alternation: alternate between deeper LLM strategic deliberation and snappy JS tactical response
+      const isRhythmAlternate = !lastAiWasLlm && aiMovesCount > 0 && aiMovesCount % 2 === 0;
 
-      if (isLlmConfigured(llmConfig) && (isNewCrisis || isNewSandbagging)) {
+      const shouldCallLlm =
+        isLlmConfigured(llmConfig) &&
+        (isAiFirstMove || isNewThreeInARow || isNewCrisis || isNewSandbagging || isRhythmAlternate);
+
+      if (shouldCallLlm) {
         try {
-          const triggerType = isNewCrisis ? 'board_crisis' : 'player_sandbagging';
+          let triggerType: GomokuTriggerType = 'rhythm_alternate';
+          if (isAiFirstMove) {
+            triggerType = 'first_move';
+          } else if (isNewThreeInARow) {
+            triggerType = 'ai_three_in_a_row';
+          } else if (isNewCrisis) {
+            triggerType = 'board_crisis';
+          } else if (isNewSandbagging) {
+            triggerType = 'player_sandbagging';
+          }
+
           const llmRes = await generateGomokuLlmResponse(llmConfig, {
             trigger: triggerType,
             character: activeChar,
@@ -564,6 +590,7 @@ export default function GomokuApp({
             isPlayerSandbagging: sandbagReport.isPlayerSandbagging,
             abandonedBestPoints: sandbagReport.abandonedBestPoints,
             crisisReason: inflection.reason,
+            threeInARowDescription: threeCheck.description,
           });
 
           activeWeights = {
@@ -578,16 +605,30 @@ export default function GomokuApp({
           setCurrentWeights(activeWeights);
           setThoughtNote(activeThought);
           setOpponentImpression(activeImpression);
+          setLastAiWasLlm(true);
+
+          if (isNewThreeInARow && threeCheck.key) {
+            setLastThreeTriggerKey(threeCheck.key);
+          }
           if (isNewCrisis) {
             setLastCrisisTriggerStep(moveHistory.length);
           }
         } catch (err) {
           console.warn('LLM Gomoku update error, using existing weights:', err);
+          // Fallback to human delay on error
+          const simulatedDelayMs = 500 + Math.floor(Math.random() * 350);
+          await new Promise((resolve) => setTimeout(resolve, simulatedDelayMs));
+          setLastAiWasLlm(false);
         }
+      } else {
+        // Fast JS turn: simulate human deliberation delay (快慢交替，模拟真人稍慢一点点ms)
+        const simulatedDelayMs = 520 + Math.floor(Math.random() * 380);
+        await new Promise((resolve) => setTimeout(resolve, simulatedDelayMs));
+        setLastAiWasLlm(false);
       }
 
       // 3. JS Mechanical Layer: Weighted Sampling across the 3 Candidate Pools
-      // (Fast 0-delay execution with Emergency Hard Protection override if lethal threat exists)
+      // (Fast execution with Emergency Hard Protection override if lethal threat exists)
       const sampleRes = sampleMoveFromPools(pools, activeWeights, inflection.isEmergencyDefense);
       const chosenCoord = sampleRes.coord;
       setLastChosenPool(sampleRes.chosenPool);
@@ -693,6 +734,8 @@ export default function GomokuApp({
       opponentImpression,
       isPlaydateInvite,
       lastCrisisTriggerStep,
+      lastThreeTriggerKey,
+      lastAiWasLlm,
       sandbaggingReport.isPlayerSandbagging,
     ]
   );
@@ -788,6 +831,8 @@ export default function GomokuApp({
     setCurrentTactic('balanced');
     setIsPlaydateInvite(isPlaydate);
     setLastCrisisTriggerStep(-1);
+    setLastThreeTriggerKey('');
+    setLastAiWasLlm(false);
 
     const aiCol: 'B' | 'W' = newPlayerColor === 'B' ? 'W' : 'B';
     const activeRank = loadCharGomokuRank(currentCharacterId);
@@ -1287,15 +1332,26 @@ export default function GomokuApp({
               <div className="p-2.5 rounded-xl bg-white/5 border border-white/10 space-y-2">
                 <div className="flex items-center justify-between text-[11px] font-bold text-amber-200">
                   <span>三维偏好权重 (v4.1)</span>
-                  {isEmergencyActive ? (
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-red-500/20 text-red-300 border border-red-500/40 animate-pulse">
-                      🚨 生死防守强制锁定
-                    </span>
-                  ) : (
-                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-400/30">
-                      上次落子: {lastChosenPool === 'attack' ? '进攻' : lastChosenPool === 'defend' ? '防守' : '稳健'}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1">
+                    {lastAiWasLlm ? (
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-400/30">
+                        ⚡ LLM决策
+                      </span>
+                    ) : (
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                        ⏱️ 真人拟真
+                      </span>
+                    )}
+                    {isEmergencyActive ? (
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-red-500/20 text-red-300 border border-red-500/40 animate-pulse">
+                        🚨 生死防守
+                      </span>
+                    ) : (
+                      <span className="text-[9px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-400/30">
+                        {lastChosenPool === 'attack' ? '进攻' : lastChosenPool === 'defend' ? '防守' : '稳健'}
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="space-y-1.5 text-[10px]">

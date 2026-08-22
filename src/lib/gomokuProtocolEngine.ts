@@ -665,6 +665,66 @@ export function detectBoardInflection(
 }
 
 /**
+ * Detects if the AI currently has 3 consecutive stones in any direction on the board,
+ * or forms a live-3 / sleep-3 line.
+ */
+export function detectAiConsecutiveThree(
+  board: Cell[][],
+  aiColor: 'B' | 'W'
+): {
+  hasThree: boolean;
+  count: number;
+  description?: string;
+  key?: string;
+} {
+  const directions: [number, number][] = [
+    [0, 1],   // horizontal
+    [1, 0],   // vertical
+    [1, 1],   // diagonal \
+    [1, -1],  // anti-diagonal /
+  ];
+
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (board[r][c] !== aiColor) continue;
+
+      for (const [dr, dc] of directions) {
+        let consecutive = 0;
+        for (let step = 0; step < 3; step++) {
+          const nr = r + dr * step;
+          const nc = c + dc * step;
+          if (nr >= 0 && nr < BOARD_SIZE && nc >= 0 && nc < BOARD_SIZE && board[nr][nc] === aiColor) {
+            consecutive++;
+          } else {
+            break;
+          }
+        }
+
+        if (consecutive === 3) {
+          const prevR = r - dr;
+          const prevC = c - dc;
+          const nextR = r + dr * 3;
+          const nextC = c + dc * 3;
+          const prevIsSame = prevR >= 0 && prevR < BOARD_SIZE && prevC >= 0 && prevC < BOARD_SIZE && board[prevR][prevC] === aiColor;
+          const nextIsSame = nextR >= 0 && nextR < BOARD_SIZE && nextC >= 0 && nextC < BOARD_SIZE && board[nextR][nextC] === aiColor;
+
+          if (!prevIsSame && !nextIsSame) {
+            return {
+              hasThree: true,
+              count: 3,
+              description: `我方在 [${r + 1},${c + 1}] 方向形成三子连线`,
+              key: `${r}_${c}_${dr}_${dc}`,
+            };
+          }
+        }
+      }
+    }
+  }
+
+  return { hasThree: false, count: 0 };
+}
+
+/**
  * Applies Character Rank ceiling (on aggressive original scores) followed by
  * Emotion intra-group soft-weighting.
  *
