@@ -57,10 +57,13 @@ export type SpeechStyle = {
   forbidden_phrases: string[];
 };
 
+export type InstinctBase = 'attack' | 'avoid' | 'freeze' | 'fawn' | 'observe';
+export type SpeechFilter = 'rough' | 'gentle' | 'formal' | 'casual';
+
 export type CharacterCore = {
   values: string[];
-  instinct_base: 'attack' | 'avoid' | 'freeze' | 'fawn' | 'observe';
-  speech_filter: 'rough' | 'gentle' | 'formal' | 'casual';
+  instinct_base: InstinctBase;
+  speech_filter: SpeechFilter;
 };
 
 export type Character = {
@@ -96,6 +99,24 @@ export type EngineSnapshot = {
   triggeredAnchors: TriggeredAnchor[];
 };
 
+export type StickerMeta = {
+  id: string;
+  name: string;
+  url: string;
+  category?: string;
+  ownerType?: 'user' | 'ai';
+  characterId?: string;
+  isStolen?: boolean;
+  stolenMeta?: {
+    stolenAt: number;
+    contextText: string;
+    emotionSnapshot?: EmotionVector;
+    sourceCharacterId?: string;
+    sourceCharacterName?: string;
+    stolenBy: 'ai' | 'user';
+  };
+};
+
 export type ChatMessage = {
   id: string;
   role: 'user' | 'character';
@@ -105,6 +126,7 @@ export type ChatMessage = {
   character_id?: string;
   snapshot?: EngineSnapshot;
   llmError?: string;
+  sticker?: StickerMeta;
 };
 
 export type IntentAnalysis = {

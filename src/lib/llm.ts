@@ -199,7 +199,18 @@ export async function callLlm(
 }
 
 import type { Character, EmotionVector } from '../data/types';
-import { loadStructuredJsonPrompt, loadCustomSystemPrompt } from './customStore';
+import { 
+  loadStructuredJsonPrompt, 
+  loadCustomSystemPrompt,
+  loadBaseSystemRolePrompt,
+  loadHistoryInjectionCount,
+  loadPromptLayers,
+  loadCharVisualDesc,
+  loadUserVisualDesc,
+  loadUserPromptProfile,
+  loadEmotionDecayRate,
+  type PromptLayer,
+} from './customStore';
 
 export type StructuredLlmResponse = {
   reply: string;
@@ -599,12 +610,14 @@ export function buildSystemPrompt(
 ): string {
   const structuredPrompt = loadStructuredJsonPrompt();
   const globalCustomPrompt = loadCustomSystemPrompt();
+  const baseSystemRoleTemplate = loadBaseSystemRolePrompt();
+  const baseSystemRole = baseSystemRoleTemplate.replace(/\{characterName\}/g, characterName);
 
   const sections: string[] = [];
 
   // LAYER 1: Core System & Structured JSON Protocol
   sections.push(`【Layer 1: 系统核心设定与结构化输出协议】
-你正在扮演「${characterName}」这个角色，与用户进行高度沉浸的角色扮演。你始终以第一人称（"我"）沉浸式响应，禁止跳出角色。
+${baseSystemRole}
 
 ${structuredPrompt}
 
@@ -659,6 +672,124 @@ ${globalCustomPrompt.trim()}`);
   }
 
   return sections.join('\n\n');
+}
+
+export interface PipelineCompileContext {
+  character: Character;
+  emotionSummary: string;
+  decayRate?: number;
+  dynamicMemoriesContext?: string;
+  backgroundThreads?: string[];
+  chatHistory: { role: string; content: string }[];
+  targetMsgInstruction?: string;
+}
+
+export function compileLayerTemplate(
+  template: string, 
+  ctx: {
+    characterName: string;
+    coreValues: string;
+    instinct: string;
+    speechFilter: string;
+    catchphrases: string;
+    forbiddenPhrases: string;
+    charCustomPrompt: string;
+    charVisual: string;
+    userVisual: string;
+    userPersona: string;
+    emotionSummary: string;
+    decayRate: number;
+    dynamicMemoriesContext: string;
+    backgroundThreads: string;
+    historyLimit?: number;
+  }
+): string {
+  return template
+    .replace(/\{characterName\}/g, ctx.characterName)
+    .replace(/\{coreValues\}/g, ctx.coreValues)
+    .replace(/\{instinct\}/g, ctx.instinct)
+    .replace(/\{speechFilter\}/g, ctx.speechFilter)
+    .replace(/\{catchphrases\}/g, ctx.catchphrases)
+    .replace(/\{forbiddenPhrases\}/g, ctx.forbiddenPhrases)
+    .replace(/\{charCustomPrompt\}/g, ctx.charCustomPrompt)
+    .replace(/\{charVisual\}/g, ctx.charVisual)
+    .replace(/\{userVisual\}/g, ctx.userVisual)
+    .replace(/\{userPersona\}/g, ctx.userPersona)
+    .replace(/\{emotionSummary\}/g, ctx.emotionSummary)
+    .replace(/\{decayRate\}/g, String(ctx.decayRate))
+    .replace(/\{dynamicMemoriesContext\}/g, ctx.dynamicMemoriesContext ? `\n【深度记忆联动唤醒】\n${ctx.dynamicMemoriesContext}` : '')
+    .replace(/\{backgroundThreads\}/g, ctx.backgroundThreads)
+    .replace(/\{historyLimit\}/g, String(ctx.historyLimit ?? 12));
+}
+
+export function assemblePipelineLlmMessages(
+  layers: PromptLayer[],
+  ctx: PipelineCompileContext
+): { role: 'system' | 'user' | 'assistant'; content: string }[] {
+  const charCoreValues = ctx.character.core.values.join('、');
+  const catchphrases = ctx.character.speech.catchphrases.join('、');
+  const forbiddenPhrases = ctx.character.speech.forbidden_phrases.join('、');
+  const charCustomPrompt = (ctx.character as any).custom_system_prompt || '';
+  const charVisual = loadCharVisualDesc(ctx.character.character_id);
+  const userVisual = loadUserVisualDesc();
+  const userPersona = loadUserPromptProfile();
+  const decayRateNum = Math.round((ctx.decayRate ?? loadEmotionDecayRate()) * 100);
+  const bgThreads = ctx.backgroundThreads && ctx.backgroundThreads.length > 0 ? ctx.backgroundThreads.join('；') : '';
+
+  const templateVars = {
+    characterName: ctx.character.name,
+    coreValues: charCoreValues,
+    instinct: ctx.character.core.instinct_base,
+    speechFilter: ctx.character.core.speech_filter,
+    catchphrases,
+    forbiddenPhrases,
+    charCustomPrompt,
+    charVisual,
+    userVisual,
+    userPersona,
+    emotionSummary: ctx.emotionSummary,
+    decayRate: decayRateNum,
+    dynamicMemoriesContext: ctx.dynamicMemoriesContext || '',
+    backgroundThreads: bgThreads,
+  };
+
+  const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [];
+
+  for (const layer of layers) {
+    if (!layer.enabled) continue;
+
+    if (layer.type === 'history_context') {
+      const limit = layer.historyLimit ?? loadHistoryInjectionCount();
+      const recentHistory = limit > 0 ? ctx.chatHistory.slice(-limit) : [];
+      for (const msg of recentHistory) {
+        messages.push({
+          role: (msg.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
+          content: msg.content,
+        });
+      }
+    } else {
+      const compiled = compileLayerTemplate(layer.content, {
+        ...templateVars,
+        historyLimit: layer.historyLimit,
+      }).trim();
+
+      if (compiled.length > 0) {
+        messages.push({
+          role: layer.role,
+          content: compiled,
+        });
+      }
+    }
+  }
+
+  if (ctx.targetMsgInstruction) {
+    messages.push({
+      role: 'user',
+      content: ctx.targetMsgInstruction,
+    });
+  }
+
+  return messages;
 }
 
 // -------------------------------------------------------------
@@ -1167,7 +1298,10 @@ ${recentConversation}
 
 import type {
   UserBluffHistoryItem,
-  GhostCardKeyMoment
+  GhostCardKeyMoment,
+  Card,
+  CardHoverReaction,
+  TacticDirection
 } from './ghostCardEngine';
 
 /**
@@ -1229,7 +1363,142 @@ export async function generateGhostCardOpening(
 }
 
 /**
- * 2. 用户抽牌后 - 角色的微反应、内心独白与台词
+ * 2. 【核心升级】主控滑动抽牌前 - 一次性为角色手中的每一张牌预生成专属微反应与台词
+ */
+export async function generateGhostCardBatchHoverReactions(
+  config: LlmConfig,
+  character: Character,
+  emotion: EmotionVector,
+  context: {
+    charHand: Card[];
+    userHandCount: number;
+    turnCount: number;
+  }
+): Promise<CardHoverReaction[]> {
+  const emotionSummary = Object.entries(emotion)
+    .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
+    .join(', ');
+
+  const ghostIdx = context.charHand.findIndex((c) => c.isGhost);
+  const cardCount = context.charHand.length;
+
+  const cardListDesc = context.charHand.map((c, i) => {
+    return `牌位 [${i}]${c.isGhost ? '【这是鬼牌🐾！】' : '【普通安全牌】'}`;
+  }).join('、');
+
+  const prompt = `【风铃·捉鬼牌·全牌位悬停反应生成】
+现在轮到主控从你的手牌中抽取 1 张牌。
+主控的手指正在你的 ${cardCount} 张牌上方左右滑动悬停浏览！
+你面前展开了 ${cardCount} 张牌（编号从 0 到 ${cardCount - 1}）：
+${cardListDesc}
+- 角色特质：${character.core.values.join('、')}
+- 说话风格与口癖：${character.core.speech_filter}
+- 当前情绪状态：${emotionSummary}
+
+【任务要求】：
+请一次性为你手里的**每一张牌（从索引 0 到 ${cardCount - 1}）**预先想好专属、生动的实时反应！
+当主控的手指滑动并悬停在某张牌上时，你的反应要符合心理战的真实表现：
+1. 悬停在【鬼牌🐾】所在牌位时：你可以表现出微心虚、强装镇定、屏住呼吸、挑衅反问、或者故意虚张声势（根据人设）。
+2. 悬停在【普通安全牌】牌位时：你可以表现出轻松、鼓励、促狭微笑、或者装作很舍不得的迷惑演技。
+3. 每一张牌的台词与动作必须各不相同，禁止出现重复！
+
+请严格输出标准 JSON 数组：
+\`\`\`json
+[
+  {
+    "card_index": 0,
+    "speech": "“停在第一张？你确定第一张就合你眼缘嘛～”",
+    "action": "*双眼微微睁大，嘴角含笑*",
+    "inner_thought": "*这张可是安全牌，看ta敢不敢抽*"
+  }
+]
+\`\`\``;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，请输出包含 ${cardCount} 个元素的纯净 JSON 数组。` },
+      { role: 'user', content: prompt }
+    ]);
+    const match = raw.match(/\[[\s\S]*\]/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        const reactions: CardHoverReaction[] = [];
+        for (let i = 0; i < cardCount; i++) {
+          const item = parsed.find((p: any) => Number(p.card_index) === i) || parsed[i];
+          if (item) {
+            reactions.push({
+              cardIndex: i,
+              speech: String(item.speech || (i === ghostIdx ? '“……你真要选这张？”' : '“这张看起来也不错呢。”')),
+              action: String(item.action || (i === ghostIdx ? '*眼神微微游移了一下*' : '*静静看着你的指尖*')),
+              innerThought: item.inner_thought ? String(item.inner_thought) : undefined,
+            });
+          }
+        }
+        if (reactions.length === cardCount) {
+          return reactions;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('Ghost Card batch hover reactions LLM failed:', err);
+  }
+
+  // Fallback heuristic for all cards
+  const fallbackList: CardHoverReaction[] = context.charHand.map((c, i) => {
+    if (c.isGhost) {
+      const ghostResponses = [
+        {
+          speech: `“……咦？你的手怎么停在这张上了，别吓我哦～”`,
+          action: `*睫毛轻颤，故作镇定地眨了眨眼*`,
+          innerThought: `*心跳漏了一拍：千万别抽这张鬼牌！*`,
+        },
+        {
+          speech: `“这么快就盯上这张啦？有魄力的话就抽抽看呀。”`,
+          action: `*微咬下唇，努力不让自己笑场*`,
+          innerThought: `*紧张极了，但一定要装作满不在乎*`,
+        },
+        {
+          speech: `“喂……你目光锁定得这么死，是直觉还是瞎蒙呀？”`,
+          action: `*指节微微收紧了一瞬*`,
+          innerThought: `*糟了，难道被ta看穿了吗？*`,
+        },
+      ];
+      const pick = ghostResponses[i % ghostResponses.length];
+      return { cardIndex: i, ...pick };
+    } else {
+      const safeResponses = [
+        {
+          speech: `“这张手感很顺哦，抽走它或许能凑成对子呢。”`,
+          action: `*眉梢轻挑，露出从容的微笑*`,
+          innerThought: `*这张是安全牌，随便你抽～*`,
+        },
+        {
+          speech: `“停在这里犹豫了？要相信自己的第一感觉嘛。”`,
+          action: `*轻轻歪了歪头，尾巴悠闲地晃了晃*`,
+          innerThought: `*看ta这纠结的小表情真有意思*`,
+        },
+        {
+          speech: `“选这张吗？那我可要拭目以待了～”`,
+          action: `*慢条斯理地调整了一下握牌姿态*`,
+          innerThought: `*安全牌，抽走也无妨*`,
+        },
+        {
+          speech: `“别光看呀，觉得顺眼就果断拿走呗。”`,
+          action: `*嘴角含笑，眼神清澈*`,
+          innerThought: `*嘿嘿，看你敢不敢下手*`,
+        },
+      ];
+      const pick = safeResponses[i % safeResponses.length];
+      return { cardIndex: i, ...pick };
+    }
+  });
+
+  return fallbackList;
+}
+
+/**
+ * 3. 用户抽牌后 - 角色的微反应、内心独白与台词
  */
 export async function generateGhostCardUserDrawReaction(
   config: LlmConfig,
@@ -1273,9 +1542,8 @@ export async function generateGhostCardUserDrawReaction(
 生成面对主控刚才抽牌结果的真实反应（说话台词+肢体动作）与【脑内独白】。
 请注意：
 1. 角色台词用引号，动作神态用星号。
-2. inner_thought 为内心真实心声（如：*暗笑：居然真被ta把鬼牌抽走了，太好笑了* 或 *可恶，居然抽走安全牌还凑成对了*）。
-3. 语气禁止千篇一律，体现真情实感。
-4. step_emotion_delta 仅记录本步细微情绪变化（-0.15 ~ +0.15）。
+2. inner_thought 为内心真实心声。
+3. step_emotion_delta 仅记录本步细微情绪变化（-0.15 ~ +0.15）。
 
 输出标准 JSON：
 \`\`\`json
@@ -1314,114 +1582,135 @@ export async function generateGhostCardUserDrawReaction(
 }
 
 /**
- * 3. 角色抽牌前 - 为主控动态生成两个心理博弈对话选项（Option A 干扰 / Option B 提示）
+ * 4. 【核心升级】角色抽牌阶段 Step 1: 角色根据主控选择的策略（挑逗/求饶）与标记牌，进行心理推演并【悬停】在某张牌上
  */
-export async function generateGhostCardUserOptions(
+export async function generateGhostCardCharHoverDecision(
   config: LlmConfig,
   character: Character,
   emotion: EmotionVector,
   context: {
     userCardCount: number;
-    charCardCount: number;
+    selectedIndices: number[]; // 主控选中的牌位（如 [0, 2]）
+    tactic: TacticDirection;   // 'provoke' (挑逗/让它选) | 'plead' (求饶/不想让它选)
     userHasGhost: boolean;
-    turnCount: number;
     userBluffHistory: UserBluffHistoryItem[];
+    turnCount: number;
+    isProactive?: boolean;     // 30% 概率触发角色主动直觉先发制人
   }
-): Promise<{ option_a: string; option_b: string }> {
+): Promise<{
+  hoveredIndex: number;
+  hoverDialogue: string;
+  hoverAction: string;
+  innerThought: string;
+  stepEmotionDelta: Partial<EmotionVector>;
+}> {
   const emotionSummary = Object.entries(emotion)
     .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
     .join(', ');
 
-  const recentBluffContext = context.userBluffHistory.slice(-3).map(
-    (b) => `第${b.turn}轮主控说: "${b.userSaid}" -> 你${b.charBelieved ? '相信了' : '怀疑并反着选'}`
-  ).join('\n');
+  const validIndices = Array.from({ length: context.userCardCount }, (_, i) => i);
+  const selectedText = context.selectedIndices.length > 0
+    ? `第 ${context.selectedIndices.map((i) => i + 1).join('、')} 张牌（索引: ${context.selectedIndices.join(', ')}）`
+    : `整把手牌`;
 
-  const prompt = `【风铃·捉鬼牌·心理博弈选项生成】
-现在轮到「${character.name}」从主控（玩家）的手牌中抽取 1 张牌。
-在角色伸手抽牌前，主控可以对你说一句话来进行心理博弈（骗你抽鬼牌，或真诚/反向提示你避开鬼牌）。
+  const tacticDesc = context.isProactive
+    ? `【⚡ 角色先发制人】你不等主控慢悠悠出招标记牌，凭借敏锐的野性直觉与自信，主动抢先锁定主控手中的某张牌！`
+    : context.tactic === 'provoke'
+    ? `【挑逗（让它选 / 挑衅诱导）】主控故意突出这几张牌，眼神带着挑逗与自信：“有种你就选这几张试试～”`
+    : `【求饶（不想让它选 / 慌张掩护）】主控试图护住这几张牌，流露出紧张与示弱：“求求你千万别碰这几张牌呀～”`;
 
-【当前局势】：
-- 主控剩余手牌数：${context.userCardCount} 张
-- 你的剩余手牌数：${context.charCardCount} 张
-- 主控手中${context.userHasGhost ? '【实际持有鬼牌🐾】' : '【实际没有鬼牌】'}
-- 历史博弈记录：
-${recentBluffContext || '（开局第一轮博弈）'}
-- 角色特质：${character.core.values.join('、')}，当前情绪：${emotionSummary}
+  const prompt = `【风铃·捉鬼牌·角色悬停试探】
+现在轮到你（「${character.name}」）从主控的手牌中抽取 1 张牌。
+主控当前有 ${context.userCardCount} 张牌（编号从 0 到 ${context.userCardCount - 1}）。
+
+【当前对局情境】：
+${context.isProactive ? `- 触发状态：【⚡ 你直接先发制人！不等主控标记，主动看中了某张牌进行锁定悬停】` : `- 主控标记了：${selectedText}`}
+- 策略情境：${tacticDesc}
+- 你的性格特质：${character.core.values.join('、')}
+- 你的说话风格：${character.core.speech_filter}
+- 当前情绪状态：${emotionSummary}
 
 【任务要求】：
-请根据当前角色性格、两人互动氛围与牌局紧张度，生成 2 个**风格截然不同、措辞自然生动**的主控话术选项供主控选择：
-- \`option_a\` (心理干扰/虚张声势/诱导)：试图误导、挑衅或暗示角色抽某张（如故意诱导去抽鬼牌或虚张声势）
-- \`option_b\` (真诚提醒/反向暗示/淡然态度)：显得真诚、提醒避开或者反向心理战
+1. ${context.isProactive ? '展示你极其自信、果断、甚至带点得意或野性的先发制人气质，直接选定一张牌' : '针对主控的【挑逗】或【求饶】心理战进行推测（ta到底是在使诈设套、还是在欲盖弥彰？）'}。
+2. 从 [${validIndices.join(', ')}] 中选择你要【悬停（手指伸向/对准/锁定）】的一张牌编号 \`hovered_index\`。
+3. 生成你手指悬停锁定在目标牌上方时的试探性台词（\`hover_dialogue\`）与肢体神态描写（\`hover_action\`）。
+4. 记录你内心的真实推演独白（\`inner_thought\`）。
 
-【严格约束】：
-1. 两个选项必须语义和心理导向明显不同，禁止同义复述！
-2. 选项文字必须短小精炼、口语化，适合玩家一键点击发出（10-25字）。
-3. 严禁使用“帮我选”、“随便吧”等元选项。
-4. 每局根据局势动态变化，不要重复。
-
-输出标准 JSON：
+请输出标准 JSON：
 \`\`\`json
 {
-  "option_a": "“左边那张我刚才摸了很久，感觉特别合你的眼缘哦～”",
-  "option_b": "“……劝你别选中间那张，真的，没骗你。”"
+  "hovered_index": 0,
+  "hover_dialogue": "${context.isProactive ? '“不等你磨磨蹭蹭打心理战了！本座直觉最准，一眼就看中了你这第 1 张！”' : '“你刚才故意表现得这么慌张……那我就偏要把手指悬在第 1 张上面，看你眼神闪不闪～”'}",
+  "hover_action": "${context.isProactive ? '*不等你动作，纤细指尖带着微光瞬间锁定在你的第一张牌上方，眸光闪烁着锐利而自信的光芒*' : '*纤细的指尖轻轻悬停在你的第一张牌上方，眼眸微眯仔细端详你的微表情*'}",
+  "inner_thought": "${context.isProactive ? '*这把凭直觉锁定这张，看主控会有多慌张～*' : '*求饶得这么明显，这张多半有诈……不过我先悬停吓唬吓唬ta，听听ta怎么说*'}",
+  "step_emotion_delta": { "joy": 0.05, "warmth": 0.05 }
 }
 \`\`\``;
 
   try {
     const raw = await callLlm(config, [
-      { role: 'system', content: `你是剧本博弈设计器，请输出纯净 JSON。` },
+      { role: 'system', content: `你是「${character.name}」，请输出纯净 JSON。` },
       { role: 'user', content: prompt }
     ]);
     const match = raw.match(/\{[\s\S]*\}/);
     if (match) {
       const parsed = JSON.parse(match[0]);
-      if (parsed.option_a && parsed.option_b && parsed.option_a !== parsed.option_b) {
-        return {
-          option_a: String(parsed.option_a),
-          option_b: String(parsed.option_b),
-        };
+      let idx = Number(parsed.hovered_index);
+      if (isNaN(idx) || idx < 0 || idx >= context.userCardCount) {
+        idx = context.selectedIndices.length > 0 ? context.selectedIndices[0] : 0;
       }
+      return {
+        hoveredIndex: idx,
+        hoverDialogue: String(parsed.hover_dialogue || (context.isProactive ? '“不等你耍花招了，我先看准这张！”' : '“那我手指就先停在这张上面看看哦～”')),
+        hoverAction: String(parsed.hover_action || (context.isProactive ? '*指尖如电般瞬间悬停在卡牌上方，周身仿佛闪烁着自信的光芒*' : '*指尖悬停在牌面之上，静静观察你的反应*')),
+        innerThought: String(parsed.inner_thought || '*仔细观察主控接下来的反应……*'),
+        stepEmotionDelta: parsed.step_emotion_delta && typeof parsed.step_emotion_delta === 'object' ? parsed.step_emotion_delta : {},
+      };
     }
   } catch (err) {
-    console.warn('Ghost Card user options generation LLM failed:', err);
+    console.warn('Ghost Card char hover decision LLM failed:', err);
   }
 
-  // Fallback dynamic options
-  const fallbackOptions = [
-    {
-      option_a: '“左边那张手感特别顺，你肯定想抽那张吧～”',
-      option_b: '“……你确定要信我？那张我劝你最好避开。”',
-    },
-    {
-      option_a: '“随便抽哪张都一样，反正你逃不出我的手掌心～”',
-      option_b: '“右边那张是我的幸运牌，别怪我没提前提醒你哦。”',
-    },
-    {
-      option_a: '“看你犹豫的样子，不敢抽最中间那张对不对？”',
-      option_b: '“别看我的眼神，专心选你的牌，我不骗你。”',
-    },
-  ];
-  return fallbackOptions[Math.floor(Math.random() * fallbackOptions.length)];
+  // Fallback
+  const fallbackIdx = context.selectedIndices.length > 0
+    ? context.selectedIndices[0]
+    : Math.floor(Math.random() * context.userCardCount);
+
+  return {
+    hoveredIndex: fallbackIdx,
+    hoverDialogue: context.isProactive
+      ? `“不等你慢吞吞挑选了！我的直觉告诉我，就是第 ${fallbackIdx + 1} 张牌！”`
+      : context.tactic === 'provoke'
+      ? `“你越是挑逗我选这张，我手指就越想悬在这上面……你是不是心里正打鼓呢？”`
+      : `“你这一副求饶的样子，该不会是故意引我避开吧？那我可要在这张上面停一停了。”`,
+    hoverAction: context.isProactive
+      ? `*眼眸一亮，指尖带着轻快的弧光果断悬停在第 ${fallbackIdx + 1} 张牌上方*`
+      : `*手指轻轻悬停在第 ${fallbackIdx + 1} 张牌上方，眉眼含笑凝视着你*`,
+    innerThought: context.isProactive
+      ? `*先发制人！先锁定第 ${fallbackIdx + 1} 张，看主控会有多紧张！*`
+      : `*先悬停在第 ${fallbackIdx + 1} 张牌上试探一下，看ta接下来怎么说……*`,
+    stepEmotionDelta: { warmth: 0.05 },
+  };
 }
 
 /**
- * 4. 角色抽牌决策与即时反应 (Anti-Hallucination: 角色不知道主控具体牌面，仅知手牌数量)
+ * 5. 【核心升级】角色抽牌阶段 Step 2: 主控输入言语施压/拉扯后，角色做最终抽牌决断并发表感言
  */
-export async function generateGhostCardCharDrawDecision(
+export async function generateGhostCardCharFinalDraw(
   config: LlmConfig,
   character: Character,
   emotion: EmotionVector,
   context: {
-    userChoiceText: string;
-    userCardCount: number; // 0 to userCardCount - 1
-    userBluffHistory: UserBluffHistoryItem[];
-    charHasGhost: boolean;
-    charCardCount: number;
+    userSpeech: string;
+    hoveredIndex: number;
+    selectedIndices: number[];
+    tactic: TacticDirection;
+    userCardCount: number;
     turnCount: number;
   }
 ): Promise<{
-  believed: boolean;
-  selectedIndex: number;
+  finalSelectedIndex: number;
+  switchedMind: boolean;
   reactionDialogue: string;
   innerThought: string;
   stepEmotionDelta: Partial<EmotionVector>;
@@ -1431,76 +1720,72 @@ export async function generateGhostCardCharDrawDecision(
     .join(', ');
 
   const validIndices = Array.from({ length: context.userCardCount }, (_, i) => i);
-  const recentBluffContext = context.userBluffHistory.slice(-3).map(
-    (b) => `主控曾说: "${b.userSaid}" -> 角色${b.charBelieved ? '信了' : '没信'}`
-  ).join('\n');
 
-  const prompt = `【风铃·捉鬼牌】轮到你（「${character.name}」）从主控的手牌中抽牌！
-主控此时看着你的眼睛，对你说了这句话：
-“${context.userChoiceText}”
+  const prompt = `【风铃·捉鬼牌·角色最终决断抽牌】
+你（「${character.name}」）刚才把手指悬停在主控的第 ${context.hoveredIndex + 1} 张牌（索引 ${context.hoveredIndex}）上方。
+此时，主控看着你的眼睛，对你说了这句话：
+“${context.userSpeech}”
 
 【当前博弈信息】：
-- 主控当前手牌数：${context.userCardCount} 张（牌索引编号为: ${validIndices.join(', ')}）
-- 你当前手牌数：${context.charCardCount} 张
-- 历史交互：
-${recentBluffContext || '（初次交锋）'}
-- 你的性格：${character.core.values.join('、')}
+- 主控之前采用的策略：${context.tactic === 'provoke' ? '挑逗（引诱你选）' : '求饶（不想让你选）'}
+- 可选牌位索引：[${validIndices.join(', ')}]
+- 刚才悬停的牌位：第 ${context.hoveredIndex + 1} 张（索引 ${context.hoveredIndex}）
+- 角色性格：${character.core.values.join('、')}
 - 说话风格与口癖：${character.core.speech_filter}
-- 当前情绪状态：${emotionSummary}
+- 当前情绪：${emotionSummary}
 
-【决策任务】：
-1. 分析主控这句话是真话还是在唬你（\`believed\`：true 代表相信ta的暗示，false 代表怀疑并故意反选）。
-2. 从合法索引 [${validIndices.join(', ')}] 中选取一个你要抽取的牌编号 \`selected_index\`。
-3. 生成你伸手抽牌时的即时台词与肢体动作（\`reaction_dialogue\`），以及真实的脑内心理活动（\`inner_thought\`）。
+【任务要求】：
+1. 结合主控刚才说的话与表情，决定是【坚持抽刚才悬停的这张】，还是【在最后一刻突然变道抽另一张】！
+2. 给出最终抽牌索引 \`final_selected_index\`（必须是 [${validIndices.join(', ')}] 中的合法数字）。
+3. 生成抽牌时或抽完后的**即时感言与神态动作**（\`reaction_dialogue\`），以及真实的脑内独白（\`inner_thought\`）。
 4. 记录本步的情绪微变化 \`step_emotion_delta\`。
 
-输出标准 JSON：
+请输出标准 JSON：
 \`\`\`json
 {
-  "believed": false,
-  "selected_index": 0,
-  "reaction_dialogue": "“想骗我？你刚才眼神飘了一下，我才不上当呢，我就要选这一张！” *指尖精准抽出一张牌*",
-  "inner_thought": "*哼，前面就吃过你的亏，这次我反着选肯定没错……*",
+  "final_selected_index": ${context.hoveredIndex},
+  "switched_mind": false,
+  "reaction_dialogue": "“听完你这话我更确定了，不管啦，我就要抽这张！” *毫不犹豫地抽出一张牌*",
+  "inner_thought": "*哼，我才不受你言语动摇，就认准这张了！*",
   "step_emotion_delta": { "joy": 0.05, "warmth": 0.05 }
 }
 \`\`\``;
 
   try {
     const raw = await callLlm(config, [
-      { role: 'system', content: `你是「${character.name}」，请输出纯净 JSON 格式决策。` },
+      { role: 'system', content: `你是「${character.name}」，请输出纯净 JSON。` },
       { role: 'user', content: prompt }
     ]);
     const match = raw.match(/\{[\s\S]*\}/);
     if (match) {
       const parsed = JSON.parse(match[0]);
-      let chosenIndex = Number(parsed.selected_index);
-      if (isNaN(chosenIndex) || chosenIndex < 0 || chosenIndex >= context.userCardCount) {
-        chosenIndex = Math.floor(Math.random() * context.userCardCount);
+      let finalIdx = Number(parsed.final_selected_index);
+      if (isNaN(finalIdx) || finalIdx < 0 || finalIdx >= context.userCardCount) {
+        finalIdx = context.hoveredIndex;
       }
       return {
-        believed: Boolean(parsed.believed !== false),
-        selectedIndex: chosenIndex,
-        reactionDialogue: String(parsed.reaction_dialogue || '“那我就选这张了，可别怪我哦。” *指尖抽出一张牌*'),
-        innerThought: String(parsed.inner_thought || '*心里嘀咕着到底能不能信你……*'),
+        finalSelectedIndex: finalIdx,
+        switchedMind: Boolean(parsed.switched_mind ?? (finalIdx !== context.hoveredIndex)),
+        reactionDialogue: String(parsed.reaction_dialogue || '“就决定是这张了！” *指尖抽出一张牌*'),
+        innerThought: String(parsed.inner_thought || '*希望抽中能配对的安全牌……*'),
         stepEmotionDelta: parsed.step_emotion_delta && typeof parsed.step_emotion_delta === 'object' ? parsed.step_emotion_delta : {},
       };
     }
   } catch (err) {
-    console.warn('Ghost Card char draw decision LLM failed:', err);
+    console.warn('Ghost Card char final draw LLM failed:', err);
   }
 
-  const safeFallbackIndex = Math.floor(Math.random() * Math.max(1, context.userCardCount));
   return {
-    believed: true,
-    selectedIndex: safeFallbackIndex,
-    reactionDialogue: `*指尖在你展开的手牌上方轻拂而过，最终抽出一张* “信你一次，就这张了！”`,
-    innerThought: `*希望不要抓到鬼牌……*`,
+    finalSelectedIndex: context.hoveredIndex,
+    switchedMind: false,
+    reactionDialogue: `“听你这么说，我反而认准它了！就抽这张！” *指尖干脆利落地将牌抽出*`,
+    innerThought: `*心一横，就相信自己的直觉抽这张了！*`,
     stepEmotionDelta: { warmth: 0.05 },
   };
 }
 
 /**
- * 5. 捉鬼牌对局终局评价、撒娇索要奖励/耍赖与情绪总结算
+ * 6. 捉鬼牌对局终局评价、撒娇索要奖励/耍赖与情绪总结算
  */
 export async function generateGhostCardEnding(
   config: LlmConfig,

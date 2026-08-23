@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { 
   X, 
   ChevronLeft, 
@@ -11,7 +11,13 @@ import {
   Music, 
   ShieldAlert, 
   Palette,
-  Gamepad2
+  Gamepad2,
+  GripVertical,
+  RotateCcw,
+  Check,
+  ArrowLeft,
+  ArrowRight,
+  Move
 } from 'lucide-react';
 import PersonaApp from './phone/PersonaApp';
 import WallpaperApp from './phone/WallpaperApp';
@@ -21,6 +27,7 @@ import DictionaryApp from './phone/DictionaryApp';
 import CssApp from './phone/CssApp';
 import GomokuApp from './phone/GomokuApp';
 import { GhostCardApp } from './phone/GhostCardApp';
+import StickersApp from './phone/StickersApp';
 import type { LlmConfig } from '../lib/llm';
 import { 
   subscribeGameInvite, 
@@ -31,6 +38,13 @@ import {
   type GameInvitation,
   type GomokuMatchRecord 
 } from '../lib/gameStore';
+import {
+  loadPhoneAppsOrder,
+  savePhoneAppsOrder,
+  loadWindChimePosition,
+  loadWindChimeCordLength,
+  type WindChimePosition,
+} from '../lib/customStore';
 import type { Character, EmotionVector } from '../data/types';
 
 interface Props {
@@ -59,7 +73,7 @@ interface Props {
   onRejectGameInvite?: (invite: GameInvitation) => void;
 }
 
-export type AppId = 'persona' | 'wallpaper' | 'llm' | 'ambience' | 'dictionary' | 'css' | 'game' | 'ghost_card';
+export type AppId = 'stickers' | 'persona' | 'wallpaper' | 'llm' | 'ambience' | 'dictionary' | 'css' | 'game' | 'ghost_card';
 
 const APPS: Array<{
   id: AppId;
@@ -69,6 +83,14 @@ const APPS: Array<{
   gradient: string;
   badge?: string;
 }> = [
+  {
+    id: 'stickers',
+    name: '表情包',
+    subtitle: '图床与偷表情',
+    icon: Sparkles,
+    gradient: 'from-pink-500 via-rose-500 to-amber-500',
+    badge: '✨ 偷表情',
+  },
   {
     id: 'ghost_card',
     name: '捉鬼牌',
@@ -151,18 +173,151 @@ export default function WindChime({
   const [isOpen, setIsOpen] = useState(false);
   const [activeApp, setActiveApp] = useState<AppId | null>(null);
 
+  // Phone Apps Order & Customization State
+  const defaultAppIds = useMemo(() => APPS.map(a => a.id), []);
+  const [appOrder, setAppOrder] = useState<string[]>(() => loadPhoneAppsOrder(defaultAppIds));
+  const [isArranging, setIsArranging] = useState(false);
+  const [draggedAppId, setDraggedAppId] = useState<string | null>(null);
+  const [dragOverAppId, setDragOverAppId] = useState<string | null>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isDraggingAppRef = useRef(false);
+
+  // Sync / Sort Apps based on current appOrder
+  const sortedApps = useMemo(() => {
+    const map = new Map(APPS.map(a => [a.id, a]));
+    const result: typeof APPS = [];
+    appOrder.forEach(id => {
+      const found = map.get(id as AppId);
+      if (found) result.push(found);
+    });
+    // Append any missing apps
+    APPS.forEach(a => {
+      if (!result.some(r => r.id === a.id)) {
+        result.push(a);
+      }
+    });
+    return result;
+  }, [appOrder]);
+
+  // Drag and Drop handlers for App Icons
+  const handleAppDragStart = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.setData('text/plain', id);
+    e.dataTransfer.effectAllowed = 'move';
+    setDraggedAppId(id);
+    isDraggingAppRef.current = true;
+  };
+
+  const handleAppDragOver = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (dragOverAppId !== targetId) {
+      setDragOverAppId(targetId);
+    }
+  };
+
+  const handleAppDrop = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    const sourceId = draggedAppId || e.dataTransfer.getData('text/plain');
+    if (!sourceId || sourceId === targetId) {
+      setDraggedAppId(null);
+      setDragOverAppId(null);
+      setTimeout(() => { isDraggingAppRef.current = false; }, 100);
+      return;
+    }
+
+    setAppOrder(prev => {
+      const copy = [...prev];
+      const fromIdx = copy.indexOf(sourceId);
+      const toIdx = copy.indexOf(targetId);
+      if (fromIdx !== -1 && toIdx !== -1) {
+        const [item] = copy.splice(fromIdx, 1);
+        copy.splice(toIdx, 0, item);
+        savePhoneAppsOrder(copy);
+        playChimeTinkle(0.7);
+        return copy;
+      }
+      return prev;
+    });
+
+    setDraggedAppId(null);
+    setDragOverAppId(null);
+    setTimeout(() => { isDraggingAppRef.current = false; }, 100);
+  };
+
+  const handleAppDragEnd = () => {
+    setDraggedAppId(null);
+    setDragOverAppId(null);
+    setTimeout(() => { isDraggingAppRef.current = false; }, 100);
+  };
+
+  // Move App by step (for button click on mobile / arrange mode)
+  const handleShiftApp = (id: string, direction: 'left' | 'right', e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setAppOrder(prev => {
+      const copy = [...prev];
+      const idx = copy.indexOf(id);
+      if (idx === -1) return prev;
+      const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= copy.length) return prev;
+      const temp = copy[idx];
+      copy[idx] = copy[targetIdx];
+      copy[targetIdx] = temp;
+      savePhoneAppsOrder(copy);
+      playChimeTinkle(0.6);
+      return copy;
+    });
+  };
+
+  // Reset to default app order
+  const handleResetAppOrder = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setAppOrder(defaultAppIds);
+    savePhoneAppsOrder(defaultAppIds);
+    playChimeTinkle(0.9);
+  };
+
+  // Long press handler for touch mobile to trigger arrange mode
+  const handleTouchStart = () => {
+    longPressTimerRef.current = setTimeout(() => {
+      setIsArranging(true);
+      playChimeTinkle(0.5);
+    }, 450);
+  };
+
+  const handleTouchEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
   // Pending Game Invitation State
   const [pendingInvite, setPendingInvite] = useState<GameInvitation | null>(() => getPendingGameInvite());
   const [isChimeShaking, setIsChimeShaking] = useState(false);
   const lastProcessedInviteIdRef = useRef<string | null>(null);
 
-  // Dynamic Rope Length State (px)
-  const [cordLength, setCordLength] = useState(DEFAULT_CORD_LENGTH);
+  // Dynamic Rope Length & Position State
+  const [windChimePos, setWindChimePos] = useState<WindChimePosition>(() => loadWindChimePosition());
+  const [baseCordLength, setBaseCordLength] = useState<number>(() => loadWindChimeCordLength());
+  const [cordLength, setCordLength] = useState(() => loadWindChimeCordLength());
   const [isDragging, setIsDragging] = useState(false);
   const dragStartYRef = useRef(0);
-  const startCordLengthRef = useRef(DEFAULT_CORD_LENGTH);
+  const startCordLengthRef = useRef(50);
   const hasPlayedPullSoundRef = useRef(false);
   const chimeRef = useRef<HTMLDivElement>(null);
+
+  // Sync layout changes
+  useEffect(() => {
+    const handleLayoutChange = () => {
+      setWindChimePos(loadWindChimePosition());
+      const newLen = loadWindChimeCordLength();
+      setBaseCordLength(newLen);
+      setCordLength(newLen);
+      setAppOrder(loadPhoneAppsOrder(defaultAppIds));
+    };
+    window.addEventListener('windchime_layout_change', handleLayoutChange);
+    return () => window.removeEventListener('windchime_layout_change', handleLayoutChange);
+  }, [defaultAppIds]);
 
   // Real-time status bar time
   const [currentTime, setCurrentTime] = useState('23:59');
@@ -267,7 +422,7 @@ export default function WindChime({
       // ignore
     }
 
-    const pulledDistance = cordLength - DEFAULT_CORD_LENGTH;
+    const pulledDistance = cordLength - baseCordLength;
     const totalTravel = Math.abs(cordLength - startCordLengthRef.current);
 
     if (pulledDistance > 20 || totalTravel > 15 || totalTravel < 4) {
@@ -275,17 +430,17 @@ export default function WindChime({
         playChimeTinkle(1.1);
       }
       setIsOpen(true);
-      setCordLength(Math.max(DEFAULT_CORD_LENGTH, Math.min(130, cordLength)));
+      setCordLength(Math.max(baseCordLength, Math.min(130, cordLength)));
     } else {
-      setCordLength(DEFAULT_CORD_LENGTH);
+      setCordLength(baseCordLength);
     }
   };
 
   return (
     <>
-      {/* ================= 1. HANGING WIND CHIME ON THE LEFT EDGE ================= */}
+      {/* ================= 1. HANGING WIND CHIME (RESTORED TO TOP LEFT) ================= */}
       <div 
-        className={`fixed top-0 left-2.5 sm:left-3.5 z-40 select-none flex flex-col items-center pointer-events-auto cursor-grab active:cursor-grabbing ${
+        className={`fixed top-0 left-2.5 sm:left-3.5 z-40 select-none flex flex-col items-center pointer-events-auto cursor-grab active:cursor-grabbing transition-all duration-300 ${
           isChimeShaking ? 'animate-chime-swing' : ''
         }`}
         title="下拉风铃绳索，开启手机控制台"
@@ -447,19 +602,63 @@ export default function WindChime({
               {!activeApp ? (
                 <div className="space-y-3.5 pt-1 animate-in fade-in-0 duration-200 select-none">
                   {/* Home Greeting & Status Widget */}
-                  <div className="p-3 rounded-2xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] border border-white/10 shadow-md space-y-1">
+                  <div className="p-3 rounded-2xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] border border-white/10 shadow-md space-y-2">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
                         <Sparkles className="size-3.5 text-[hsl(28_85%_62%)]" />
                         <span className="text-xs font-bold text-white">灵犀控制中心</span>
                       </div>
-                      <span className="text-[9px] text-amber-300/80 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full font-mono">
-                        ONLINE
+                      <div className="flex items-center gap-1.5">
+                        {/* Arrange Mode Toggle Button */}
+                        <button
+                          onClick={() => {
+                            setIsArranging(!isArranging);
+                            playChimeTinkle(0.6);
+                          }}
+                          className={`px-2 py-0.5 rounded-full text-[9px] font-medium flex items-center gap-1 transition-all ${
+                            isArranging
+                              ? 'bg-amber-400 text-amber-950 font-bold shadow-md shadow-amber-500/20 ring-1 ring-amber-300'
+                              : 'bg-white/10 hover:bg-white/20 text-white/80 border border-white/10'
+                          }`}
+                          title={isArranging ? '完成桌面图标排列' : '自定义调整图标位置'}
+                        >
+                          {isArranging ? (
+                            <>
+                              <Check className="size-2.5" />
+                              <span>完成</span>
+                            </>
+                          ) : (
+                            <>
+                              <Move className="size-2.5 text-amber-300" />
+                              <span>排列图标</span>
+                            </>
+                          )}
+                        </button>
+
+                        {/* Reset App Order Button */}
+                        {isArranging && (
+                          <button
+                            onClick={handleResetAppOrder}
+                            className="p-1 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-colors"
+                            title="恢复默认图标顺序"
+                          >
+                            <RotateCcw className="size-2.5" />
+                          </button>
+                        )}
+
+                        <span className="text-[9px] text-amber-300/80 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full font-mono">
+                          ONLINE
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[10px] text-white/50 leading-tight">
+                      <span>
+                        {isArranging 
+                          ? '✨ 拖拽卡片或点击左右箭头调整桌面顺序' 
+                          : '💡 拖拽卡片或长按图标可自定义排列顺序'}
                       </span>
                     </div>
-                    <p className="text-[10.5px] text-white/50 leading-tight">
-                      点击下方软件图标快速配置人设、背景、模型与对弈小游戏。
-                    </p>
                   </div>
 
                   {/* Pending Game Invitation Banner on Home Screen */}
@@ -487,9 +686,9 @@ export default function WindChime({
                     </button>
                   )}
 
-                  {/* 3-Column Phone App Grid (3 Icons per row) */}
+                  {/* 3-Column Phone App Grid (Draggable & Reorderable) */}
                   <div className="grid grid-cols-3 gap-2.5 pt-1">
-                    {APPS.map((app) => {
+                    {sortedApps.map((app, index) => {
                       const Icon = app.icon;
                       const isGameWithInvite = app.id === 'game' && !!pendingInvite && pendingInvite.gameType !== 'ghost_card';
                       const isGhostWithInvite = app.id === 'ghost_card' && !!pendingInvite && pendingInvite.gameType === 'ghost_card';
@@ -498,14 +697,58 @@ export default function WindChime({
                       const hasPausedGomoku = !!activeGomokuSession && activeGomokuSession.moveHistory.length > 0;
                       const hasPausedGhost = !!activeGhostSession && (activeGhostSession.userHand.length > 0 || activeGhostSession.charHand.length > 0);
 
+                      const isSelfDragging = draggedAppId === app.id;
+                      const isDropTarget = dragOverAppId === app.id;
+
                       return (
-                        <button
+                        <div
                           key={app.id}
-                          onClick={() => setActiveApp(app.id)}
-                          className="group relative flex flex-col items-center p-2.5 rounded-2xl bg-black/40 hover:bg-white/[0.08] border border-white/10 hover:border-[hsl(28_85%_62%/0.4)] transition-all duration-200 text-center shadow-md hover:shadow-[hsl(28_85%_62%/0.15)] active:scale-95 cursor-pointer"
+                          draggable
+                          onDragStart={(e) => handleAppDragStart(e, app.id)}
+                          onDragOver={(e) => handleAppDragOver(e, app.id)}
+                          onDrop={(e) => handleAppDrop(e, app.id)}
+                          onDragEnd={handleAppDragEnd}
+                          onTouchStart={handleTouchStart}
+                          onTouchEnd={handleTouchEnd}
+                          onClick={() => {
+                            if (!isArranging && !isDraggingAppRef.current) {
+                              setActiveApp(app.id);
+                            }
+                          }}
+                          className={`group relative flex flex-col items-center p-2.5 rounded-2xl transition-all duration-200 text-center shadow-md cursor-pointer select-none ${
+                            isSelfDragging
+                              ? 'opacity-30 scale-90 border-dashed border-2 border-amber-400 bg-amber-950/30 ring-2 ring-amber-400/40'
+                              : isDropTarget
+                              ? 'scale-105 border-2 border-amber-400 bg-amber-950/40 shadow-lg shadow-amber-500/30 ring-2 ring-amber-300'
+                              : isArranging
+                              ? 'bg-white/[0.07] border border-amber-400/50 hover:border-amber-400 shadow-md ring-1 ring-amber-400/20'
+                              : 'bg-black/40 hover:bg-white/[0.08] border border-white/10 hover:border-[hsl(28_85%_62%/0.4)] hover:shadow-[hsl(28_85%_62%/0.15)] active:scale-95'
+                          }`}
                         >
+                          {/* Arrange Mode: Reorder Left / Right Quick Control Buttons on Mobile */}
+                          {isArranging && (
+                            <div className="absolute -top-1.5 inset-x-1 flex items-center justify-between z-20 pointer-events-auto">
+                              <button
+                                disabled={index === 0}
+                                onClick={(e) => handleShiftApp(app.id, 'left', e)}
+                                className="size-5 rounded-full bg-neutral-900 border border-amber-400/80 text-amber-300 flex items-center justify-center disabled:opacity-20 hover:bg-amber-400 hover:text-black transition-all shadow-md active:scale-90"
+                                title="向左移动"
+                              >
+                                <ArrowLeft className="size-3" />
+                              </button>
+                              <button
+                                disabled={index === sortedApps.length - 1}
+                                onClick={(e) => handleShiftApp(app.id, 'right', e)}
+                                className="size-5 rounded-full bg-neutral-900 border border-amber-400/80 text-amber-300 flex items-center justify-center disabled:opacity-20 hover:bg-amber-400 hover:text-black transition-all shadow-md active:scale-90"
+                                title="向右移动"
+                              >
+                                <ArrowRight className="size-3" />
+                              </button>
+                            </div>
+                          )}
+
                           {/* Badge (e.g. AI视觉, 新邀请, 暂停中) */}
-                          {(app.badge || isGameWithInvite || isGhostWithInvite || hasPausedGomoku || hasPausedGhost) && (
+                          {!isArranging && (app.badge || isGameWithInvite || isGhostWithInvite || hasPausedGomoku || hasPausedGhost) && (
                             <span
                               className={`absolute -top-1 -right-1 text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow-md z-10 ${
                                 isGameWithInvite || isGhostWithInvite
@@ -529,9 +772,14 @@ export default function WindChime({
 
                           {/* App Icon (Squircle shape) */}
                           <div
-                            className={`size-12 rounded-2xl bg-gradient-to-br ${app.gradient} shadow-md group-hover:scale-105 transition-transform duration-200 flex items-center justify-center mb-1.5 ring-1 ring-white/20`}
+                            className={`size-12 rounded-2xl bg-gradient-to-br ${app.gradient} shadow-md group-hover:scale-105 transition-transform duration-200 flex items-center justify-center mb-1.5 ring-1 ring-white/20 relative`}
                           >
                             <Icon className="size-6 text-white drop-shadow-sm" />
+                            {isArranging && (
+                              <div className="absolute inset-0 rounded-2xl bg-black/20 flex items-center justify-center">
+                                <GripVertical className="size-4 text-white/90 drop-shadow-md" />
+                              </div>
+                            )}
                           </div>
 
                           {/* App Label & Subtitle */}
@@ -543,7 +791,7 @@ export default function WindChime({
                               {app.subtitle}
                             </p>
                           </div>
-                        </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -551,6 +799,9 @@ export default function WindChime({
               ) : (
                 /* ========== IN-APP DETAIL VIEW ========== */
                 <div className="animate-in fade-in-0 duration-200 pt-1">
+                  {activeApp === 'stickers' && (
+                    <StickersApp currentCharacterId={currentCharacterId} />
+                  )}
                   {activeApp === 'persona' && (
                     <PersonaApp
                       currentCharacterId={currentCharacterId}

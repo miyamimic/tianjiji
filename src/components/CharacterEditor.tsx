@@ -1,5 +1,21 @@
-import { useState, useEffect } from 'react';
-import { User, ShieldAlert, Heart, MessageSquare, Clipboard, RotateCcw, Check, Sparkles, HelpCircle, Layers, Swords } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  User, 
+  ShieldAlert, 
+  Heart, 
+  MessageSquare, 
+  Clipboard, 
+  RotateCcw, 
+  Check, 
+  Sparkles, 
+  HelpCircle, 
+  Layers, 
+  Swords,
+  Download,
+  Upload,
+  FileText,
+  FileJson
+} from 'lucide-react';
 import { 
   loadSavedCharacters, 
   saveCharacterEdit, 
@@ -12,6 +28,13 @@ import {
   saveCharGomokuRank,
   type GomokuRank
 } from '../lib/customStore';
+import { 
+  exportCharacterToJson, 
+  exportCharacterToDocx, 
+  exportAllCharactersToJson, 
+  importCharacterFromJson, 
+  importCharacterFromDocxOrText 
+} from '../lib/characterIO';
 import type { Character, CharacterCore } from '../data/types';
 import { INSTINCT_DESCRIPTIONS, SPEECH_FILTER_DESCRIPTIONS } from '../data/types';
 
@@ -51,6 +74,9 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
   const [threadContents, setThreadContents] = useState('');
 
   const [charSaved, setCharSaved] = useState(false);
+  const [isExportingDocx, setIsExportingDocx] = useState(false);
+  const [ioNotice, setIoNotice] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load characters and user profile
   useEffect(() => {
@@ -163,16 +189,85 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
     }
   };
 
+  // Character IO handlers
+  const handleExportDocx = async () => {
+    if (!editingChar) return;
+    try {
+      setIsExportingDocx(true);
+      await exportCharacterToDocx(editingChar);
+      setIoNotice(`已成功生成并下载《${editingChar.name}》的 Word 档案卡 (.docx)！`);
+    } catch (err: any) {
+      setIoNotice(`Word 文档生成失败：${err?.message || err}`);
+    } finally {
+      setIsExportingDocx(false);
+      setTimeout(() => setIoNotice(null), 3500);
+    }
+  };
+
+  const handleExportJson = () => {
+    if (!editingChar) return;
+    try {
+      exportCharacterToJson(editingChar);
+      setIoNotice(`已成功导出《${editingChar.name}》的 JSON 档案！`);
+    } catch (err: any) {
+      setIoNotice(`导出失败：${err?.message || err}`);
+    }
+    setTimeout(() => setIoNotice(null), 3000);
+  };
+
+  const handleExportAll = () => {
+    try {
+      exportAllCharactersToJson(characters);
+      setIoNotice(`已成功打包导出全部 ${characters.length} 位角色档案！`);
+    } catch (err: any) {
+      setIoNotice(`导出失败：${err?.message || err}`);
+    }
+    setTimeout(() => setIoNotice(null), 3000);
+  };
+
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      if (file.name.endsWith('.json')) {
+        const text = await file.text();
+        const res = importCharacterFromJson(text);
+        const refreshed = loadSavedCharacters();
+        setCharacters(refreshed);
+        if (res.characters.length > 0) {
+          const first = res.characters[0];
+          setSelectedId(first.character_id);
+        }
+        setIoNotice(`成功导入 ${res.importedCount} 位角色档案！`);
+      } else if (file.name.endsWith('.docx') || file.name.endsWith('.txt')) {
+        const imported = await importCharacterFromDocxOrText(file);
+        const refreshed = loadSavedCharacters();
+        setCharacters(refreshed);
+        setSelectedId(imported.character_id);
+        setIoNotice(`成功解析并导入《${imported.name}》角色档案！`);
+      } else {
+        setIoNotice('不支持的文件格式，请上传 .docx 或 .json 角色档案！');
+      }
+      onCharacterUpdated();
+    } catch (err: any) {
+      setIoNotice(`导入失败：${err?.message || err}`);
+    } finally {
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      setTimeout(() => setIoNotice(null), 3500);
+    }
+  };
+
   return (
     <div className="space-y-6 text-white/90">
       <div>
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-3">
           <div className="space-y-0.5">
             <h3 className="text-sm font-semibold text-white flex items-center gap-1.5">
               <Sparkles className="size-4 text-[hsl(28_85%_62%)]" />
-              角色卡档案深度编辑
+              角色卡档案深度编辑 (Character Profile Studio)
             </h3>
-            <p className="text-[11px] text-white/40">在这里，网页上所有的剧情设定和提示词都可以自定义！</p>
+            <p className="text-[11px] text-white/40">支持自定义核心人设、言辞口癖与思维动作，并可无缝导入导出 Word DOCX 和 JSON 档案！</p>
           </div>
           <button
             onClick={handleResetDefaults}
@@ -180,6 +275,78 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
           >
             <RotateCcw className="size-3" /> 重置默认角色卡
           </button>
+        </div>
+
+        {/* IO Notice Feedback */}
+        {ioNotice && (
+          <div className="p-3 mb-3 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-[11px] flex items-center justify-between shadow-lg">
+            <span>{ioNotice}</span>
+            <button onClick={() => setIoNotice(null)} className="text-amber-300 hover:text-white text-xs font-bold">
+              ✕
+            </button>
+          </div>
+        )}
+
+        {/* Character Import / Export Action Bar */}
+        <div className="p-3 mb-4 rounded-xl border border-amber-400/30 bg-gradient-to-br from-amber-950/30 via-stone-900/40 to-black/50 space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-amber-300 flex items-center gap-1.5 text-xs">
+              <FileText className="size-3.5 text-amber-400" />
+              角色档案导入 / 导出 (Word DOCX & JSON)
+            </span>
+            <span className="text-[10px] text-amber-300/70 font-mono">Archive Portable</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <button
+              type="button"
+              onClick={handleExportDocx}
+              disabled={isExportingDocx || !editingChar}
+              className="p-1.5 rounded-lg border border-amber-400/40 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-semibold text-[11px] transition-all flex items-center justify-center gap-1 active:scale-95 disabled:opacity-50 cursor-pointer shadow-xs"
+              title="生成并下载角色 Word 档案卡"
+            >
+              <FileText className="size-3 text-amber-300" />
+              <span>{isExportingDocx ? '生成 Word 中...' : '导出 Word 档案 (.docx)'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportJson}
+              disabled={!editingChar}
+              className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white/80 font-medium text-[11px] transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+              title="导出当前角色为 JSON 档案"
+            >
+              <FileJson className="size-3 text-emerald-400" />
+              <span>导出 JSON 档案</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportAll}
+              className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white/80 font-medium text-[11px] transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+              title="导出全部已保存角色合集"
+            >
+              <Download className="size-3 text-cyan-300" />
+              <span>打包导出全部</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white/80 font-medium text-[11px] transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+              title="上传 .docx / .json 角色档案"
+            >
+              <Upload className="size-3 text-purple-300" />
+              <span>导入角色档案</span>
+            </button>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".docx,.json,.txt,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              onChange={handleImportFile}
+              className="hidden"
+            />
+          </div>
         </div>
 
         {/* Character Selector tabs */}

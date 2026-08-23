@@ -99,32 +99,46 @@ export function createCompactDeck(): Card[] {
 }
 
 /**
- * 2. Deal Initial Hands (9 to first player, 8 to second)
+ * 2. Deal Initial Hands (Strict 50/50 equal probability for Ghost Card holder)
  */
 export function dealInitialHands(
   deck: Card[],
   firstTurn: 'user' | 'character' = 'user'
-): { userHand: Card[]; charHand: Card[] } {
-  const userHand: Card[] = [];
-  const charHand: Card[] = [];
+): { userHand: Card[]; charHand: Card[]; initialGhostHolder: 'user' | 'character' } {
+  // Separate ghost card and normal cards
+  const ghostCard = deck.find((c) => c.isGhost);
+  const normalCards = deck.filter((c) => !c.isGhost);
 
-  deck.forEach((card, idx) => {
-    if (firstTurn === 'user') {
-      if (idx % 2 === 0) {
-        userHand.push(card);
-      } else {
-        charHand.push(card);
-      }
+  // Shuffle normal cards thoroughly
+  for (let i = normalCards.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [normalCards[i], normalCards[j]] = [normalCards[j], normalCards[i]];
+  }
+
+  // Deal 8 normal cards to user, 8 normal cards to character
+  const userHand: Card[] = normalCards.slice(0, 8);
+  const charHand: Card[] = normalCards.slice(8, 16);
+
+  // Explicit 50% / 50% fair coin flip for who initially receives the Ghost Card!
+  const initialGhostHolder: 'user' | 'character' = Math.random() < 0.5 ? 'user' : 'character';
+
+  if (ghostCard) {
+    if (initialGhostHolder === 'user') {
+      userHand.push(ghostCard);
     } else {
-      if (idx % 2 === 0) {
-        charHand.push(card);
-      } else {
-        userHand.push(card);
-      }
+      charHand.push(ghostCard);
     }
-  });
+  }
 
-  return { userHand, charHand };
+  // Shuffle each hand so ghost card isn't just at the end
+  const shuffledUser = shuffleHand(userHand);
+  const shuffledChar = shuffleHand(charHand);
+
+  return { 
+    userHand: shuffledUser, 
+    charHand: shuffledChar, 
+    initialGhostHolder 
+  };
 }
 
 /**
@@ -237,4 +251,25 @@ export function checkGhostCardWinner(
   if (userHand.length === 0) return 'user';
   if (charHand.length === 0) return 'character';
   return null;
+}
+
+/**
+ * 6. Shuffle an existing hand (used for "换牌/重新打乱")
+ */
+export function shuffleHand(hand: Card[]): Card[] {
+  const newHand = [...hand];
+  for (let i = newHand.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newHand[i], newHand[j]] = [newHand[j], newHand[i]];
+  }
+  return newHand;
+}
+
+export type TacticDirection = 'provoke' | 'plead'; // 挑逗(让它选) vs 求饶(不想让它选)
+
+export interface CardHoverReaction {
+  cardIndex: number;
+  speech: string;
+  action: string;
+  innerThought?: string;
 }

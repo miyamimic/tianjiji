@@ -44,6 +44,32 @@ export default function App() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
+  const [stickerToast, setStickerToast] = useState<{
+    by: 'user' | 'ai';
+    message: string;
+    stickerUrl?: string;
+  } | null>(null);
+
+  useEffect(() => {
+    const handleStickerStolen = (e: Event) => {
+      const customEvt = e as CustomEvent;
+      if (customEvt.detail) {
+        setStickerToast({
+          by: customEvt.detail.by,
+          message: customEvt.detail.message,
+          stickerUrl: customEvt.detail.stickerUrl,
+        });
+        setTimeout(() => {
+          setStickerToast(null);
+        }, 3600);
+      }
+    };
+    window.addEventListener('rp_sticker_stolen_event', handleStickerStolen);
+    return () => {
+      window.removeEventListener('rp_sticker_stolen_event', handleStickerStolen);
+    };
+  }, []);
+
   useEffect(() => {
     const unsub = subscribeGameInvite((invite) => {
       if (invite && invite.status === 'pending') {
@@ -296,7 +322,9 @@ export default function App() {
             <div className="pointer-events-auto">
               <ChatInput
                 onSend={handleSend}
+                onSendSticker={(sticker, text) => engine.sendUserSticker(sticker, text)}
                 onRequestReply={() => handleRequestReply()}
+                onOpenStickerApp={() => setForceOpenApp('stickers')}
                 disabled={isLoading}
                 llmReady={llmReady}
               />
@@ -364,6 +392,36 @@ export default function App() {
           setActiveInviteModal(null);
         }}
       />
+
+      {/* Floating Sticker Stolen Toast */}
+      {stickerToast && (
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-4 duration-300 pointer-events-auto">
+          <div
+            onClick={() => setForceOpenApp('stickers')}
+            className={`flex items-center gap-3 px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-xl border cursor-pointer hover:scale-105 transition active:scale-95 ${
+              stickerToast.by === 'ai'
+                ? 'bg-purple-950/90 border-purple-400/50 text-purple-100 shadow-purple-900/40'
+                : 'bg-amber-950/90 border-amber-400/50 text-amber-100 shadow-amber-900/40'
+            }`}
+          >
+            {stickerToast.stickerUrl && (
+              <div className="size-8 rounded-xl overflow-hidden bg-black/50 border border-white/20 shrink-0">
+                <img
+                  src={stickerToast.stickerUrl}
+                  alt="表情包"
+                  className="w-full h-full object-cover"
+                  referrerPolicy="no-referrer"
+                />
+              </div>
+            )}
+            <div className="text-xs font-medium space-y-0.5">
+              <p>{stickerToast.message}</p>
+              <p className="text-[10px] opacity-70 underline">点击前往【表情包工坊】查看详情与回忆快照 ➔</p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+

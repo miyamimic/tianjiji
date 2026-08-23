@@ -13,8 +13,19 @@ import {
   Sliders,
   ShieldAlert,
   Clipboard,
-  Swords
+  Swords,
+  Download,
+  FileText,
+  FileJson,
+  Plus
 } from 'lucide-react';
+import { 
+  exportCharacterToJson, 
+  exportCharacterToDocx, 
+  exportAllCharactersToJson, 
+  importCharacterFromJson, 
+  importCharacterFromDocxOrText 
+} from '../../lib/characterIO';
 import { 
   loadSavedCharacters, 
   saveCharacterEdit, 
@@ -75,7 +86,11 @@ export default function PersonaApp({ currentCharacterId = 'char_001', onEngineRe
   const [touchActions, setTouchActions] = useState('');
   const [charSaved, setCharSaved] = useState(false);
   const [analyzingCharVision, setAnalyzingCharVision] = useState(false);
+  const [isExportingDocx, setIsExportingDocx] = useState(false);
+  const [charIoNotice, setCharIoNotice] = useState<string | null>(null);
+
   const charFileRef = useRef<HTMLInputElement>(null);
+  const importCharFileRef = useRef<HTMLInputElement>(null);
 
   // Load initial data
   useEffect(() => {
@@ -223,6 +238,78 @@ export default function PersonaApp({ currentCharacterId = 'char_001', onEngineRe
     setTimeout(() => setCharSaved(false), 2000);
   };
 
+  // Export handlers
+  const handleExportDocx = async () => {
+    if (!editingChar) return;
+    try {
+      setIsExportingDocx(true);
+      await exportCharacterToDocx(editingChar);
+      setCharIoNotice(`已成功生成并下载《${editingChar.name}》的 Word 档案 (.docx)！`);
+    } catch (err: any) {
+      setCharIoNotice(`Word 文档生成失败：${err?.message || err}`);
+    } finally {
+      setIsExportingDocx(false);
+      setTimeout(() => setCharIoNotice(null), 3500);
+    }
+  };
+
+  const handleExportJson = () => {
+    if (!editingChar) return;
+    try {
+      exportCharacterToJson(editingChar);
+      setCharIoNotice(`已成功导出《${editingChar.name}》的 JSON 档案！`);
+    } catch (err: any) {
+      setCharIoNotice(`导出失败：${err?.message || err}`);
+    }
+    setTimeout(() => setCharIoNotice(null), 3000);
+  };
+
+  const handleExportAll = () => {
+    try {
+      exportAllCharactersToJson(characters);
+      setCharIoNotice(`已成功打包导出全部 ${characters.length} 位角色档案合集！`);
+    } catch (err: any) {
+      setCharIoNotice(`导出失败：${err?.message || err}`);
+    }
+    setTimeout(() => setCharIoNotice(null), 3000);
+  };
+
+  // Import file handler (supports .docx, .json, .txt)
+  const handleImportFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      if (file.name.endsWith('.json')) {
+        const text = await file.text();
+        const res = importCharacterFromJson(text);
+        const refreshed = loadSavedCharacters();
+        setCharacters(refreshed);
+        if (res.characters.length > 0) {
+          const first = res.characters[0];
+          setSelectedCharId(first.character_id);
+          loadCharData(first);
+        }
+        setCharIoNotice(`成功导入 ${res.importedCount} 位角色档案！`);
+      } else if (file.name.endsWith('.docx') || file.name.endsWith('.txt')) {
+        const imported = await importCharacterFromDocxOrText(file);
+        const refreshed = loadSavedCharacters();
+        setCharacters(refreshed);
+        setSelectedCharId(imported.character_id);
+        loadCharData(imported);
+        setCharIoNotice(`成功解析并导入《${imported.name}》角色档案！`);
+      } else {
+        setCharIoNotice('不支持的文件格式，请上传 .docx 或 .json 角色档案！');
+      }
+      onEngineReload?.();
+    } catch (err: any) {
+      setCharIoNotice(`导入失败：${err?.message || err}`);
+    } finally {
+      if (importCharFileRef.current) importCharFileRef.current.value = '';
+      setTimeout(() => setCharIoNotice(null), 3500);
+    }
+  };
+
   return (
     <div className="space-y-4 text-xs text-white/90 pb-6">
       {/* Sub tabs: User Persona vs Character Cards */}
@@ -368,6 +455,84 @@ export default function PersonaApp({ currentCharacterId = 'char_001', onEngineRe
       {/* ================= CHARACTER TAB ================= */}
       {subTab === 'character' && (
         <div className="space-y-3.5 animate-in fade-in-0 duration-200">
+          {/* IO Feedback Banner */}
+          {charIoNotice && (
+            <div className="p-3 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-[11px] flex items-center justify-between shadow-lg animate-in fade-in-0 duration-150">
+              <span>{charIoNotice}</span>
+              <button 
+                onClick={() => setCharIoNotice(null)}
+                className="text-amber-300 hover:text-white ml-2 text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+          )}
+
+          {/* Export / Import Character Archive Toolbar */}
+          <div className="p-3 rounded-2xl border border-amber-400/30 bg-gradient-to-br from-amber-950/40 via-stone-900/60 to-black/60 space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="font-bold text-amber-300 flex items-center gap-1.5 text-xs">
+                <FileText className="size-3.5 text-amber-400" />
+                角色档案导入 / 导出 (Word DOCX & JSON)
+              </span>
+              <span className="text-[9px] text-amber-300/70 font-mono">Portable Persona</span>
+            </div>
+            <p className="text-[10px] text-white/60 leading-relaxed">
+              支持导出为标准排版的 Microsoft Word (.docx) 档案卡、或多角色 JSON 配置文件，随时备份与迁移。
+            </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 pt-1">
+              <button
+                type="button"
+                onClick={handleExportDocx}
+                disabled={isExportingDocx || !editingChar}
+                className="p-1.5 rounded-xl border border-amber-400/40 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-semibold text-[10px] transition-all flex items-center justify-center gap-1 active:scale-95 disabled:opacity-50 cursor-pointer shadow-xs"
+                title="生成并下载角色 Word 档案卡"
+              >
+                <FileText className="size-3 text-amber-300" />
+                <span>{isExportingDocx ? '生成 Word 中...' : '导出 Word 档案'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportJson}
+                disabled={!editingChar}
+                className="p-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-white/80 font-medium text-[10px] transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+                title="导出单角色 JSON 格式"
+              >
+                <FileJson className="size-3 text-emerald-400" />
+                <span>导出 JSON</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportAll}
+                className="p-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-white/80 font-medium text-[10px] transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+                title="导出全部已保存角色合集"
+              >
+                <Download className="size-3 text-cyan-300" />
+                <span>打包导出全部</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => importCharFileRef.current?.click()}
+                className="p-1.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-white/80 font-medium text-[10px] transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+                title="导入 .docx / .json 角色档案"
+              >
+                <Upload className="size-3 text-purple-300" />
+                <span>导入角色档案</span>
+              </button>
+
+              <input
+                ref={importCharFileRef}
+                type="file"
+                accept=".docx,.json,.txt,application/json,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                onChange={handleImportFile}
+                className="hidden"
+              />
+            </div>
+          </div>
+
           {/* Character Selector */}
           <div className="flex gap-1.5 p-1 bg-black/40 rounded-xl border border-white/10 overflow-x-auto no-scrollbar">
             {characters.map((c) => (

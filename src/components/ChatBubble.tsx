@@ -1,7 +1,8 @@
-import { useState } from 'react';
-import type { MessageSegment, ChatMessage } from '../data/types';
-import { History, Clock, Edit2, CornerDownLeft, Plus, AlertCircle, RefreshCw } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import type { MessageSegment, ChatMessage, StickerMeta } from '../data/types';
+import { History, Clock, Edit2, CornerDownLeft, Plus, AlertCircle, RefreshCw, Sparkles, Check, Smile, Info } from 'lucide-react';
 import { loadUserAvatar, loadCharAvatar } from '../lib/customStore';
+import { userStealAiSticker, isStickerStolenByUser, subscribeStickers } from '../lib/stickerStore';
 
 interface Props {
   message: ChatMessage;
@@ -73,6 +74,20 @@ export default function ChatBubble({
   const [isAddingUserMsg, setIsAddingUserMsg] = useState(false);
   const [userMsgVal, setUserMsgVal] = useState('');
   const [showErrorDetail, setShowErrorDetail] = useState(false);
+  const [showSnapshotModal, setShowSnapshotModal] = useState(false);
+
+  const [isStolenAlready, setIsStolenAlready] = useState(() => {
+    if (!message.sticker) return false;
+    return isStickerStolenByUser(message.sticker.url);
+  });
+
+  useEffect(() => {
+    if (!message.sticker) return;
+    const unsub = subscribeStickers(() => {
+      setIsStolenAlready(isStickerStolenByUser(message.sticker!.url));
+    });
+    return unsub;
+  }, [message.sticker]);
 
   const charAvatar = loadCharAvatar(characterId);
   const userAvatar = loadUserAvatar();
@@ -90,6 +105,13 @@ export default function ChatBubble({
       setIsAddingUserMsg(false);
       setUserMsgVal('');
     }
+  };
+
+  const handleStealSticker = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!message.sticker) return;
+    userStealAiSticker(characterId, characterName || '角色', message.sticker, message.content);
+    setIsStolenAlready(true);
   };
 
   return (
@@ -150,7 +172,71 @@ export default function ChatBubble({
                 </div>
               </div>
             ) : (
-              <div className="space-y-1">
+              <div className="space-y-2">
+                {/* Sticker rendering if message has a sticker */}
+                {message.sticker && (
+                  <div className="space-y-1.5 pt-0.5 pb-1">
+                    <div className="relative group/sticker inline-block">
+                      {/* Stolen indicator badge on sticker card */}
+                      {message.sticker.isStolen && (
+                        <div className="absolute -top-2 -left-1.5 z-10 bg-gradient-to-r from-purple-600 to-indigo-600 text-white font-extrabold text-[8.5px] px-1.5 py-0.5 rounded-full shadow-md border border-purple-300/60 flex items-center gap-0.5 animate-pulse">
+                          <Sparkles className="size-2 text-purple-200" />
+                          <span>
+                            {message.sticker.stolenMeta?.sourceCharacterName
+                              ? `来自 ${message.sticker.stolenMeta.sourceCharacterName}`
+                              : !isUser ? '偷你的表情' : '偷自AI'}
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Sticker Image Container */}
+                      <div className="w-36 sm:w-44 aspect-square rounded-2xl overflow-hidden bg-black/50 border border-white/15 shadow-lg relative flex items-center justify-center">
+                        <img
+                          src={message.sticker.url}
+                          alt={message.sticker.name}
+                          className="w-full h-full object-cover hover:scale-105 transition-transform duration-200"
+                          referrerPolicy="no-referrer"
+                        />
+                      </div>
+
+                      {/* Sticker Name Bar */}
+                      <div className="mt-1 flex items-center justify-between gap-1 text-[10.5px]">
+                        <span className="font-bold text-white/90 truncate max-w-[110px]">
+                          {message.sticker.name}
+                        </span>
+
+                        {/* If AI sent this sticker: User can Steal It! */}
+                        {!isUser && (
+                          <button
+                            type="button"
+                            onClick={handleStealSticker}
+                            disabled={isStolenAlready}
+                            className={`px-2 py-0.5 rounded-lg text-[9.5px] font-bold flex items-center gap-1 transition shadow-sm cursor-pointer ${
+                              isStolenAlready
+                                ? 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 cursor-default'
+                                : 'bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-stone-950 active:scale-95'
+                            }`}
+                            title={isStolenAlready ? '已在你的表情包库中' : '将此表情包偷到你的主控表情库'}
+                          >
+                            {isStolenAlready ? (
+                              <>
+                                <Check className="size-2.5" />
+                                <span>已偷取</span>
+                              </>
+                            ) : (
+                              <>
+                                <Sparkles className="size-2.5" />
+                                <span>偷表情</span>
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Text Segments */}
                 {message.segments.map((s, i) => renderSegment(s, i))}
               </div>
             )}

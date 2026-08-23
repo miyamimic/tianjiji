@@ -29,6 +29,7 @@ import {
   callLlm, 
   callLlmWithGuardrail,
   buildSystemPrompt, 
+  assemblePipelineLlmMessages,
   parseStructuredLlmResponse,
   parseStructuredLlmResponses, 
   isLlmConfigured, 
@@ -48,6 +49,8 @@ import {
   saveDynamicMemory,
   findRelevantDynamicMemories,
   clearDynamicMemories,
+  loadHistoryInjectionCount,
+  loadPromptLayers,
 } from '../lib/customStore';
 import { 
   setPendingGameInvite, 
@@ -59,6 +62,12 @@ import {
   type GameInvitation,
   type GomokuMatchRecord 
 } from '../lib/gameStore';
+import { 
+  getCharacterStickers, 
+  aiStealUserSticker, 
+  isStickerStolenByAi, 
+  type Sticker 
+} from '../lib/stickerStore';
 
 
 const STORAGE_KEY = '__rp_engine_state';
@@ -160,7 +169,7 @@ export function useEngine() {
       const decayRate = loadEmotionDecayRate();
       s.emotion = decayEmotionTowardsBaseline(s.emotion, character.emotion.baseline, decayRate);
 
-      // 2. Pre-process input through NLP Sensitive Words Dictionary
+      // 2. Pre-process input through NLP Intent Analysis & AI Sensitive Interception
       const sensitive = checkSensitiveWords(userInput);
       let processedInput = userInput;
 
@@ -168,11 +177,12 @@ export function useEngine() {
         if (sensitive.blocked) {
           // Block message sending! Output a warning bubble and abort processing.
           const ts = Date.now();
+          const blockedWords = sensitive.matchedInterceptions.map((i) => i.word);
           const warningMsg: ChatMessage = {
             id: `sys-warning-${ts}`,
             role: 'character',
-            content: `⚠️【设定拦截警告】您的消息包含敏感词（如："${sensitive.matchedWords.join('、')}"），已触发前置绝对拦截过滤，此条消息未发送。`,
-            segments: [{ type: 'thought', text: '前置拦截成功' }],
+            content: `🛡️【AI敏感防御拦截】您的消息包含针对AI角色的敏感违规词（如："${blockedWords.join('、') || sensitive.matchedWords.join('、')}"），已触发前置安全防御拦截，此条消息已拒绝发送。`,
+            segments: [{ type: 'thought', text: '前置安全防御拦截成功' }],
             timestamp: ts,
             character_id: character.character_id,
           };
@@ -184,7 +194,7 @@ export function useEngine() {
           processedInput = sensitive.censoredText;
         }
 
-        // Apply severe emotional shifts if mapped
+        // Apply severe emotional shifts from NLP Intent Analysis if mapped
         if (sensitive.triggeredEmotion) {
           const { key, delta } = sensitive.triggeredEmotion;
           s.emotion[key] = Math.max(0, Math.min(1, s.emotion[key] + delta));
@@ -222,33 +232,13 @@ export function useEngine() {
             .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
             .join(', ');
           
-          const charCoreStr = [
-            `核心特质: ${character.core.values.join('、')}`,
-            `直觉本能反应: ${character.core.instinct_base}`,
-            `语言风格: ${character.core.speech_filter}`,
-            character.speech.catchphrases.length > 0 ? `口癖习惯: ${character.speech.catchphrases.join('、')}` : '',
-            character.speech.forbidden_phrases.length > 0 ? `禁止言语: ${character.speech.forbidden_phrases.join('、')}` : '',
-            (character as any).custom_system_prompt ? `专属补充: ${(character as any).custom_system_prompt}` : '',
-          ].filter(Boolean).join('\n');
-
-          const charVisual = loadCharVisualDesc(character.character_id);
-          const userPersona = loadUserPromptProfile();
-          const userVisual = loadUserVisualDesc();
-          const systemPrompt = buildSystemPrompt(character.name, emotionSummary, {
-            characterCore: charCoreStr,
-            charVisual,
-            userPersona,
-            userVisual,
+          const pipelineLayers = loadPromptLayers();
+          const llmMessages = assemblePipelineLlmMessages(pipelineLayers, {
+            character,
+            emotionSummary,
             backgroundThreads: s.backgroundThreads.map((t) => t.content),
+            chatHistory: s.messages,
           });
-
-          const llmMessages = [
-            { role: 'system' as const, content: systemPrompt },
-            ...s.messages.slice(-10).map((m) => ({
-              role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
-              content: m.content,
-            })),
-          ];
 
           const rawText = await callLlm(llmConfig, llmMessages);
           const structuredList = parseStructuredLlmResponses(rawText);
@@ -404,18 +394,19 @@ export function useEngine() {
       }
     }
 
-    // Pre-process input through NLP Sensitive Words Dictionary
+    // Pre-process input through NLP Intent Analysis & AI Sensitive Interception
     const sensitive = checkSensitiveWords(content);
     let processedInput = content;
 
     if (sensitive.matched) {
       if (sensitive.blocked) {
         const ts = Date.now();
+        const blockedWords = sensitive.matchedInterceptions.map((i) => i.word);
         const warningMsg: ChatMessage = {
           id: `sys-warning-${ts}`,
           role: 'character',
-          content: `⚠️【设定拦截警告】您的消息包含敏感词（如："${sensitive.matchedWords.join('、')}"），已触发前置绝对拦截过滤，此条消息未发送。`,
-          segments: [{ type: 'thought', text: '前置拦截成功' }],
+          content: `🛡️【AI敏感防御拦截】您的消息包含针对AI角色的敏感违规词（如："${blockedWords.join('、') || sensitive.matchedWords.join('、')}"），已触发前置安全防御拦截，此条消息已拒绝发送。`,
+          segments: [{ type: 'thought', text: '前置安全防御拦截成功' }],
           timestamp: ts,
           character_id: character.character_id,
         };
@@ -445,6 +436,51 @@ export function useEngine() {
     s.messages = [...s.messages, newUserMsg];
     persist(s);
     rerender();
+  }, [persist, rerender]);
+
+  const sendUserSticker = useCallback((sticker: Sticker, accompanyingText?: string) => {
+    const s = stateRef.current;
+    const character = getCharacterById(s.characterId) ?? MOCK_CHARACTERS[0];
+    const text = accompanyingText?.trim() || `[表情包: ${sticker.name}]`;
+
+    const newUserMsg: ChatMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: text,
+      segments: [{ type: 'speech', text }],
+      sticker: {
+        id: sticker.id,
+        name: sticker.name,
+        url: sticker.url,
+        category: sticker.category,
+        ownerType: 'user',
+        isStolen: sticker.isStolen,
+        stolenMeta: sticker.stolenMeta,
+      },
+      timestamp: Date.now(),
+      snapshot: captureSnapshot(s),
+    };
+
+    s.messages = [...s.messages, newUserMsg];
+    persist(s);
+    rerender();
+
+    // AI Stealing Chance:
+    // If AI character doesn't have this sticker yet, 60% chance they steal it!
+    // Captures exact snapshot of timestamp, user's accompanying words, and current AI emotion!
+    if (!isStickerStolenByAi(character.character_id, sticker.url)) {
+      if (Math.random() < 0.65) {
+        setTimeout(() => {
+          aiStealUserSticker(
+            character.character_id,
+            character.name,
+            sticker,
+            text,
+            { ...s.emotion }
+          );
+        }, 400);
+      }
+    }
   }, [persist, rerender]);
 
   const triggerCharacterReply = useCallback(async (messageId?: string, llmConfig?: LlmConfig) => {
@@ -513,42 +549,17 @@ export function useEngine() {
           .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
           .join(', ');
         
-        const charCoreStr = [
-          `核心特质: ${character.core.values.join('、')}`,
-          `直觉本能反应: ${character.core.instinct_base}`,
-          `语言风格: ${character.core.speech_filter}`,
-          character.speech.catchphrases.length > 0 ? `口癖习惯: ${character.speech.catchphrases.join('、')}` : '',
-          character.speech.forbidden_phrases.length > 0 ? `禁止言语: ${character.speech.forbidden_phrases.join('、')}` : '',
-          (character as any).custom_system_prompt ? `专属补充: ${(character as any).custom_system_prompt}` : '',
-        ].filter(Boolean).join('\n');
-
-        const charVisual = loadCharVisualDesc(character.character_id);
-        const userPersona = loadUserPromptProfile();
-        const userVisual = loadUserVisualDesc();
-        const systemPrompt = buildSystemPrompt(character.name, emotionSummary, {
-          characterCore: charCoreStr,
-          charVisual,
-          userPersona,
-          userVisual,
+        const pipelineLayers = loadPromptLayers();
+        const llmMessages = assemblePipelineLlmMessages(pipelineLayers, {
+          character,
+          emotionSummary,
           backgroundThreads: s.backgroundThreads.map((t) => t.content),
           dynamicMemoriesContext,
+          chatHistory: s.messages,
+          targetMsgInstruction: targetMsg
+            ? `（特别指令：希望你以这一句“${targetMsg.content}”为本次回复的核心情感基准与回应重点，在此情绪基调上进行接续推演与回应。）`
+            : undefined,
         });
-
-        const llmMessages = [
-          { role: 'system' as const, content: systemPrompt },
-          ...s.messages.slice(-12).map((m) => ({
-            role: (m.role === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
-            content: m.content,
-          })),
-        ];
-
-        // If replying to a specific message, inject instruction at the end
-        if (targetMsg) {
-          llmMessages.push({
-            role: 'user' as const,
-            content: `（特别指令：希望你以这一句“${targetMsg.content}”为本次回复的核心情感基准与回应重点，在此情绪基调上进行接续推演与回应。）`,
-          });
-        }
 
         // Defensive guardrail LLM call with auto-regeneration
         const rawText = await callLlmWithGuardrail(llmConfig, llmMessages, character);
@@ -701,6 +712,28 @@ export function useEngine() {
         }
 
         lastFallbackRef.current = false;
+
+        // Optionally attach an AI sticker to the last bubble if character has stickers
+        const charStickers = getCharacterStickers(character.character_id);
+        if (charStickers.length > 0 && newReplies.length > 0) {
+          const shouldSendSticker = Math.random() < 0.35 || /表情包|表情|图|看看你/.test(triggerInput);
+          if (shouldSendSticker) {
+            const randomStk = charStickers[Math.floor(Math.random() * charStickers.length)];
+            const lastReply = newReplies[newReplies.length - 1];
+            if (!lastReply.sticker) {
+              lastReply.sticker = {
+                id: randomStk.id,
+                name: randomStk.name,
+                url: randomStk.url,
+                category: randomStk.category,
+                ownerType: 'ai',
+                characterId: character.character_id,
+                isStolen: randomStk.isStolen,
+                stolenMeta: randomStk.stolenMeta,
+              };
+            }
+          }
+        }
 
         s.messages = [...s.messages, ...newReplies];
         persist(s);
@@ -1010,6 +1043,7 @@ export function useEngine() {
     getLastIntent: (): IntentAnalysis | null => lastIntentRef.current,
     getLastFallback: (): boolean => lastFallbackRef.current,
     sendMessage,
+    sendUserSticker,
     switchCharacter,
     clearHistory,
     resetEmotion,

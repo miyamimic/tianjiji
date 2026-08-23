@@ -5,7 +5,6 @@ import {
   PanelRight,
   Check,
   RotateCcw,
-  Trash2,
   X,
   Flame,
   CloudRain,
@@ -205,18 +204,6 @@ export default function TopBar({
 
           {/* Right: settings + sidebar toggle */}
           <div className="flex items-center gap-1">
-            <button
-              onClick={() => {
-                if (window.confirm('确定要清空当前对话并重置状态吗？')) {
-                  onClearHistory();
-                }
-              }}
-              className="flex items-center gap-1.5 h-8 px-2.5 rounded-lg bg-red-500/10 text-red-400 hover:bg-red-500/20 hover:text-red-300 transition-colors border border-red-500/10 text-xs mr-1"
-              title="清空记录并重置引擎"
-            >
-              <Trash2 className="size-3.5" />
-              <span className="hidden sm:inline">清空</span>
-            </button>
             <button
               onClick={onOpenSettings}
               className="size-9 flex items-center justify-center rounded-lg hover:bg-white/5 text-white/60 hover:text-white transition-colors"

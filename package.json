@@ -10,12 +10,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "docx": "^9.7.1",
+    "jszip": "^3.10.1",
     "lucide-react": "^1.28.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.3",
+    "@types/jszip": "^3.4.1",
     "@types/node": "^22.20.1",
     "@types/react": "~19.2.18",
     "@types/react-dom": "~19.2.4",
