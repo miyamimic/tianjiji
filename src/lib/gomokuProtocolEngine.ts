@@ -48,6 +48,7 @@ export interface GomokuWeights {
 }
 
 export interface GomokuLlmOutput {
+  action?: 'move' | 'resign';
   weight_attack: number;
   weight_defend: number;
   weight_steady: number;
@@ -529,17 +530,16 @@ export function cleanAndNormalizeWeights(raw?: Partial<GomokuWeights> | null): G
 }
 
 /**
- * Weighted Random Sampling across the 3 Candidate Pools (v4.1):
+ * Weighted Random Sampling across the 3 Candidate Pools:
  * - Uses normalized weights to pick a pool (attack / defend / steady).
  * - Inside the selected pool, picks the candidate with the highest algorithm score.
- * - Emergency Hard Protection: If lethal crisis detected (human has live 4 or winning shot),
- *   temporarily ignores persistent weights and forces the defense pool!
+ * - Respects the user's verbal command and LLM weights (no mechanical emergency override).
  * - Empty Pool Fallback: Automatically degrades to non-empty pools if sampled pool is empty.
  */
 export function sampleMoveFromPools(
   pools: GomokuCandidatePools,
   weights: GomokuWeights,
-  isEmergencyDefense: boolean = false
+  _isEmergencyDefense: boolean = false
 ): {
   coord: [number, number];
   candidate: CandidateMove;
@@ -547,18 +547,6 @@ export function sampleMoveFromPools(
   isEmergencyOverride: boolean;
   wasFallback: boolean;
 } {
-  // Emergency Hard Protection Rule
-  if (isEmergencyDefense && pools.defend_candidates && pools.defend_candidates.length > 0) {
-    const topDefend = pools.defend_candidates[0];
-    return {
-      coord: topDefend.coord,
-      candidate: topDefend,
-      chosenPool: 'defend',
-      isEmergencyOverride: true,
-      wasFallback: false,
-    };
-  }
-
   const norm = cleanAndNormalizeWeights(weights);
 
   // Weighted random sampling to select pool

@@ -495,34 +495,107 @@ export default function GomokuApp({
     refreshLists();
   };
 
-  // Watch winner state
+  // Watch winner state & trigger dynamic game_over settlement dialogue
   useEffect(() => {
     if (!winner) return;
 
-    if (winner === 'draw') {
-      prepareGameSettlement('draw');
-      setCharacterSpeech(`（将剩余棋子收回盒中）"棋逢对手，不分伯仲。能与我下成和局，你很不错。"`);
-    } else if (winner === playerColor) {
-      prepareGameSettlement('player');
-    } else if (winner === 'surrender') {
-      prepareGameSettlement('surrender');
-    } else {
-      prepareGameSettlement('character');
-      setCharacterSpeech(
-        `（从容放下最后一子，抬眸看向你）"承让了。棋盘如战场，稍有不慎就会被我抓住破绽。还想再来吗？"`
-      );
-    }
-  }, [winner, playerColor, prepareGameSettlement]);
+    const handleGameOverSettlement = async () => {
+      const finalWinner =
+        winner === 'draw'
+          ? 'draw'
+          : winner === 'surrender'
+          ? 'surrender'
+          : winner === playerColor
+          ? 'player'
+          : 'character';
 
-  // AI Move Execution (v4.1): Fast & Slow Alternation (LLM strategic turns & human-paced JS turns)
+      prepareGameSettlement(finalWinner);
+
+      const llmConfig = loadLlmConfig();
+      if (isLlmConfigured(llmConfig)) {
+        try {
+          const aiCol: 'B' | 'W' = playerColor === 'B' ? 'W' : 'B';
+          const activeRank = loadCharGomokuRank(currentCharacterId);
+          const pools =
+            candidatePools ||
+            generateGomokuCandidatePools(board, aiCol, activeRank, initialEmotionSnapshot);
+
+          const endRes = await generateGomokuLlmResponse(llmConfig, {
+            trigger: 'game_over',
+            character: activeChar,
+            currentEmotionSnapshot: initialEmotionSnapshot,
+            charRank: activeRank,
+            aiColor: aiCol,
+            is_playdate_invite: isPlaydateInvite,
+            candidatePools: pools,
+            oldWeights: currentWeights,
+            previousThoughtNote: thoughtNote,
+            opponentImpression,
+            stepNumber: moveHistory.length,
+            recentMoves: moveHistory.map((m) => ({ step: m.step, r: m.r, c: m.c, color: m.color })),
+            inGameChats: inGameChats.map((c) => ({ sender: c.sender, text: c.text })),
+            gameResult: finalWinner,
+          });
+
+          if (endRes.ending_dialog) {
+            setCharacterSpeech(endRes.ending_dialog);
+            setInGameChats((prev) => [
+              ...prev,
+              {
+                id: `chat_end_llm_${Date.now()}`,
+                sender: 'character',
+                text: endRes.ending_dialog,
+                thought: endRes.thought_note,
+                tactic: currentTactic,
+                timestamp: Date.now(),
+              },
+            ]);
+            return;
+          }
+        } catch (err) {
+          console.warn('Game over LLM dialogue error, using fallback:', err);
+        }
+      }
+
+      // Fallback if LLM not configured
+      if (winner === 'draw') {
+        setCharacterSpeech(`（将剩余棋子收回盒中）"棋逢对手，不分伯仲。能与我下成和局，你很不错。"`);
+      } else if (winner === playerColor) {
+        setCharacterSpeech(`（目光在胜势处停留片刻，含笑抬眸）"你赢了。只要你开心，这盘棋就下得值得。"`);
+      } else if (winner === 'surrender') {
+        setCharacterSpeech(`（见你投子认负，轻按住你的手背，眼眸微敛）"认输了？胜败乃兵家常事，这局你下得很有章法，待会儿再陪你下一盘。"`);
+      } else {
+        setCharacterSpeech(`（从容放下最后一子，抬眸看向你）"承让了。棋盘如战场，还想再来一局吗？"`);
+      }
+    };
+
+    handleGameOverSettlement();
+  }, [
+    winner,
+    playerColor,
+    prepareGameSettlement,
+    activeChar,
+    initialEmotionSnapshot,
+    candidatePools,
+    board,
+    currentCharacterId,
+    isPlaydateInvite,
+    currentWeights,
+    thoughtNote,
+    opponentImpression,
+    moveHistory,
+    inGameChats,
+    currentTactic,
+  ]);
+
+  // AI Move Execution: Entertainment & Companion Oriented (User instructions are supreme)
   const triggerAiMove = useCallback(
     async (currentBoard: Cell[][], aiCol: 'B' | 'W') => {
       setIsAiThinking(true);
 
-      const humanColor: 'B' | 'W' = aiCol === 'B' ? 'W' : 'B';
       const activeRank = loadCharGomokuRank(currentCharacterId);
 
-      // 1. JS Mechanical Layer: Generate the 3 Candidate Pools (with rank ceiling & emotion soft weighting)
+      // 1. JS Mechanical Layer: Generate the 3 Candidate Pools
       const pools = generateGomokuCandidatePools(currentBoard, aiCol, activeRank, initialEmotionSnapshot);
       setCandidatePools(pools);
       setStrategyGroups({
@@ -531,12 +604,6 @@ export default function GomokuApp({
         passive: pools.steady_candidates,
       });
       setTop5Candidates([...pools.attack_candidates, ...pools.defend_candidates, ...pools.steady_candidates].slice(0, 5));
-
-      // 2. JS Mechanical Layer: Inflection / Crisis Detection, 3-in-a-row Detection, & Sandbagging Analysis
-      const inflection = detectBoardInflection(currentBoard, aiCol);
-      const sandbagReport = analyzePlayerSandbagging(currentBoard, humanColor, moveHistory);
-      setSandbaggingReport(sandbagReport);
-      const threeCheck = detectAiConsecutiveThree(currentBoard, aiCol);
 
       const llmConfig = loadLlmConfig();
       let activeWeights = { ...currentWeights };
@@ -549,29 +616,15 @@ export default function GomokuApp({
       const isAiFirstMove = aiMovesCount === 0;
       const currentStepCount = moveHistory.length + 1;
 
-      // Event-driven triggers for LLM
-      const isNewThreeInARow = threeCheck.hasThree && lastThreeTriggerKey !== threeCheck.key;
-      const isNewCrisis = inflection.hasCrisis && lastCrisisTriggerStep !== moveHistory.length;
-      const isNewSandbagging = sandbagReport.isPlayerSandbagging && !sandbaggingReport.isPlayerSandbagging;
-      // Pacing alternation: alternate between deeper LLM strategic deliberation and snappy JS tactical response
-      const isRhythmAlternate = !lastAiWasLlm && aiMovesCount > 0 && aiMovesCount % 2 === 0;
+      // Companionship banter trigger (random flirt or first move, NO board-state fighting triggers)
+      const isOccasionalFlirt = !lastAiWasLlm && aiMovesCount >= 2 && Math.random() < 0.25;
 
       const shouldCallLlm =
-        isLlmConfigured(llmConfig) &&
-        (isAiFirstMove || isNewThreeInARow || isNewCrisis || isNewSandbagging || isRhythmAlternate);
+        isLlmConfigured(llmConfig) && (isAiFirstMove || isOccasionalFlirt);
 
       if (shouldCallLlm) {
         try {
-          let triggerType: GomokuTriggerType = 'rhythm_alternate';
-          if (isAiFirstMove) {
-            triggerType = 'first_move';
-          } else if (isNewThreeInARow) {
-            triggerType = 'ai_three_in_a_row';
-          } else if (isNewCrisis) {
-            triggerType = 'board_crisis';
-          } else if (isNewSandbagging) {
-            triggerType = 'player_sandbagging';
-          }
+          const triggerType: GomokuTriggerType = isAiFirstMove ? 'first_move' : 'flirt';
 
           const llmRes = await generateGomokuLlmResponse(llmConfig, {
             trigger: triggerType,
@@ -587,11 +640,29 @@ export default function GomokuApp({
             stepNumber: currentStepCount,
             recentMoves: moveHistory.map((m) => ({ step: m.step, r: m.r, c: m.c, color: m.color })),
             inGameChats: inGameChats.map((c) => ({ sender: c.sender, text: c.text })),
-            isPlayerSandbagging: sandbagReport.isPlayerSandbagging,
-            abandonedBestPoints: sandbagReport.abandonedBestPoints,
-            crisisReason: inflection.reason,
-            threeInARowDescription: threeCheck.description,
           });
+
+          // Check if AI resigns
+          if (llmRes.action === 'resign') {
+            const resignSpeech =
+              llmRes.speech_text ||
+              `（抬眸看着你，眼角含笑地放下手中棋子）"这局算我认输了，只要你玩得开心就好。"`;
+            setCharacterSpeech(resignSpeech);
+            setWinner(playerColor);
+            setInGameChats((prev) => [
+              ...prev,
+              {
+                id: `chat_event_resign_${Date.now()}`,
+                sender: 'character',
+                text: resignSpeech,
+                thought: llmRes.thought_note,
+                tactic: currentTactic,
+                timestamp: Date.now(),
+              },
+            ]);
+            setIsAiThinking(false);
+            return;
+          }
 
           activeWeights = {
             weight_attack: llmRes.weight_attack,
@@ -606,33 +677,24 @@ export default function GomokuApp({
           setThoughtNote(activeThought);
           setOpponentImpression(activeImpression);
           setLastAiWasLlm(true);
-
-          if (isNewThreeInARow && threeCheck.key) {
-            setLastThreeTriggerKey(threeCheck.key);
-          }
-          if (isNewCrisis) {
-            setLastCrisisTriggerStep(moveHistory.length);
-          }
         } catch (err) {
           console.warn('LLM Gomoku update error, using existing weights:', err);
-          // Fallback to human delay on error
           const simulatedDelayMs = 500 + Math.floor(Math.random() * 350);
           await new Promise((resolve) => setTimeout(resolve, simulatedDelayMs));
           setLastAiWasLlm(false);
         }
       } else {
-        // Fast JS turn: simulate human deliberation delay (快慢交替，模拟真人稍慢一点点ms)
+        // Fast JS turn: simulate human deliberation delay
         const simulatedDelayMs = 520 + Math.floor(Math.random() * 380);
         await new Promise((resolve) => setTimeout(resolve, simulatedDelayMs));
         setLastAiWasLlm(false);
       }
 
-      // 3. JS Mechanical Layer: Weighted Sampling across the 3 Candidate Pools
-      // (Fast execution with Emergency Hard Protection override if lethal threat exists)
-      const sampleRes = sampleMoveFromPools(pools, activeWeights, inflection.isEmergencyDefense);
+      // 3. JS Mechanical Layer: Weighted Sampling across the 3 Candidate Pools without forced mechanical blocking
+      const sampleRes = sampleMoveFromPools(pools, activeWeights);
       const chosenCoord = sampleRes.coord;
       setLastChosenPool(sampleRes.chosenPool);
-      setIsEmergencyActive(sampleRes.isEmergencyOverride);
+      setIsEmergencyActive(false);
       setLastSelectedStrategy(
         sampleRes.chosenPool === 'attack' ? 'aggressive' : sampleRes.chosenPool === 'defend' ? 'balanced' : 'passive'
       );
@@ -668,7 +730,7 @@ export default function GomokuApp({
         color: aiCol,
         weights: activeWeights,
         chosenPool: sampleRes.chosenPool,
-        isEmergencyOverride: sampleRes.isEmergencyOverride,
+        isEmergencyOverride: false,
         innerThought: activeThought,
         spokenDialogue: spokenText,
         timestamp: Date.now(),
@@ -733,10 +795,8 @@ export default function GomokuApp({
       thoughtNote,
       opponentImpression,
       isPlaydateInvite,
-      lastCrisisTriggerStep,
-      lastThreeTriggerKey,
       lastAiWasLlm,
-      sandbaggingReport.isPlayerSandbagging,
+      playerColor,
     ]
   );
 
@@ -1030,6 +1090,26 @@ export default function GomokuApp({
           abandonedBestPoints: sandbaggingReport.abandonedBestPoints,
           playerChatText: text,
         });
+
+        // Check if AI obeys user instructions by resigning
+        if (chatRes.action === 'resign') {
+          const resignSpeech =
+            chatRes.speech_text ||
+            `（见你如此说，微笑着将指间棋子放回盒中）"好好好，依你便是。这局算我输了，你开心就好。"`;
+          setCharacterSpeech(resignSpeech);
+          setWinner(playerColor);
+          const charMsg: InGameChatMessage = {
+            id: `chat_char_resign_${Date.now() + 1}`,
+            sender: 'character',
+            text: resignSpeech,
+            thought: chatRes.thought_note || '顺从主控心愿，主动投子认负。',
+            tactic: currentTactic,
+            timestamp: Date.now() + 1,
+          };
+          setInGameChats((prev) => [...prev, charMsg]);
+          setIsChatSending(false);
+          return;
+        }
 
         setCurrentWeights({
           weight_attack: chatRes.weight_attack,
