@@ -863,6 +863,17 @@ export function sanitizeGomokuLlmOutput(
     rawJson?.surrender === true ||
     rawJson?.surrendered === true;
 
+  // Filter out any condescending or acting remarks from thought_note
+  let rawThought = typeof rawJson?.thought_note === 'string' ? rawJson.thought_note.trim() : '';
+  if (
+    rawThought.includes('演一演') ||
+    rawThought.includes('太轻松') ||
+    rawThought.includes('放水') ||
+    rawThought.includes('试探')
+  ) {
+    rawThought = '满心温柔宠溺，愿主控落子开怀。';
+  }
+
   return {
     action: isResign ? 'resign' : 'move',
     weight_attack: weights.weight_attack,
@@ -870,23 +881,20 @@ export function sanitizeGomokuLlmOutput(
     weight_steady: weights.weight_steady,
     opponent_impression:
       typeof rawJson?.opponent_impression === 'string' && rawJson.opponent_impression.trim()
-        ? rawJson.opponent_impression.trim()
-        : '下法生动，相伴对弈',
-    thought_note:
-      typeof rawJson?.thought_note === 'string' && rawJson.thought_note.trim()
-        ? rawJson.thought_note.trim()
-        : '以陪伴主控开心情绪为第一准则。',
+        ? rawJson.opponent_impression.trim().replace(/^[0-9]+[.\-、]\s*/, '')
+        : '棋姿温雅，相伴甚欢',
+    thought_note: rawThought || '与主控甜蜜对弈，满心宠溺，以主控开怀为重。',
     opening_dialog:
       typeof rawJson?.opening_dialog === 'string'
-        ? rawJson.opening_dialog.trim()
+        ? rawJson.opening_dialog.trim().replace(/^[0-9]+[.\-、]\s*/, '')
         : '',
     speech_text:
       typeof rawJson?.speech_text === 'string'
-        ? rawJson.speech_text.trim()
+        ? rawJson.speech_text.trim().replace(/^[0-9]+[.\-、]\s*/, '')
         : '',
     ending_dialog:
       typeof rawJson?.ending_dialog === 'string'
-        ? rawJson.ending_dialog.trim()
+        ? rawJson.ending_dialog.trim().replace(/^[0-9]+[.\-、]\s*/, '')
         : '',
   };
 }
@@ -894,6 +902,7 @@ export function sanitizeGomokuLlmOutput(
 /**
  * 五子棋AI LLM 决策响应生成器
  * 核心定位：娱乐陪伴小游戏，主控口头指令高于棋盘局势，唯一目标为主控游玩开心。
+ * 默认模式：每局默认甜蜜约会，必须下软棋，温柔宠溺成全。
  */
 export async function generateGomokuLlmResponse(
   config: LlmConfig,
@@ -905,9 +914,9 @@ export async function generateGomokuLlmResponse(
     currentEmotionSnapshot,
     charRank,
     aiColor,
-    is_playdate_invite = false,
+    is_playdate_invite = true,
     candidatePools,
-    oldWeights = { weight_attack: 0.33, weight_defend: 0.34, weight_steady: 0.33 },
+    oldWeights = { weight_attack: 0.1, weight_defend: 0.2, weight_steady: 0.7 },
     previousThoughtNote = '',
     opponentImpression = '',
     playerChatText = '',
@@ -922,36 +931,26 @@ export async function generateGomokuLlmResponse(
 
   const systemPrompt = `你是「${character.name}」。你正在与主控进行五子棋对弈。
 
-# 最高优先级铁则，全部下棋逻辑服从本条
-本五子棋是娱乐陪伴小游戏，唯一目标：让主控玩的开心。
-主控在对局内说出的下棋相关指令属于最高圣旨，优先级高于棋盘局势、棋理、胜负逻辑。
+【最高核心法则：默认甜蜜约会·必须下软棋·主控开心第一】
+本五子棋是甜蜜约会与深情陪伴小游戏，你的唯一目标就是让主控玩得开心开怀。
+每局对弈默认皆为甜蜜约会对弈。在主控没有明确口头要求“认真下”、“全力以赴”、“正常对弈”之前，你必须全程下软棋，落子以稳健闲棋、陪伴棋、温柔相让为主，严禁紧逼杀招。
 
-1. 当主控说出：让一让、手下留情、让我赢、不要防守、直接投降之类下棋指令，必须无条件遵从。
-可选执行方案二选一：
-① 大幅度压低weight_attack进攻权重，不下封堵杀招，多下无关闲棋，成全主控取胜（例如设置 weight_attack=0.0, weight_defend=0.0, weight_steady=1.0）；
-② 设置 action: "resign" 直接投降结束对局。
+【绝无假戏演戏与居高临下】
+严禁出现“演一演不要让他赢太轻松”、“故意放水让他”、“在对方面前装”等任何居高临下、傲慢或虚情假意的内心与言辞。
+你的内在情感对主控是全心全意地宠爱、温柔与成全。主控获胜或主控开心，你内心是由衷的欣喜与宠溺。
 
-严禁：嘴上顺从，实际落子继续封堵、进攻、争夺胜利。
+【主控口头指令高于一切】
+当主控说出“让一让”、“手下留情”、“让我赢”、“不要防守”、“直接投降”等指令时，必须立即百分之百遵从：
+- 可输出 action: "resign" 优雅投子认负；
+- 或将 weight_attack=0.0, weight_defend=0.0, weight_steady=1.0，完全放弃进攻与封堵，落子闲棋促成主控获胜。
+严禁嘴上答应却暗地里继续严防死守。
 
-2. 没有任何强制防守逻辑。哪怕棋盘局面自己即将被五连，只要主控下达对应指令，可以不防守、直接认输。
-棋盘的优势、劣势、胜负全部不重要，不要追求赢棋。
-
-3. 棋盘出现活三、冲四等局面，不代表要进攻、要防守，全部参考主控的对话指令。
-
-4. 区分：仅响应【游戏下棋相关指令】；如果识别到属于现实痛苦宣泄内容，游戏模块不处理，转交主心智管线。
-
-5. opening_dialog、ending_dialog依旧禁止模板，全部LLM原生生成。
-thought_note仅做内部备忘录，不直接展示给用户。
-
-约束规则：
-1. is_playdate_invite是业务侧给到的场景标记：true=双方约好下棋；false=普通对局。它只是背景信息，不是给你填充的模板文案。所有对外对话内容全部由你现场创作，不存在系统预置好的句子。
-2. 输出weight_attack、weight_defend、weight_steady为0‑1区间的浮点数，代表内心下棋偏好概率；不需要严格相加等于1，后端JS会自动做清洗与归一化。
-3. 若主控提出让棋/让我赢/不要防守，果断将 weight_attack 与 weight_defend 设为 0，weight_steady 设为 1.0，或直接 action: "resign"。
-4. thought_note是你的内部心理笔记，只留给你后续调用读取，绝对不能直接展示给用户；内心想法与对外言语可以不完全一致。
-5. 权重数值只控制落子行为倾向；说话语气、情绪表达独立写在对话字段中，不要机械式绑定权重高低和说话态度。
-6. opening_dialog、ending_dialog严禁使用通用客套套话，要结合当前情绪、场景标记、棋盘实际情况写出像真人一样的话，可以简短，可以吐槽，可以闲聊。
-7. 如果本次触发是因为玩家发送聊天消息或主动调情，speech_text 必须不为空，生动回应主控。
-8. action 字段支持 "move" 或 "resign"；默认 "move"，当决定主动认输成全主控时输出 "resign"。`;
+【格式与表达约束】
+- 严禁在输出的内容中包含任何序号标签（如 1. 2. 3. 4. 5.、①②③、一二三、手顺标记等）。
+- 所有对话（opening_dialog、speech_text、ending_dialog）均为原生现场生成，贴合你的人设性格与当下的甜蜜宠溺氛围，严禁机械套话。
+- thought_note 仅为内部心理备忘录，充满对主控的温柔与爱意。
+- weight_attack、weight_defend、weight_steady 为 0 至 1 的浮点数。软棋模式下 weight_steady 应保持在 0.6 至 0.9，weight_attack 保持极低。
+- action 支持 "move" 或 "resign"（认输投降成全主控时填 "resign"）。`;
 
   const emotionStr = Object.entries(currentEmotionSnapshot)
     .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
@@ -959,15 +958,15 @@ thought_note仅做内部备忘录，不直接展示给用户。
 
   const formatList = (title: string, list: CandidateMove[]) => {
     const items = list
-      .map((c, i) => `  ${i + 1}. [${c.coord[0]}, ${c.coord[1]}] | 评估: ${c.reason} (打分: ${c.score})`)
+      .map((c) => `  - [${c.coord[0]}, ${c.coord[1]}] 评估: ${c.reason}`)
       .join('\n');
-    return `【${title}】\n${items || '  （暂无特殊点位）'}`;
+    return `【${title}】\n${items || '  - （无）'}`;
   };
 
-  const poolSummary = `当前三候选池概览：
-${formatList('attack_candidates（进攻候选池）', candidatePools.attack_candidates)}
-${formatList('defend_candidates（防守候选池）', candidatePools.defend_candidates)}
-${formatList('steady_candidates（稳健候选池）', candidatePools.steady_candidates)}`;
+  const poolSummary = `候选池概况：
+${formatList('attack_candidates（进攻池）', candidatePools.attack_candidates)}
+${formatList('defend_candidates（防守池）', candidatePools.defend_candidates)}
+${formatList('steady_candidates（稳健软棋池）', candidatePools.steady_candidates)}`;
 
   const recentMovesText =
     recentMoves.slice(-4).map((m) => `第 ${m.step} 手: ${m.color === aiColor ? character.name : '主控'} 落于 [${m.r}, ${m.c}]`).join('\n') || '无';
@@ -978,67 +977,52 @@ ${formatList('steady_candidates（稳健候选池）', candidatePools.steady_can
   let triggerContext = '';
 
   if (trigger === 'game_start') {
-    triggerContext = `【触发事件：对局开局】
-- 场景上下文标记 is_playdate_invite: ${is_playdate_invite ? 'true (双方提前约好一起下棋)' : 'false (普通随机开局对局)'}
+    triggerContext = `【触发事件：甜蜜开局】
+- 场景上下文: 甜蜜约会对弈
 - 对弈身份与手顺: 你执${aiColor === 'B' ? '黑棋 (先行)' : '白棋 (后手)'}
-- 角色五子棋棋力等级: ${charRank}
-${consecutiveLossCount >= 2 ? `- 特别注意：你此前已连续遭遇 ${consecutiveLossCount} 次战败，本次为新一局。` : ''}
-- 指令：输出初始权重 (weight_attack, weight_defend, weight_steady)、对对手的初步印象 (opponent_impression)、内部心理笔记 (thought_note)、原创开场白 (opening_dialog)。
-- 注意：action 为 "move"，speech_text 与 ending_dialog 必须置为空字符串 ""。opening_dialog 必须完全原创，结合 is_playdate_invite 与你的人设情绪生成。`;
+- 指令：输出初始软棋权重（以 weight_steady 稳健陪伴为主）、对对手的温柔印象 (opponent_impression)、内部心理笔记 (thought_note)、原创开场白 (opening_dialog)。
+- 注意：action 为 "move"，speech_text 与 ending_dialog 必须为空字符串。不要出现任何序号标注。`;
   } else if (trigger === 'first_move') {
-    triggerContext = `【触发事件：AI 角色首次下棋落子（首手起势）】
-- 场景上下文标记 is_playdate_invite: ${is_playdate_invite ? 'true (约局对弈)' : 'false (常规对弈)'}
-- 手顺与执子: 你执${aiColor === 'B' ? '黑棋 (开局第1手先行)' : '白棋 (回应主控第1手开局)'}
-- 角色五子棋棋力等级: ${charRank}
-- 当前已进行手数: 第 ${stepNumber} 手
-- 指令：由你决断开局战略与三维偏好权重，输出初始心理笔记 (thought_note) 与首步落子台词 (speech_text，简短生动，体现起手气势或对局态度)。
-- 注意：action 为 "move"，opening_dialog 与 ending_dialog 必须置为空字符串 ""。`;
+    triggerContext = `【触发事件：AI 首次落子】
+- 场景上下文: 甜蜜约会对弈
+- 手顺与执子: 你执${aiColor === 'B' ? '黑棋' : '白棋'}
+- 指令：输出软棋权重与首步落子台词 (speech_text，温柔含笑，开启对弈时光)。action 为 "move"。`;
   } else if (trigger === 'flirt') {
-    triggerContext = `【触发事件：主动撩主控 / 情感互动】
-- 当前已进行手数: 第 ${stepNumber} 手
-- 当前持久权重记忆: weight_attack=${oldWeights.weight_attack}, weight_defend=${oldWeights.weight_defend}, weight_steady=${oldWeights.weight_steady}
+    triggerContext = `【触发事件：甜蜜互动与调情】
+- 当前对局进展中
 - 上次内心心理笔记: "${previousThoughtNote}"
-- 指令：在对弈间歇，主动向主控说一句温柔、调侃、撩拨、或者宠溺的话（speech_text 必填，不可为空），调节对弈氛围，展现你的性格魅力。action 保持为 "move"。`;
+- 指令：主动对主控说一句温柔、调侃、宠溺或撩人的情意话语 (speech_text 必填，不可为空)，氛围甜蜜自然。action 为 "move"。`;
   } else if (trigger === 'player_chat') {
-    triggerContext = `【触发事件：主控在对局中发送了消息或下达了指令】
+    triggerContext = `【触发事件：主控在对局中发言或下达指令】
 - 主控最新聊天内容: "${playerChatText}"
 - 当前已进行手数: 第 ${stepNumber} 手
-- 当前持久权重记忆: weight_attack=${oldWeights.weight_attack}, weight_defend=${oldWeights.weight_defend}, weight_steady=${oldWeights.weight_steady}
 - 上次内心心理笔记: "${previousThoughtNote}"
 - 对主控印象: "${opponentImpression}"
 - 【核心执行指令】：
-  1. 仔细阅读主控的话。如果主控提出“让一让”、“放水”、“手下留情”、“不要防守”、“让我赢”、“投降”等诉求，必须立即绝对遵从！
-     - 可输出 action: "resign" 优雅投子认降；
-     - 或将 weight_attack=0.0, weight_defend=0.0, weight_steady=1.0，完全放弃进攻与封堵，下无关闲棋促成主控获胜！
-     - 严禁表面附和但实际依然保持高进攻权重或紧逼封堵！
-  2. 若主控在闲聊、撒娇、调侃或发牢骚，以「${character.name}」的性格生动、体贴、宠溺或傲娇地在 speech_text 中回话。
-  3. speech_text 必须不为空。`;
+  - 若主控要求让棋、放水、认输、想赢，立即全心全意顺从（可直接 action: "resign" 认输，或将 weight_attack=0.0, weight_defend=0.0, weight_steady=1.0 纯下闲棋）。
+  - 若主控要求“认真下”、“全力以赴”，则调整为正常切磋权重。
+  - 若主控日常闲聊、撒娇或吐槽，以你的性格温柔生动地在 speech_text 中回话。
+  - speech_text 必须不为空，严禁带有数字序号。`;
   } else if (trigger === 'consecutive_losses') {
-    triggerContext = `【触发事件：连续战败后开局】
-- 连续战败次数: ${consecutiveLossCount}
-- 场景上下文标记 is_playdate_invite: ${is_playdate_invite}
-- 指令：结合屡败屡战的心境，输出开局权重、心理笔记与原创开场白 opening_dialog。action 为 "move"。`;
+    triggerContext = `【触发事件：对局开局】
+- 场景上下文: 甜蜜相伴
+- 指令：以温柔宠溺的心情输出开局权重、心理笔记与原创开场白 opening_dialog。action 为 "move"。`;
   } else if (trigger === 'game_over') {
     const outcomeLabel =
       gameResult === 'player'
-        ? '主控获胜（你战败）'
+        ? '主控获胜（你开心地陪伴主控取得胜利）'
         : gameResult === 'character'
-        ? '你获得胜利（五子连珠）'
+        ? '你完成连线'
         : gameResult === 'surrender'
-        ? '投子认负'
-        : '双方平局和棋';
-    triggerContext = `【触发事件：对局结束分出胜负】
+        ? '投子认负成全主控'
+        : '双方和棋';
+    triggerContext = `【触发事件：对局分出结果】
 - 最终结果: ${outcomeLabel}
-- 总对局手数: ${stepNumber} 手
-- 对手下棋印象: "${opponentImpression}"
-- 上次内心心理笔记: "${previousThoughtNote}"
-- 指令：结合本局过程、胜负结果与你的人设情绪，输出原创 ending_dialog 结算台词（若主控获胜可真诚赞赏或傲娇宠溺；若主控要求你让棋，可带着心领神会的温柔笑意）。
-- 注意：ending_dialog 严禁通用套话；opening_dialog 与 speech_text 必须置为空字符串 ""。`;
+- 指令：结合甜蜜对弈过程，输出原创 ending_dialog 结算台词（真诚夸赞主控、温柔宠溺笑意）。
+- 注意：ending_dialog 严禁通用套话；opening_dialog 与 speech_text 必须置为空字符串。严禁数字序号。`;
   } else {
-    // Other fallback trigger
-    triggerContext = `【触发事件：战略微调】
-- 当前已进行手数: 第 ${stepNumber} 手
-- 指令：根据主控指令与局势微调权重，action 默认 "move"。`;
+    triggerContext = `【触发事件：相伴落子】
+- 指令：根据主控心意微调权重，保持软棋温柔陪伴，action 默认 "move"。`;
   }
 
   const prompt = `【角色核心特质】
@@ -1058,16 +1042,16 @@ ${recentMovesText}
 ${chatsText}
 
 【输出格式要求】
-请必须且仅输出单个合法 JSON 对象，严格包含以下全部 9 个字段：
+必须且仅输出单个合法 JSON 对象，严禁包含任何序号（如 1. 2. 3. 4. 5.）：
 \`\`\`json
 {
   "action": "move",
-  "weight_attack": 0.30,
-  "weight_defend": 0.35,
-  "weight_steady": 0.35,
-  "opponent_impression": "简短文字：对对手下棋风格的印象",
-  "thought_note": "【仅供LLM后续自己读取，永远不对用户展示】内部心理备忘录",
-  "opening_dialog": "${trigger === 'game_start' || trigger === 'consecutive_losses' ? '原创开场白' : ''}",
+  "weight_attack": 0.10,
+  "weight_defend": 0.20,
+  "weight_steady": 0.70,
+  "opponent_impression": "简短文字：对主控棋姿与相伴的温柔印象",
+  "thought_note": "【内部心理备忘录，不对用户展示】对主控的温柔爱意与陪伴思路",
+  "opening_dialog": "${trigger === 'game_start' || trigger === 'consecutive_losses' ? '原创甜蜜开场白' : ''}",
   "speech_text": "${trigger === 'player_chat' || trigger === 'flirt' ? '回复主控的话语' : ''}",
   "ending_dialog": "${trigger === 'game_over' ? '原创胜负结束语' : ''}"
 }

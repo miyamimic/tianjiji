@@ -244,13 +244,13 @@ export default function GomokuApp({
   // Mechanical Protocol Layer State (v4.1)
   const [candidatePools, setCandidatePools] = useState<GomokuCandidatePools | null>(null);
   const [currentWeights, setCurrentWeights] = useState<GomokuWeights>({
-    weight_attack: 0.33,
-    weight_defend: 0.34,
-    weight_steady: 0.33,
+    weight_attack: 0.10,
+    weight_defend: 0.20,
+    weight_steady: 0.70,
   });
-  const [thoughtNote, setThoughtNote] = useState<string>('【心智备忘】观察对手棋路，按当前重心推进。');
-  const [opponentImpression, setOpponentImpression] = useState<string>('下法稳健，落子有章法');
-  const [isPlaydateInvite, setIsPlaydateInvite] = useState<boolean>(false);
+  const [thoughtNote, setThoughtNote] = useState<string>('【心智备忘】甜蜜相伴对弈，以主控开怀为重。');
+  const [opponentImpression, setOpponentImpression] = useState<string>('棋姿温雅，相伴甚欢');
+  const [isPlaydateInvite, setIsPlaydateInvite] = useState<boolean>(true);
   const [lastCrisisTriggerStep, setLastCrisisTriggerStep] = useState<number>(-1);
   const [lastThreeTriggerKey, setLastThreeTriggerKey] = useState<string>('');
   const [lastAiWasLlm, setLastAiWasLlm] = useState<boolean>(false);
@@ -276,7 +276,7 @@ export default function GomokuApp({
   const [settlementPendingRecord, setSettlementPendingRecord] = useState<GomokuMatchRecord | null>(null);
 
   // AI Tactic State (Modulated by LLM during in-game chat)
-  const [currentTactic, setCurrentTactic] = useState<AiTactic>('balanced');
+  const [currentTactic, setCurrentTactic] = useState<AiTactic>('gentle');
 
   // Sound switch
   const [soundEnabled, setSoundEnabled] = useState(true);
@@ -293,7 +293,7 @@ export default function GomokuApp({
       {
         id: `chat_init_${Date.now()}`,
         sender: 'character',
-        text: `（拂袖落座，指尖轻敲棋子）"落子无悔。你想执黑先行还是执白？"`,
+        text: `（拂袖落座，眉眼间满是温柔笑意）"难得与你约好对弈，今天只想安安静静陪着你。你想执黑先行还是执白？"`,
         timestamp: Date.now(),
       },
     ];
@@ -307,7 +307,7 @@ export default function GomokuApp({
     if (initialSession && initialSession.moveHistory.length > 0) {
       return `（见你重新坐回棋盘前，微微抬眸）"局势已为你保存在第 ${initialSession.moveHistory.length} 手，请继续落子。"`;
     }
-    return `（拂袖落座，指尖轻敲棋子）"落子无悔。你想执黑先行还是执白？"`;
+    return `（拂袖落座，眉眼间满是温柔笑意）"难得与你约好对弈，今天只想安安静静陪着你。你想执黑先行还是执白？"`;
   });
   const [characterInnerThought, setCharacterInnerThought] = useState<string>('');
 
@@ -870,8 +870,8 @@ export default function GomokuApp({
     triggerAiMove(nextBoard, aiColor);
   };
 
-  // Restart / Reset (v4.1: Calls LLM with trigger='game_start' and passes is_playdate_invite)
-  const handleRestart = async (newPlayerColor = playerColor, isPlaydate = false) => {
+  // Restart / Reset (v4.1: Calls LLM with trigger='game_start' and passes is_playdate_invite=true)
+  const handleRestart = async (newPlayerColor = playerColor, isPlaydate = true) => {
     gameFinalizedRef.current = false;
     clearActiveGameSession(currentCharacterId);
     const emptyBoard = Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null));
@@ -888,7 +888,7 @@ export default function GomokuApp({
     setPlayerColor(newPlayerColor);
     setCurrentTurn('B');
     setIsAiThinking(false);
-    setCurrentTactic('balanced');
+    setCurrentTactic('gentle');
     setIsPlaydateInvite(isPlaydate);
     setLastCrisisTriggerStep(-1);
     setLastThreeTriggerKey('');
@@ -899,13 +899,18 @@ export default function GomokuApp({
     const initialPools = generateGomokuCandidatePools(emptyBoard, aiCol, activeRank, initialEmotionSnapshot);
     setCandidatePools(initialPools);
 
+    const defaultSoftWeights: GomokuWeights = {
+      weight_attack: 0.10,
+      weight_defend: 0.20,
+      weight_steady: 0.70,
+    };
+    setCurrentWeights(defaultSoftWeights);
+
     const llmConfig = loadLlmConfig();
     let initialOpeningText =
       newPlayerColor === 'W'
-        ? `（黑子先落，轻扣天元）"既然你让我先行，那我就不客气了。"`
-        : isPlaydate
-        ? `（拂袖落座，含笑相迎）"你如期赴约了。请吧，执黑先行。"`
-        : `（棋盘归整如初）"请吧，执黑先行。这次可要全力以赴。"`;
+        ? `（黑子先落，轻扣天元）"既然你让我先行，那我就落这一子了。你想怎么下都依你。"`
+        : `（拂袖落座，眉眼含笑）"难得与你相约手谈，今天只想安安静静陪你下棋。请吧，执黑先行。"`;
 
     if (isLlmConfigured(llmConfig)) {
       try {
@@ -917,7 +922,7 @@ export default function GomokuApp({
           aiColor: aiCol,
           is_playdate_invite: isPlaydate,
           candidatePools: initialPools,
-          oldWeights: currentWeights,
+          oldWeights: defaultSoftWeights,
           previousThoughtNote: thoughtNote,
           opponentImpression,
           stepNumber: 1,
@@ -1355,11 +1360,9 @@ export default function GomokuApp({
                           />
                         )}
 
-                        {/* Top-5 Candidate Hint Badges (when Inspector is open and cell is empty) */}
+                        {/* Hint Glow Badges (when Inspector is open and cell is empty) - No 12345 numbers */}
                         {showInspector && !cell && candidateIndex !== -1 && (
-                          <div className="absolute size-4 rounded-full bg-amber-500/80 text-amber-950 text-[9px] font-bold flex items-center justify-center pointer-events-none z-10 shadow-sm border border-amber-300">
-                            {candidateIndex + 1}
-                          </div>
+                          <div className="absolute size-2.5 rounded-full bg-amber-400/80 shadow-[0_0_8px_rgba(251,191,36,0.8)] pointer-events-none z-10 animate-pulse border border-amber-200" />
                         )}
 
                         {/* Placed Stone */}
@@ -1641,7 +1644,7 @@ export default function GomokuApp({
                     >
                       <div className="flex items-center justify-between text-[10px]">
                         <span className="font-bold text-amber-300">
-                          #{idx + 1} [{cand.coord[0]}, {cand.coord[1]}]
+                          [{cand.coord[0]}, {cand.coord[1]}]
                         </span>
                         <span className="text-[9px] font-mono text-white/50">{cand.score}</span>
                       </div>
@@ -1742,13 +1745,6 @@ export default function GomokuApp({
                     <div className="p-2 rounded-2xl rounded-tl-xs bg-white/[0.08] border border-white/10 text-white/95 leading-relaxed break-words">
                       {c.text}
                     </div>
-
-                    {c.thought && (
-                      <div className="text-[10px] text-amber-300/80 italic bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-lg">
-                        <span className="font-semibold text-amber-400 not-italic mr-1">独白:</span>
-                        <span>{c.thought}</span>
-                      </div>
-                    )}
                   </div>
                 </div>
               );

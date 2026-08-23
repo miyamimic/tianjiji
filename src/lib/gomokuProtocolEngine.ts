@@ -515,10 +515,11 @@ export function cleanAndNormalizeWeights(raw?: Partial<GomokuWeights> | null): G
 
   const sum = wAttack + wDefend + wSteady;
   if (sum <= 0) {
+    // Default: Soft companion mode with high steady weight
     return {
-      weight_attack: 0.33,
-      weight_defend: 0.34,
-      weight_steady: 0.33,
+      weight_attack: 0.10,
+      weight_defend: 0.20,
+      weight_steady: 0.70,
     };
   }
 
