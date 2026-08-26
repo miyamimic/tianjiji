@@ -60,6 +60,8 @@ export interface InGameChatMessage {
   tactic?: string;
   strategy?: string;
   emotionLabel?: string;
+  stickerUrl?: string;
+  stickerName?: string;
   timestamp: number;
 }
 

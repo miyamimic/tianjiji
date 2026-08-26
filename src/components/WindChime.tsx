@@ -25,9 +25,7 @@ import LlmApp from './phone/LlmApp';
 import AmbienceApp from './phone/AmbienceApp';
 import DictionaryApp from './phone/DictionaryApp';
 import CssApp from './phone/CssApp';
-import GomokuApp from './phone/GomokuApp';
-import { GhostCardApp } from './phone/GhostCardApp';
-import StickersApp from './phone/StickersApp';
+import GameLobbyApp, { type GameLobbySubApp } from './phone/GameLobbyApp';
 import type { LlmConfig } from '../lib/llm';
 import { 
   subscribeGameInvite, 
@@ -57,6 +55,7 @@ interface Props {
   onEngineReload?: () => void;
   onConfigChange?: (config: LlmConfig) => void;
   forceOpenApp?: AppId | null;
+  forceOpenSubApp?: GameLobbySubApp | null;
   onClearForceOpenApp?: () => void;
   onGameFinished?: (
     summary: string, 
@@ -73,7 +72,7 @@ interface Props {
   onRejectGameInvite?: (invite: GameInvitation) => void;
 }
 
-export type AppId = 'stickers' | 'persona' | 'wallpaper' | 'llm' | 'ambience' | 'dictionary' | 'css' | 'game' | 'ghost_card';
+export type AppId = 'game_lobby' | 'persona' | 'wallpaper' | 'llm' | 'ambience' | 'dictionary' | 'css';
 
 const APPS: Array<{
   id: AppId;
@@ -84,27 +83,12 @@ const APPS: Array<{
   badge?: string;
 }> = [
   {
-    id: 'stickers',
-    name: '表情包',
-    subtitle: '图床与偷表情',
-    icon: Sparkles,
-    gradient: 'from-pink-500 via-rose-500 to-amber-500',
-    badge: '✨ 偷表情',
-  },
-  {
-    id: 'ghost_card',
-    name: '捉鬼牌',
-    subtitle: '心理博弈纸牌',
-    icon: Sparkles,
-    gradient: 'from-purple-600 via-stone-800 to-amber-600',
-    badge: '🐾 读心',
-  },
-  {
-    id: 'game',
-    name: '对弈棋局',
-    subtitle: '五子棋小游戏',
+    id: 'game_lobby',
+    name: '游戏大厅',
+    subtitle: '捉鬼牌·五子棋·表情',
     icon: Gamepad2,
-    gradient: 'from-amber-500 via-orange-600 to-rose-600',
+    gradient: 'from-amber-500 via-purple-600 to-rose-600',
+    badge: '娱乐',
   },
   {
     id: 'persona',
@@ -518,7 +502,7 @@ export default function WindChime({
       {isOpen && (
         <div
           className={`fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md animate-in fade-in-0 duration-200 ${
-            activeApp === 'game' ? 'p-0 sm:p-3' : 'p-3 sm:p-6'
+            activeApp === 'game_lobby' ? 'p-0 sm:p-3' : 'p-3 sm:p-6'
           }`}
         >
           {/* Backdrop click to close */}
@@ -527,8 +511,8 @@ export default function WindChime({
           {/* Chassis Window */}
           <div
             className={`relative w-full transition-all duration-300 ${
-              activeApp === 'game'
-                ? 'max-w-full sm:max-w-[460px] h-full sm:h-[94vh] sm:max-h-[860px] sm:rounded-[36px] rounded-none bg-gradient-to-b from-[#1c1917] via-[#141210] to-[#0c0a09] border-0 sm:border-[2px] sm:border-amber-500/30'
+              activeApp === 'game_lobby'
+                ? 'max-w-full sm:max-w-[480px] h-full sm:h-[94vh] sm:max-h-[860px] sm:rounded-[36px] rounded-none bg-gradient-to-b from-[#1c1917] via-[#141210] to-[#0c0a09] border-0 sm:border-[2px] sm:border-amber-500/30'
                 : 'max-w-[390px] h-[660px] max-h-[92vh] rounded-[42px] bg-gradient-to-b from-[hsl(222_30%_12%)] via-[hsl(222_35%_8%)] to-[hsl(222_40%_5%)] border-[3px] border-white/20'
             } shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9),0_0_40px_rgba(245,158,11,0.15)] flex flex-col overflow-hidden ring-1 ring-black/80 z-10 animate-in zoom-in-95 duration-200`}
           >
@@ -543,7 +527,7 @@ export default function WindChime({
               <div className="absolute left-1/2 -translate-x-1/2 top-2 w-24 h-5 bg-black rounded-full border border-white/10 flex items-center justify-center gap-1.5 px-2 shadow-inner">
                 <div className="size-2 rounded-full bg-amber-400/90 animate-pulse" />
                 <span className="text-[8px] text-white/60 font-mono tracking-tighter">
-                  {activeApp === 'game' ? '对弈手谈' : '灵犀 OS'}
+                  {activeApp === 'game_lobby' ? '游戏大厅' : '灵犀 OS'}
                 </span>
                 <div className="size-1.5 rounded-full bg-white/20" />
               </div>
@@ -567,14 +551,14 @@ export default function WindChime({
                   className="flex items-center gap-1 text-xs font-semibold text-[hsl(28_85%_62%)] hover:text-amber-300 transition-colors py-1 px-2.5 rounded-xl bg-white/5 hover:bg-white/10 cursor-pointer"
                 >
                   <ChevronLeft className="size-4" />
-                  <span>{activeApp === 'game' ? '退出对弈' : '返回桌面'}</span>
+                  <span>{activeApp === 'game_lobby' ? '退出大厅' : '返回桌面'}</span>
                 </button>
 
                 <span className="text-xs font-bold text-white tracking-wide flex items-center gap-1.5">
-                  {activeApp === 'game' ? (
+                  {activeApp === 'game_lobby' ? (
                     <>
                       <Gamepad2 className="size-3.5 text-amber-400" />
-                      <span>五子棋 · {characterName}</span>
+                      <span>游戏大厅 · {characterName}</span>
                     </>
                   ) : (
                     APPS.find((a) => a.id === activeApp)?.name
@@ -594,7 +578,7 @@ export default function WindChime({
             {/* Smartphone Screen Body */}
             <div
               className={`flex-1 overflow-y-auto ${
-                activeApp === 'game' ? 'px-2.5 sm:px-4 py-2' : 'px-4 py-3'
+                activeApp === 'game_lobby' ? 'px-2.5 sm:px-3.5 py-2' : 'px-4 py-3'
               } no-scrollbar`}
             >
               
@@ -664,7 +648,7 @@ export default function WindChime({
                   {/* Pending Game Invitation Banner on Home Screen */}
                   {pendingInvite && (
                     <button
-                      onClick={() => setActiveApp('game')}
+                      onClick={() => setActiveApp('game_lobby')}
                       className="w-full p-2.5 rounded-2xl bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-rose-500/20 border border-amber-400/40 flex items-center justify-between text-left shadow-lg hover:border-amber-400/70 transition-all cursor-pointer group"
                     >
                       <div className="flex items-center gap-2">
@@ -673,10 +657,10 @@ export default function WindChime({
                         </div>
                         <div className="space-y-0.5">
                           <p className="text-xs font-bold text-amber-200 group-hover:text-white transition-colors">
-                            {pendingInvite.characterName} 邀你五子棋对弈
+                            {pendingInvite.characterName} 邀你游戏对决
                           </p>
                           <p className="text-[9px] text-amber-300/70">
-                            点击前往棋局赴约下棋 ♟️
+                            {pendingInvite.gameType === 'ghost_card' ? '🃏 捉鬼牌纸牌对决' : '♟️ 五子棋对弈'} · 点击前往大厅赴约
                           </p>
                         </div>
                       </div>
@@ -690,10 +674,9 @@ export default function WindChime({
                   <div className="grid grid-cols-3 gap-2.5 pt-1">
                     {sortedApps.map((app, index) => {
                       const Icon = app.icon;
-                      const isGameWithInvite = app.id === 'game' && !!pendingInvite && pendingInvite.gameType !== 'ghost_card';
-                      const isGhostWithInvite = app.id === 'ghost_card' && !!pendingInvite && pendingInvite.gameType === 'ghost_card';
-                      const activeGomokuSession = app.id === 'game' ? loadActiveGameSession(currentCharacterId) : null;
-                      const activeGhostSession = app.id === 'ghost_card' ? loadActiveGhostCardSession(currentCharacterId) : null;
+                      const isGameLobbyWithInvite = app.id === 'game_lobby' && !!pendingInvite;
+                      const activeGomokuSession = app.id === 'game_lobby' ? loadActiveGameSession(currentCharacterId) : null;
+                      const activeGhostSession = app.id === 'game_lobby' ? loadActiveGhostCardSession(currentCharacterId) : null;
                       const hasPausedGomoku = !!activeGomokuSession && activeGomokuSession.moveHistory.length > 0;
                       const hasPausedGhost = !!activeGhostSession && (activeGhostSession.userHand.length > 0 || activeGhostSession.charHand.length > 0);
 
@@ -748,24 +731,22 @@ export default function WindChime({
                           )}
 
                           {/* Badge (e.g. AI视觉, 新邀请, 暂停中) */}
-                          {!isArranging && (app.badge || isGameWithInvite || isGhostWithInvite || hasPausedGomoku || hasPausedGhost) && (
+                          {!isArranging && (app.badge || isGameLobbyWithInvite || hasPausedGomoku || hasPausedGhost) && (
                             <span
                               className={`absolute -top-1 -right-1 text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow-md z-10 ${
-                                isGameWithInvite || isGhostWithInvite
+                                isGameLobbyWithInvite
                                   ? 'bg-red-500 text-white animate-pulse'
-                                  : hasPausedGomoku
+                                  : hasPausedGomoku || hasPausedGhost
                                   ? 'bg-amber-500 text-amber-950 font-bold'
-                                  : hasPausedGhost
-                                  ? 'bg-purple-500 text-white font-bold'
                                   : 'text-amber-950 bg-[hsl(28_85%_62%)]'
                               }`}
                             >
-                              {isGameWithInvite || isGhostWithInvite
+                              {isGameLobbyWithInvite
                                 ? '新邀约'
                                 : hasPausedGomoku
-                                ? `进行中(${activeGomokuSession?.moveHistory.length}手)`
+                                ? `棋局(${activeGomokuSession?.moveHistory.length}手)`
                                 : hasPausedGhost
-                                ? `进行中(第${activeGhostSession?.turnCount}轮)`
+                                ? `牌局(${activeGhostSession?.turnCount}轮)`
                                 : app.badge}
                             </span>
                           )}
@@ -799,8 +780,18 @@ export default function WindChime({
               ) : (
                 /* ========== IN-APP DETAIL VIEW ========== */
                 <div className="animate-in fade-in-0 duration-200 pt-1">
-                  {activeApp === 'stickers' && (
-                    <StickersApp currentCharacterId={currentCharacterId} />
+                  {activeApp === 'game_lobby' && (
+                    <GameLobbyApp
+                      currentCharacterId={currentCharacterId}
+                      characterName={characterName}
+                      character={character}
+                      currentEmotionSnapshot={currentEmotionSnapshot}
+                      onGameFinished={onGameFinished}
+                      onApplyGameEmotionDelta={onApplyGameEmotionDelta}
+                      onInGameChat={onInGameChat}
+                      onRejectGameInvite={onRejectGameInvite}
+                      onExitLobby={() => setActiveApp(null)}
+                    />
                   )}
                   {activeApp === 'persona' && (
                     <PersonaApp
@@ -820,31 +811,6 @@ export default function WindChime({
                   {activeApp === 'ambience' && <AmbienceApp />}
                   {activeApp === 'dictionary' && <DictionaryApp />}
                   {activeApp === 'css' && <CssApp />}
-                  {activeApp === 'game' && (
-                    <GomokuApp
-                      currentCharacterId={currentCharacterId}
-                      characterName={characterName}
-                      character={character}
-                      currentEmotionSnapshot={currentEmotionSnapshot}
-                      onGameFinished={onGameFinished}
-                      onApplyGameEmotionDelta={onApplyGameEmotionDelta}
-                      onInGameChat={onInGameChat}
-                      onRejectInvite={onRejectGameInvite}
-                      onExit={() => setActiveApp(null)}
-                    />
-                  )}
-                  {activeApp === 'ghost_card' && (
-                    <GhostCardApp
-                      currentCharacterId={currentCharacterId}
-                      characterName={characterName}
-                      character={character}
-                      currentEmotionSnapshot={currentEmotionSnapshot}
-                      onGameFinished={onGameFinished}
-                      onApplyGameEmotionDelta={onApplyGameEmotionDelta}
-                      onRejectInvite={onRejectGameInvite}
-                      onExit={() => setActiveApp(null)}
-                    />
-                  )}
                 </div>
               )}
             </div>

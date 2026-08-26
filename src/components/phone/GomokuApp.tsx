@@ -89,9 +89,12 @@ import {
   isLlmConfigured,
   type GomokuTriggerType
 } from '../../lib/llm';
-import { getCharacterById, MOCK_CHARACTERS } from '../../data/characters';
+import { getCharacterById, MOCK_CHARACTERS, getSavedCharacters } from '../../data/characters';
 import { EMOTION_NAMES } from '../../data/types';
 import type { Character, EmotionVector, EmotionKey } from '../../data/types';
+import InGameStickerBar from '../InGameStickerBar';
+import GameCharacterSelector from './GameCharacterSelector';
+import type { Sticker } from '../../lib/stickerStore';
 
 export type { Cell };
 export type AiTactic = 'aggressive' | 'defensive' | 'gentle' | 'balanced';
@@ -202,7 +205,7 @@ const TACTIC_INFO: Record<AiTactic, { label: string; icon: React.ElementType; co
 
 export default function GomokuApp({
   currentCharacterId,
-  characterName,
+  characterName: propCharacterName,
   character: propCharacter,
   currentEmotionSnapshot: propEmotionSnapshot,
   onGameFinished,
@@ -211,7 +214,10 @@ export default function GomokuApp({
   onRejectInvite,
   onExit,
 }: Props) {
-  const activeChar = propCharacter || getCharacterById(currentCharacterId) || MOCK_CHARACTERS[0];
+  const [selectedOpponentId, setSelectedOpponentId] = useState<string>(currentCharacterId);
+  const activeChar = getCharacterById(selectedOpponentId) || propCharacter || MOCK_CHARACTERS[0];
+  const characterName = activeChar.name;
+
   const initialEmotionSnapshot = propEmotionSnapshot || {
     joy: 0.5,
     sadness: 0.1,
@@ -221,8 +227,15 @@ export default function GomokuApp({
     desire: 0.4,
   };
 
+  // Sync prop changes
+  useEffect(() => {
+    if (currentCharacterId && currentCharacterId !== selectedOpponentId) {
+      setSelectedOpponentId(currentCharacterId);
+    }
+  }, [currentCharacterId]);
+
   // Screen Mode: 'arena' (Full Screen Game) or 'hub' (Game Selection & Archives Hub)
-  const initialSession = loadActiveGameSession(currentCharacterId);
+  const initialSession = loadActiveGameSession(selectedOpponentId);
   const [screenMode, setScreenMode] = useState<'arena' | 'hub'>('arena');
 
   // Hub sub-tabs: 'games' | 'invites' | 'history' | 'settings'
@@ -312,22 +325,75 @@ export default function GomokuApp({
   const [characterInnerThought, setCharacterInnerThought] = useState<string>('');
 
   // Stats & Match History Archive
-  const [stats, setStats] = useState<GomokuStats>(() => loadGomokuStats(currentCharacterId));
+  const [stats, setStats] = useState<GomokuStats>(() => loadGomokuStats(selectedOpponentId));
   const [matchHistory, setMatchHistory] = useState<GomokuMatchRecord[]>([]);
   const [pendingInvitesList, setPendingInvitesList] = useState<GameInvitation[]>([]);
   const [expandedMatchId, setExpandedMatchId] = useState<string | null>(null);
 
   // Character Gomoku Skill Level
-  const [charRank, setCharRank] = useState<GomokuRank>(() => loadCharGomokuRank(currentCharacterId));
+  const [charRank, setCharRank] = useState<GomokuRank>(() => loadCharGomokuRank(selectedOpponentId));
 
   // Debug mode switch
   const [debugShortcutEnabled, setDebugShortcutEnabled] = useState(isGameDebugShortcutEnabled);
 
-  const charAvatar = loadCharAvatar(currentCharacterId);
+  const charAvatar = loadCharAvatar(selectedOpponentId);
   const boardRef = useRef<HTMLDivElement>(null);
   const gameFinalizedRef = useRef(false);
   const chatScrollContainerRef = useRef<HTMLDivElement>(null);
   const chatsEndRef = useRef<HTMLDivElement>(null);
+
+  // Switch opponent helper
+  const handleSwitchOpponent = (newId: string) => {
+    if (newId === selectedOpponentId) return;
+    if (!winner && moveHistory.length > 0) {
+      saveActiveGameSession({
+        characterId: selectedOpponentId,
+        characterName,
+        board,
+        moveHistory,
+        playerColor,
+        currentTurn,
+        inGameChats,
+        characterSpeech,
+        isPaused: true,
+        lastUpdated: Date.now(),
+      });
+    }
+    setSelectedOpponentId(newId);
+    const newSession = loadActiveGameSession(newId);
+
+    if (newSession && newSession.moveHistory.length > 0) {
+      setBoard(newSession.board);
+      setMoveHistory(newSession.moveHistory);
+      setPlayerColor(newSession.playerColor);
+      setCurrentTurn(newSession.currentTurn);
+      setInGameChats(newSession.inGameChats);
+      setCharacterSpeech(newSession.characterSpeech);
+      setWinner(null);
+      setIsPaused(true);
+    } else {
+      setBoard(Array(BOARD_SIZE).fill(null).map(() => Array(BOARD_SIZE).fill(null)));
+      setMoveHistory([]);
+      setWinner(null);
+      setWinningLine(null);
+      setPlayerColor('B');
+      setCurrentTurn('B');
+      setIsPaused(false);
+      const greeting = `（见你落座，眼中带着欣喜）"今天想和我下棋吗？来吧，执黑先行。"`;
+      setCharacterSpeech(greeting);
+      setInGameChats([
+        {
+          id: `chat_init_${Date.now()}`,
+          sender: 'character',
+          text: greeting,
+          timestamp: Date.now(),
+        },
+      ]);
+    }
+
+    setStats(loadGomokuStats(newId));
+    setCharRank(loadCharGomokuRank(newId));
+  };
 
   // Auto-scroll to bottom of live chat stream when new message arrives
   useEffect(() => {
@@ -1054,25 +1120,29 @@ export default function GomokuApp({
   };
 
   // In-Game Live Chat Sender (v4.1: Calls LLM with trigger='player_chat' to update weights and dialogue)
-  const handleSendInGameChat = async (e?: React.FormEvent) => {
+  const handleSendInGameChat = async (e?: React.FormEvent, overrideText?: string, overrideSticker?: Sticker) => {
     if (e) e.preventDefault();
-    const text = chatInputText.trim();
+    const text = (overrideText !== undefined ? overrideText : chatInputText).trim();
     if (!text || isChatSending) return;
 
     const userMsg: InGameChatMessage = {
       id: `chat_user_${Date.now()}`,
       sender: 'user',
-      text,
+      text: overrideSticker ? `[表情: ${overrideSticker.name}]` : text,
+      stickerUrl: overrideSticker?.url,
+      stickerName: overrideSticker?.name,
       timestamp: Date.now(),
     };
     const updatedChats = [...inGameChats, userMsg];
     setInGameChats(updatedChats);
-    setChatInputText('');
+    if (overrideText === undefined) {
+      setChatInputText('');
+    }
     setIsChatSending(true);
 
     const llmConfig = loadLlmConfig();
     const aiCol: 'B' | 'W' = playerColor === 'B' ? 'W' : 'B';
-    const activeRank = loadCharGomokuRank(currentCharacterId);
+    const activeRank = loadCharGomokuRank(selectedOpponentId);
     const pools = candidatePools || generateGomokuCandidatePools(board, aiCol, activeRank, initialEmotionSnapshot);
 
     try {
@@ -1093,7 +1163,7 @@ export default function GomokuApp({
           inGameChats: updatedChats.map((c) => ({ sender: c.sender, text: c.text })),
           isPlayerSandbagging: sandbaggingReport.isPlayerSandbagging,
           abandonedBestPoints: sandbaggingReport.abandonedBestPoints,
-          playerChatText: text,
+          playerChatText: overrideSticker ? `[发送了表情包: ${overrideSticker.name}]` : text,
         });
 
         // Check if AI obeys user instructions by resigning
@@ -1187,6 +1257,10 @@ export default function GomokuApp({
     }
   };
 
+  const handleSendStickerInGame = (sticker: Sticker) => {
+    handleSendInGameChat(undefined, `[发送了表情包: ${sticker.name}]`, sticker);
+  };
+
   // Handle invitation actions in "Pending Invites" tab (passes isPlaydate=true)
   const handleAcceptPendingInvite = (invite: GameInvitation) => {
     acceptGameInvite(invite.id);
@@ -1224,15 +1298,23 @@ export default function GomokuApp({
         
         {/* ================= TOP COMPACT HEADER ================= */}
         <div className="flex items-center justify-between px-1 shrink-0 pb-1">
-          {/* Left: Exit to Game Hub button */}
-          <button
-            onClick={handleExitArena}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-xs font-bold text-amber-300 hover:text-white transition active:scale-95 cursor-pointer shadow-sm"
-            title="退出对弈并自动暂存进度"
-          >
-            <ChevronLeft className="size-4" />
-            <span>退出对局</span>
-          </button>
+          {/* Left: Exit to Game Hub button & Character switch */}
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleExitArena}
+              className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/15 text-xs font-bold text-amber-300 hover:text-white transition active:scale-95 cursor-pointer shadow-sm"
+              title="退出对弈并自动暂存进度"
+            >
+              <ChevronLeft className="size-4" />
+              <span className="hidden sm:inline">退出</span>
+            </button>
+
+            <GameCharacterSelector
+              selectedCharacterId={selectedOpponentId}
+              onSelectCharacter={handleSwitchOpponent}
+              compact={true}
+            />
+          </div>
 
           {/* Center: Live Game Status Badge */}
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/60 border border-amber-500/30 text-xs shadow-inner">
@@ -1697,8 +1779,13 @@ export default function GomokuApp({
               if (c.sender === 'user') {
                 return (
                   <div key={c.id} className="flex justify-end gap-1.5 items-end ml-8">
-                    <div className="bg-gradient-to-r from-amber-600/30 to-amber-500/25 border border-amber-400/30 text-amber-100 px-3 py-1.5 rounded-2xl rounded-br-xs text-xs shadow-sm max-w-[85%] break-words">
-                      {c.text}
+                    <div className="bg-gradient-to-r from-amber-600/30 to-amber-500/25 border border-amber-400/30 text-amber-100 px-3 py-1.5 rounded-2xl rounded-br-xs text-xs shadow-sm max-w-[85%] break-words space-y-1">
+                      {c.stickerUrl && (
+                        <div className="rounded-xl overflow-hidden max-w-[110px] max-h-[110px] bg-black/40 border border-amber-400/30 p-1">
+                          <img src={c.stickerUrl} alt={c.stickerName || '表情包'} referrerPolicy="no-referrer" className="w-full h-full object-contain rounded-lg" />
+                        </div>
+                      )}
+                      <div>{c.text}</div>
                     </div>
                     <div className="size-5 rounded-full bg-amber-500/30 border border-amber-400/40 text-[9px] font-bold text-amber-200 flex items-center justify-center shrink-0">
                       你
@@ -1742,8 +1829,13 @@ export default function GomokuApp({
                       )}
                     </div>
 
-                    <div className="p-2 rounded-2xl rounded-tl-xs bg-white/[0.08] border border-white/10 text-white/95 leading-relaxed break-words">
-                      {c.text}
+                    <div className="p-2 rounded-2xl rounded-tl-xs bg-white/[0.08] border border-white/10 text-white/95 leading-relaxed break-words space-y-1">
+                      {c.stickerUrl && (
+                        <div className="rounded-xl overflow-hidden max-w-[110px] max-h-[110px] bg-black/40 border border-white/20 p-1">
+                          <img src={c.stickerUrl} alt={c.stickerName || '表情包'} referrerPolicy="no-referrer" className="w-full h-full object-contain rounded-lg" />
+                        </div>
+                      )}
+                      <div>{c.text}</div>
                     </div>
                   </div>
                 </div>
@@ -1753,8 +1845,16 @@ export default function GomokuApp({
           </div>
         </div>
 
-        {/* ================= 3. LOWER: TALK INPUT FIELD ================= */}
-        <div className="shrink-0 max-w-xl mx-auto w-full pt-0.5">
+        {/* ================= 3. LOWER: TALK INPUT FIELD & STICKERS ================= */}
+        <div className="shrink-0 max-w-xl mx-auto w-full pt-0.5 space-y-1.5">
+          {/* In-Game Sticker Bar */}
+          <InGameStickerBar
+            currentCharacterId={selectedOpponentId}
+            characterName={characterName}
+            onSelectSticker={handleSendStickerInGame}
+            disabled={isChatSending}
+          />
+
           <form onSubmit={handleSendInGameChat} className="flex items-center gap-2">
             <input
               type="text"

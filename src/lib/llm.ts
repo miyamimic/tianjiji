@@ -165,37 +165,81 @@ export async function analyzeVisualAvatar(
   }
 }
 
+import { backgroundKeepAlive } from './backgroundKeepAlive';
+
 export async function callLlm(
   config: LlmConfig,
   messages: LlmMessage[],
+  options?: { timeoutMs?: number; maxRetries?: number }
 ): Promise<string> {
   const url = config.baseUrl.replace(/\/$/, '') + '/chat/completions';
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.apiKey}`,
-    },
-    body: JSON.stringify({
-      model: config.model,
-      messages,
-      temperature: 0.82,
-      // Generous max_tokens (2048) ensures rich 100+ character RP responses and thoughts are never cut off
-      max_tokens: 2048,
-    }),
-  });
+  const timeoutMs = options?.timeoutMs ?? 50000;
+  const maxRetries = options?.maxRetries ?? 2;
+  const leaseId = `llm_call_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`LLM API error ${res.status}: ${text}`);
+  // Acquire iOS background keep-alive during the network call
+  backgroundKeepAlive.acquire(leaseId, 'callLlm');
+
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: config.model,
+          messages,
+          temperature: 0.82,
+          // Generous max_tokens (2048) ensures rich 100+ character RP responses and thoughts are never cut off
+          max_tokens: 2048,
+        }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timer);
+
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`LLM API error ${res.status}: ${text}`);
+      }
+
+      const data = await res.json();
+      const content = data?.choices?.[0]?.message?.content;
+      if (typeof content !== 'string') {
+        throw new Error('LLM API returned unexpected response shape');
+      }
+
+      backgroundKeepAlive.release(leaseId);
+      return content;
+    } catch (err: any) {
+      clearTimeout(timer);
+      lastError = err;
+      const isAbort = err?.name === 'AbortError' || err?.message?.includes('aborted');
+      const isNetwork =
+        isAbort ||
+        err?.message?.includes('Load failed') ||
+        err?.message?.includes('Failed to fetch') ||
+        err?.message?.includes('NetworkError');
+
+      if (attempt < maxRetries && isNetwork) {
+        const backoff = 1000 * Math.pow(1.8, attempt) + Math.random() * 300;
+        console.warn(`[LLM Call Warning] Encountered ${err?.message || 'Network issue'}, retrying attempt ${attempt + 1}/${maxRetries} after ${Math.round(backoff)}ms...`);
+        await new Promise((r) => setTimeout(r, backoff));
+        continue;
+      }
+      break;
+    }
   }
 
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (typeof content !== 'string') {
-    throw new Error('LLM API returned unexpected response shape');
-  }
-  return content;
+  backgroundKeepAlive.release(leaseId);
+  throw lastError || new Error('LLM API call failed');
 }
 
 import type { Character, EmotionVector } from '../data/types';
@@ -1383,9 +1427,9 @@ export async function generateGhostCardBatchHoverReactions(
     return `牌位 [${i}]${c.isGhost ? '【这是鬼牌🐾！】' : '【普通安全牌】'}`;
   }).join('、');
 
-  const prompt = `【风铃·捉鬼牌·全牌位悬停反应生成】
+  const prompt = `【风铃·捉鬼牌·全牌位悬停反应与气泡生成】
 现在轮到主控从你的手牌中抽取 1 张牌。
-主控的手指正在你的 ${cardCount} 张牌上方左右滑动悬停浏览！
+主控的手指正在你的 ${cardCount} 张牌上方左右滑动悬停试探！
 你面前展开了 ${cardCount} 张牌（编号从 0 到 ${cardCount - 1}）：
 ${cardListDesc}
 - 角色特质：${character.core.values.join('、')}
@@ -1393,20 +1437,23 @@ ${cardListDesc}
 - 当前情绪状态：${emotionSummary}
 
 【任务要求】：
-请一次性为你手里的**每一张牌（从索引 0 到 ${cardCount - 1}）**预先想好专属、生动的实时反应！
-当主控的手指滑动并悬停在某张牌上时，你的反应要符合心理战的真实表现：
-1. 悬停在【鬼牌🐾】所在牌位时：你可以表现出微心虚、强装镇定、屏住呼吸、挑衅反问、或者故意虚张声势（根据人设）。
-2. 悬停在【普通安全牌】牌位时：你可以表现出轻松、鼓励、促狭微笑、或者装作很舍不得的迷惑演技。
-3. 每一张牌的台词与动作必须各不相同，禁止出现重复！
+请一次性为你手里的**每一张牌（从索引 0 到 ${cardCount - 1}）**预先想好专属、简短（15字以内为主，适合气泡浮现）、生动的悬停即时反应！
+当主控的手指左右滑动并悬停在某张牌上时，你的反应要符合心理博弈的真实表现：
+1. **微反应不要太明显暴露**：不要出现过于直白的“这就是鬼牌”或“这不是鬼牌”，保持神秘感与微表情细节（如睫毛轻颤、轻抬眉梢、嘴角微抿、呼吸顿了半拍等）。
+2. **根据角色性格可能故意使诈/骗主控**：
+   - 狡黠/傲娇角色可能在【鬼牌】上故作淡定或挑衅“敢抽吗”，而在【普通牌】上故意演戏装心虚设陷阱诱导主控踩雷；
+   - 沉稳/内敛角色可能喜怒不形于色，语气几乎无破绽；
+   - 温柔/纯真角色可能微微慌乱或真实流露，但也会偶尔开个小玩笑。
+3. 每一张牌的台词与动作描写必须不同，生动且贴合当下手牌情境。
 
 请严格输出标准 JSON 数组：
 \`\`\`json
 [
   {
     "card_index": 0,
-    "speech": "“停在第一张？你确定第一张就合你眼缘嘛～”",
-    "action": "*双眼微微睁大，嘴角含笑*",
-    "inner_thought": "*这张可是安全牌，看ta敢不敢抽*"
+    "speech": "“手指停在这儿，是在测我的心跳吗？”",
+    "action": "*睫毛微微一颤，嘴角含笑注视着你*",
+    "inner_thought": "*这张可是安全牌，看ta敢不敢下手*"
   }
 ]
 \`\`\``;

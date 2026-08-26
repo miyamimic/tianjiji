@@ -63,6 +63,10 @@ import {
 import { getCharacterById, MOCK_CHARACTERS } from '../../data/characters';
 import { EMOTION_NAMES } from '../../data/types';
 import type { Character, EmotionVector, EmotionKey } from '../../data/types';
+import InGameStickerBar from '../InGameStickerBar';
+import GameCharacterSelector from './GameCharacterSelector';
+import type { Sticker } from '../../lib/stickerStore';
+import { ChevronLeft } from 'lucide-react';
 
 interface Props {
   currentCharacterId: string;
@@ -188,15 +192,24 @@ function playVictorySound() {
 
 export const GhostCardApp: React.FC<Props> = ({
   currentCharacterId,
-  characterName,
+  characterName: propCharacterName,
   character: propChar,
   currentEmotionSnapshot,
   onGameFinished,
   onApplyGameEmotionDelta,
   onExit,
 }) => {
-  const activeChar = propChar || getCharacterById(currentCharacterId) || MOCK_CHARACTERS[0];
-  const charAvatar = loadCharAvatar(currentCharacterId);
+  const [selectedOpponentId, setSelectedOpponentId] = useState<string>(currentCharacterId);
+  const activeChar = getCharacterById(selectedOpponentId) || propChar || MOCK_CHARACTERS[0];
+  const characterName = activeChar.name;
+  const charAvatar = loadCharAvatar(selectedOpponentId);
+
+  // Sync prop changes
+  useEffect(() => {
+    if (currentCharacterId && currentCharacterId !== selectedOpponentId) {
+      setSelectedOpponentId(currentCharacterId);
+    }
+  }, [currentCharacterId]);
 
   // Mechanical State
   const [userHand, setUserHand] = useState<Card[]>([]);
@@ -218,19 +231,22 @@ export const GhostCardApp: React.FC<Props> = ({
   const [characterAction, setCharacterAction] = useState<string>('*轻轻理顺手中的卡牌*');
   const [characterInnerThought, setCharacterInnerThought] = useState<string>('');
 
-  // User Draw Sliding State
+  // -------------------------------------------------------------
+  // Interaction State (Card Selection ≠ Game Action)
+  // -------------------------------------------------------------
+  interface SelectedCardTarget {
+    zone: 'char' | 'user';
+    index: number;
+    card: Card;
+  }
+  const [selectedCard, setSelectedCard] = useState<SelectedCardTarget | null>(null);
   const [hoveredCharCardIdx, setHoveredCharCardIdx] = useState<number | null>(null);
   const [charBatchReactions, setCharBatchReactions] = useState<CardHoverReaction[]>([]);
   const lastHoveredIdxRef = useRef<number | null>(null);
   const charCardContainerRef = useRef<HTMLDivElement>(null);
 
-  // Character Turn Psychology & Tactics
-  type UserTacticPhase = 'select_tactic' | 'char_hovering' | 'interject_speech' | 'resolving_draw';
-  const [userTacticPhase, setUserTacticPhase] = useState<UserTacticPhase>('select_tactic');
-  const [selectedUserCardIndices, setSelectedUserCardIndices] = useState<number[]>([]);
-  const [currentTactic, setCurrentTactic] = useState<TacticDirection>('provoke');
+  // Character Turn Focus & Intuition
   const [charHoveredUserCardIdx, setCharHoveredUserCardIdx] = useState<number | null>(null);
-  const [interjectInputText, setInterjectInputText] = useState<string>('');
   const [isProactiveInitiative, setIsProactiveInitiative] = useState<boolean>(false);
 
   // System & Flags
@@ -251,7 +267,7 @@ export const GhostCardApp: React.FC<Props> = ({
   const [rewardOrPunishment, setRewardOrPunishment] = useState<string>('');
   const [emotionSettled, setEmotionSettled] = useState<boolean>(false);
 
-  // Chat Input
+  // Chat Input (Always Active)
   const [chatInputText, setChatInputText] = useState<string>('');
   const chatScrollRef = useRef<HTMLDivElement>(null);
 
@@ -288,9 +304,9 @@ export const GhostCardApp: React.FC<Props> = ({
     [activeChar, currentEmotionSnapshot]
   );
 
-  // Load / resume session on mount
+  // Load / resume session on mount / opponent change
   useEffect(() => {
-    const saved = loadActiveGhostCardSession(currentCharacterId);
+    const saved = loadActiveGhostCardSession(selectedOpponentId);
     if (saved && saved.userHand && saved.charHand && (saved.userHand.length > 0 || saved.charHand.length > 0)) {
       setUserHand(saved.userHand);
       setCharHand(saved.charHand);
@@ -312,13 +328,13 @@ export const GhostCardApp: React.FC<Props> = ({
     } else {
       initNewGame();
     }
-  }, [currentCharacterId]);
+  }, [selectedOpponentId]);
 
   // Save session on state change
   useEffect(() => {
     if (!winner && (userHand.length > 0 || charHand.length > 0)) {
       saveActiveGhostCardSession({
-        characterId: currentCharacterId,
+        characterId: selectedOpponentId,
         characterName,
         userHand,
         charHand,
@@ -339,7 +355,7 @@ export const GhostCardApp: React.FC<Props> = ({
       });
     }
   }, [
-    currentCharacterId,
+    selectedOpponentId,
     characterName,
     userHand,
     charHand,
@@ -358,6 +374,34 @@ export const GhostCardApp: React.FC<Props> = ({
     winner,
   ]);
 
+  // Switch opponent helper
+  const handleSwitchOpponent = (newId: string) => {
+    if (newId === selectedOpponentId) return;
+    if (!winner && (userHand.length > 0 || charHand.length > 0)) {
+      saveActiveGhostCardSession({
+        characterId: selectedOpponentId,
+        characterName,
+        userHand,
+        charHand,
+        discardPile,
+        ghostCardId,
+        currentTurn,
+        turnCount,
+        userBluffHistory,
+        charBluffHistory,
+        keyMoments,
+        inGameChats,
+        characterSpeech,
+        characterInnerThought,
+        isPaused: true,
+        lastUpdated: Date.now(),
+        gameTotalDelta,
+        winner,
+      });
+    }
+    setSelectedOpponentId(newId);
+  };
+
   // -------------------------------------------------------------
   // Initialize New Game
   // -------------------------------------------------------------
@@ -372,8 +416,7 @@ export const GhostCardApp: React.FC<Props> = ({
     setKeyMoments([]);
     setTurnCount(1);
     setCurrentTurn('user');
-    setUserTacticPhase('select_tactic');
-    setSelectedUserCardIndices([]);
+    setSelectedCard(null);
     setCharHoveredUserCardIdx(null);
     setHoveredCharCardIdx(null);
     lastHoveredIdxRef.current = null;
@@ -459,8 +502,24 @@ export const GhostCardApp: React.FC<Props> = ({
   // -------------------------------------------------------------
   // User Hover / Slide Over Character Cards Interaction
   // -------------------------------------------------------------
+  // -------------------------------------------------------------
+  // Card Selection & Focus Handling (Card Selection ≠ Game Action)
+  // -------------------------------------------------------------
+  const handleSelectCard = (zone: 'char' | 'user', idx: number, card: Card) => {
+    if (winner || isLlmThinking) return;
+
+    if (selectedCard && selectedCard.zone === zone && selectedCard.index === idx) {
+      // Toggle deselect
+      setSelectedCard(null);
+    } else {
+      setSelectedCard({ zone, index: idx, card });
+      if (zone === 'char') {
+        handleHoverCharCard(idx);
+      }
+    }
+  };
+
   const handleHoverCharCard = (idx: number) => {
-    if (currentTurn !== 'user' || winner || isLlmThinking) return;
     if (idx < 0 || idx >= charHand.length) return;
     if (hoveredCharCardIdx === idx) return;
 
@@ -481,9 +540,8 @@ export const GhostCardApp: React.FC<Props> = ({
     }
   };
 
-  // Touch / Pointer sliding move handler
   const handleCharFanPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (currentTurn !== 'user' || winner || isLlmThinking) return;
+    if (winner || isLlmThinking) return;
     if (!charCardContainerRef.current || charHand.length === 0) return;
 
     const rect = charCardContainerRef.current.getBoundingClientRect();
@@ -497,17 +555,56 @@ export const GhostCardApp: React.FC<Props> = ({
   };
 
   // -------------------------------------------------------------
-  // Player Finalizes Draw of a Card from Character Hand
+  // Shuffle User Hand (Physical Game Action)
   // -------------------------------------------------------------
-  const handleUserDrawCard = async (cardIdx: number) => {
+  const handleShuffleUserHand = (userWords?: string) => {
+    if (isLlmThinking || winner) return;
+    const shuffled = shuffleHand(userHand);
+    setUserHand(shuffled);
+    setSelectedCard(null);
+
+    const logText = userWords || '（将手中的手牌重新打乱洗牌，调整阵型）';
+    setInGameChats((prev) => [
+      ...prev,
+      {
+        id: `user_shuffle_${Date.now()}`,
+        sender: 'user',
+        text: logText,
+        timestamp: Date.now(),
+      },
+    ]);
+
+    if (currentTurn === 'character') {
+      const newHover = Math.floor(Math.random() * shuffled.length);
+      setCharHoveredUserCardIdx(newHover);
+      const reactText = `“哎？把手牌打乱重新洗了一遍呀？那我重新看看你这第 ${newHover + 1} 张～”`;
+      setCharacterSpeech(reactText);
+      setCharacterAction(`*饶有兴致地看着你洗牌，重新将手指悬停在第 ${newHover + 1} 张牌上方*`);
+      setInGameChats((prev) => [
+        ...prev,
+        {
+          id: `char_react_${Date.now()}`,
+          sender: 'character',
+          text: reactText,
+          timestamp: Date.now(),
+        },
+      ]);
+    }
+  };
+
+  // -------------------------------------------------------------
+  // Full State Transition: User Draws Card (DRAW_CARD)
+  // -------------------------------------------------------------
+  const executeUserDrawCard = async (cardIdx: number, userPromptText: string) => {
     if (currentTurn !== 'user' || winner || isLlmThinking || isPaused) return;
     if (cardIdx < 0 || cardIdx >= charHand.length) return;
 
     if (soundEnabled) playCardDrawSound();
+    setSelectedCard(null);
     setHoveredCharCardIdx(null);
     lastHoveredIdxRef.current = null;
 
-    // Mechanical execution
+    // 1. Mechanical execution
     const result = executeDrawCard(charHand, userHand, cardIdx, 'user');
     setCharHand(result.newFromHand);
     setUserHand(result.newToHand);
@@ -521,7 +618,7 @@ export const GhostCardApp: React.FC<Props> = ({
       playGhostRevealSound();
     }
 
-    // Log action to chat
+    // 2. Log User message & draw event
     const drawDesc = result.isGhost
       ? `抽到了【鬼牌 🐾】！`
       : result.pairedCard
@@ -533,19 +630,19 @@ export const GhostCardApp: React.FC<Props> = ({
       {
         id: `user_draw_${Date.now()}`,
         sender: 'user',
-        text: `（从${characterName}的手牌中抽取了第 ${cardIdx + 1} 张牌）${drawDesc}`,
+        text: `${userPromptText} （从${characterName}手中抽取了第 ${cardIdx + 1} 张牌，${drawDesc}）`,
         timestamp: Date.now(),
       },
     ]);
 
-    // Check Win/Loss
+    // 3. Check Win/Loss
     const winResult = checkGhostCardWinner(result.newToHand, result.newFromHand);
     if (winResult) {
       handleGameOver(winResult, result.newToHand, result.newFromHand);
       return;
     }
 
-    // Step 2: LLM Reaction for User's Draw
+    // 4. LLM Reaction for User's Draw
     setIsLlmThinking(true);
     const activeConfig = loadLlmConfig();
     const charHasGhost = result.newFromHand.some((c) => c.isGhost);
@@ -598,129 +695,49 @@ export const GhostCardApp: React.FC<Props> = ({
             ...prev,
             {
               round: turnCount,
-              event: '抓到鬼牌',
-              detail: `主控在第${turnCount}轮抽中了鬼牌🐾，${characterName}暗喜`,
+              event: '主控抽中鬼牌',
+              detail: `主控在第${turnCount}轮抽中了${characterName}手中的鬼牌🐾`,
             },
           ]);
         }
-      }
-    } catch (err) {
-      console.warn('User draw reaction LLM failed:', err);
-    } finally {
-      setIsLlmThinking(false);
-    }
-
-    // Transition to Character's Turn with 30% Proactive Initiative Check
-    await startCharacterTurnWithProactiveCheck(result.newToHand, result.newFromHand);
-  };
-
-  // -------------------------------------------------------------
-  // Character's Turn Step 0: Check 30% Proactive Initiative (AI 直觉先发制人)
-  // -------------------------------------------------------------
-  const startCharacterTurnWithProactiveCheck = async (currentUserHand: Card[], currentCharHand: Card[]) => {
-    setCurrentTurn('character');
-    setSelectedUserCardIndices([]);
-    setCharHoveredUserCardIdx(null);
-
-    // 30% probability to trigger LLM Proactive Initiative
-    const isProactive = Math.random() < 0.3;
-
-    if (isProactive && currentUserHand.length > 0) {
-      setIsProactiveInitiative(true);
-      setUserTacticPhase('interject_speech'); // Skip manual selection
-      setIsLlmThinking(true);
-
-      const activeConfig = loadLlmConfig();
-      const userHasGhost = currentUserHand.some((c) => c.isGhost);
-      const fallbackIdx = Math.floor(Math.random() * currentUserHand.length);
-
-      try {
-        let hoverRes: {
-          hoveredIndex: number;
-          hoverDialogue: string;
-          hoverAction: string;
-          innerThought: string;
-          stepEmotionDelta: Partial<EmotionVector>;
-        };
-
-        if (isLlmConfigured(activeConfig)) {
-          hoverRes = await generateGhostCardCharHoverDecision(
-            activeConfig,
-            activeChar,
-            currentEmotionSnapshot || { joy: 0.5, warmth: 0.5, sadness: 0.1, anger: 0.1, fear: 0.1, desire: 0.2 },
-            {
-              userCardCount: currentUserHand.length,
-              selectedIndices: [],
-              tactic: 'provoke',
-              userHasGhost,
-              userBluffHistory,
-              turnCount,
-              isProactive: true,
-            }
-          );
-        } else {
-          hoverRes = {
-            hoveredIndex: fallbackIdx,
-            hoverDialogue: `“哈哈！不等你慢吞吞出招耍花样了，我直觉最灵！我就先认准你这第 ${fallbackIdx + 1} 张！”`,
-            hoverAction: `*不等你动作，指尖如电般瞬间闪烁着灵觉微光锁定在你的第 ${fallbackIdx + 1} 张牌上方，神态自信而狡黠*`,
-            innerThought: `*直觉告诉我就是这张！看主控这下怎么跟我拉扯心理战～*`,
-            stepEmotionDelta: { joy: 0.08, warmth: 0.05 },
-          };
-        }
-
-        setCharHoveredUserCardIdx(hoverRes.hoveredIndex);
-        setCharacterSpeech(hoverRes.hoverDialogue);
-        setCharacterAction(hoverRes.hoverAction);
-        setCharacterInnerThought(hoverRes.innerThought);
-
+      } else {
+        const fallbackText = result.isGhost
+          ? `“哇！你真的把鬼牌抓走了！” *忍不住松了一大口气*`
+          : result.pairedCard
+          ? `“竟然让你配成一对打出去了，运气真好～”`
+          : `“拿走啦？看看你能不能撑到最后哦～”`;
+        setCharacterSpeech(fallbackText);
         setInGameChats((prev) => [
           ...prev,
           {
-            id: `proactive_event_${Date.now()}`,
-            sender: 'system',
-            text: `⚡【直觉触发】${characterName} 触发了 30% 直觉先发制人！跳过了标记环节，直接锁定了你的【第 ${hoverRes.hoveredIndex + 1} 张牌】！`,
+            id: `char_react_${Date.now()}`,
+            sender: 'character',
+            text: fallbackText,
             timestamp: Date.now(),
           },
-          {
-            id: `char_hover_${Date.now()}`,
-            sender: 'character',
-            text: `${hoverRes.hoverAction} ${hoverRes.hoverDialogue}`,
-            thought: hoverRes.innerThought,
-            timestamp: Date.now() + 1,
-          },
         ]);
-      } catch (err) {
-        console.warn('Proactive initiative LLM failed:', err);
-        setCharHoveredUserCardIdx(fallbackIdx);
-      } finally {
-        setIsLlmThinking(false);
       }
-    } else {
-      // Normal 70% flow: manual selection
-      setIsProactiveInitiative(false);
-      setUserTacticPhase('select_tactic');
+
+      // 5. Advance Turn to Character
+      startCharacterTurn(result.newToHand, result.newFromHand);
+    } finally {
+      setIsLlmThinking(false);
     }
   };
 
   // -------------------------------------------------------------
-  // Character's Turn Step 1: Player Selects Cards + Tactic (挑逗 vs 求饶)
+  // Start Character Turn (Observing and Hovering)
   // -------------------------------------------------------------
-  const handleToggleSelectUserCard = (idx: number) => {
-    if (currentTurn !== 'character' || userTacticPhase !== 'select_tactic' || winner) return;
-    setSelectedUserCardIndices((prev) =>
-      prev.includes(idx) ? prev.filter((i) => i !== idx) : [...prev, idx]
-    );
-  };
+  const startCharacterTurn = async (currentUserHand: Card[], currentCharHand: Card[]) => {
+    setCurrentTurn('character');
+    setSelectedCard(null);
+    setCharHoveredUserCardIdx(null);
 
-  const handleConfirmTactic = async (tactic: TacticDirection) => {
-    if (currentTurn !== 'character' || userTacticPhase !== 'select_tactic' || winner || isLlmThinking) return;
-
-    setCurrentTactic(tactic);
-    setUserTacticPhase('char_hovering');
     setIsLlmThinking(true);
-
     const activeConfig = loadLlmConfig();
-    const userHasGhost = userHand.some((c) => c.isGhost);
+    const fallbackIdx = Math.floor(Math.random() * currentUserHand.length);
+    const isProactive = Math.random() < 0.3;
+    setIsProactiveInitiative(isProactive);
 
     try {
       let hoverRes: {
@@ -737,25 +754,23 @@ export const GhostCardApp: React.FC<Props> = ({
           activeChar,
           currentEmotionSnapshot || { joy: 0.5, warmth: 0.5, sadness: 0.1, anger: 0.1, fear: 0.1, desire: 0.2 },
           {
-            userCardCount: userHand.length,
-            selectedIndices: selectedUserCardIndices,
-            tactic,
-            userHasGhost,
+            userCardCount: currentUserHand.length,
+            selectedIndices: [],
+            tactic: 'provoke',
+            userHasGhost: currentUserHand.some((c) => c.isGhost),
             userBluffHistory,
             turnCount,
+            isProactive,
           }
         );
       } else {
-        const targetIdx = selectedUserCardIndices.length > 0
-          ? selectedUserCardIndices[0]
-          : Math.floor(Math.random() * userHand.length);
         hoverRes = {
-          hoveredIndex: targetIdx,
-          hoverDialogue: tactic === 'provoke'
-            ? `“你越是挑逗我选这张，我手指就越想悬在这上面……你是不是心里打鼓呢？”`
-            : `“你这一副求饶的样子，该不会是故意引我避开吧？那我可要在这张上面停一停了。”`,
-          hoverAction: `*手指轻轻悬停在第 ${targetIdx + 1} 张牌上方，微眯起眼端详你的表情*`,
-          innerThought: `*先悬停在第 ${targetIdx + 1} 张牌上试探一下，看ta接下来怎么说……*`,
+          hoveredIndex: fallbackIdx,
+          hoverDialogue: isProactive
+            ? `“轮到我抽了！我直觉最准，先认准你这第 ${fallbackIdx + 1} 张牌！”`
+            : `“我的手指先悬停在这第 ${fallbackIdx + 1} 张上面看看……你准备怎么跟我出招？”`,
+          hoverAction: `*手指轻轻悬停在你的第 ${fallbackIdx + 1} 张牌上方，微眯起眼端详你的表情*`,
+          innerThought: `*端详牌面，看看ta是胸有成竹还是在虚张声势……*`,
           stepEmotionDelta: { warmth: 0.05 },
         };
       }
@@ -768,74 +783,46 @@ export const GhostCardApp: React.FC<Props> = ({
       setInGameChats((prev) => [
         ...prev,
         {
-          id: `tactic_event_${Date.now()}`,
-          sender: 'user',
-          text: `（主控标记了 ${selectedUserCardIndices.map((i) => `第${i + 1}张`).join('、') || '整手牌'}，并选择了【${tactic === 'provoke' ? '🔥 挑逗（让ta选）' : '🥺 求饶（不想让ta选）'}】）`,
-          timestamp: Date.now(),
-        },
-        {
           id: `char_hover_${Date.now()}`,
           sender: 'character',
           text: `${hoverRes.hoverAction} ${hoverRes.hoverDialogue}`,
           thought: hoverRes.innerThought,
-          timestamp: Date.now() + 1,
+          timestamp: Date.now(),
         },
       ]);
-
-      setUserTacticPhase('interject_speech');
+    } catch (err) {
+      console.warn('Char hover decision LLM failed:', err);
+      setCharHoveredUserCardIdx(fallbackIdx);
     } finally {
       setIsLlmThinking(false);
     }
   };
 
   // -------------------------------------------------------------
-  // Character's Turn Option: Shuffle / Swap Hand & Repeat Tactic
+  // Full State Transition: Character Draws with User's Speech (DRAW_CARD)
   // -------------------------------------------------------------
-  const handleSwapCardsAndRestartTactic = () => {
-    if (userTacticPhase !== 'interject_speech' || isLlmThinking) return;
-    const shuffled = shuffleHand(userHand);
-    setUserHand(shuffled);
-    setSelectedUserCardIndices([]);
-    setCharHoveredUserCardIdx(null);
-    setUserTacticPhase('select_tactic');
-    setCharacterSpeech(`“哎？把牌打乱重新洗了一遍呀？那我也重新看你出招～”`);
-    setCharacterAction(`*收回手指，耐心地等待你重新理牌*`);
-    setInGameChats((prev) => [
-      ...prev,
-      {
-        id: `user_shuffle_${Date.now()}`,
-        sender: 'user',
-        text: `（将手中的牌重新打乱洗牌，调整博弈策略）`,
-        timestamp: Date.now(),
-      },
-    ]);
-  };
+  const executeCharacterDrawWithSpeech = async (speechText: string) => {
+    if (currentTurn !== 'character' || winner || isLlmThinking || isPaused) return;
+    if (userHand.length === 0) return;
 
-  // -------------------------------------------------------------
-  // Character's Turn Step 2: Player Speaks -> LLM Draws Card & Gives Speech
-  // -------------------------------------------------------------
-  const handlePlayerSubmitInterjection = async (speechText: string) => {
-    if (currentTurn !== 'character' || userTacticPhase !== 'interject_speech' || winner || isLlmThinking || isPaused) return;
-    if (charHoveredUserCardIdx === null) return;
-
-    const chosenSpeech = speechText.trim() || (currentTactic === 'provoke' ? '“有种你就抽这张！”' : '“求求你别选这张！”');
-    setInterjectInputText('');
-    setUserTacticPhase('resolving_draw');
+    const hoveredIdx = charHoveredUserCardIdx !== null ? charHoveredUserCardIdx : 0;
+    const chosenSpeech = speechText.trim() || '“随你抽吧，我相信我的直觉～”';
     setIsLlmThinking(true);
 
-    // Record user's words
+    // Record user's speech
     setInGameChats((prev) => [
       ...prev,
       {
-        id: `user_interject_${Date.now()}`,
+        id: `user_speech_${Date.now()}`,
         sender: 'user',
-        text: `（看着${characterName}悬停的手指说）：${chosenSpeech}`,
+        text: `（对${characterName}说）：${chosenSpeech}`,
         timestamp: Date.now(),
       },
     ]);
 
     const activeConfig = loadLlmConfig();
     const userHasGhost = userHand.some((c) => c.isGhost);
+    const pointedIndices = selectedCard && selectedCard.zone === 'user' ? [selectedCard.index] : [];
 
     try {
       let finalDecision: {
@@ -853,29 +840,31 @@ export const GhostCardApp: React.FC<Props> = ({
           currentEmotionSnapshot || { joy: 0.5, warmth: 0.5, sadness: 0.1, anger: 0.1, fear: 0.1, desire: 0.2 },
           {
             userSpeech: chosenSpeech,
-            hoveredIndex: charHoveredUserCardIdx,
-            selectedIndices: selectedUserCardIndices,
-            tactic: currentTactic,
+            hoveredIndex: hoveredIdx,
+            selectedIndices: pointedIndices,
+            tactic: 'provoke',
             userCardCount: userHand.length,
             turnCount,
           }
         );
       } else {
+        const finalIdx = pointedIndices.length > 0 && Math.random() < 0.6
+          ? pointedIndices[0]
+          : hoveredIdx;
         finalDecision = {
-          finalSelectedIndex: charHoveredUserCardIdx,
-          switchedMind: false,
-          reactionDialogue: `“听你这么说，我反而更认准它了！就抽这张！” *指尖干脆利落地将牌抽出*`,
+          finalSelectedIndex: finalIdx,
+          switchedMind: finalIdx !== hoveredIdx,
+          reactionDialogue: `“听你这么说，我决定就抽这张了！” *指尖干脆利落地将牌抽出*`,
           innerThought: `*心一横，就相信自己的直觉了！*`,
           stepEmotionDelta: { warmth: 0.05 },
         };
       }
 
-      // Safe index bound
       const safeIdx = Math.max(0, Math.min(finalDecision.finalSelectedIndex, userHand.length - 1));
 
       if (soundEnabled) playCardDrawSound();
 
-      // Execute mechanical draw
+      // Mechanical draw
       const result = executeDrawCard(userHand, charHand, safeIdx, 'character');
       setUserHand(result.newFromHand);
       setCharHand(result.newToHand);
@@ -892,7 +881,7 @@ export const GhostCardApp: React.FC<Props> = ({
       // Record bluff history
       const bluffItem: UserBluffHistoryItem = {
         turn: turnCount,
-        userSaid: `${currentTactic === 'provoke' ? '[挑逗]' : '[求饶]'} ${chosenSpeech}`,
+        userSaid: chosenSpeech,
         charBelieved: !finalDecision.switchedMind,
         actualResult: result.isGhost ? '抽到鬼牌' : result.pairedCard ? '抽到安全牌并成对' : '抽到安全牌',
         isLie: userHasGhost,
@@ -900,7 +889,6 @@ export const GhostCardApp: React.FC<Props> = ({
       };
       setUserBluffHistory((prev) => [...prev, bluffItem]);
 
-      // Update character speech & thought
       setCharacterSpeech(finalDecision.reactionDialogue);
       setCharacterInnerThought(finalDecision.innerThought);
 
@@ -957,8 +945,7 @@ export const GhostCardApp: React.FC<Props> = ({
       // Next Turn
       setTurnCount((prev) => prev + 1);
       setCurrentTurn('user');
-      setUserTacticPhase('select_tactic');
-      setSelectedUserCardIndices([]);
+      setSelectedCard(null);
       setCharHoveredUserCardIdx(null);
     } finally {
       setIsLlmThinking(false);
@@ -1115,19 +1102,20 @@ export const GhostCardApp: React.FC<Props> = ({
   };
 
   // -------------------------------------------------------------
-  // Live Chat Input Send
+  // Casual In-Game Banter / Chat without Advancing Turn
   // -------------------------------------------------------------
-  const handleSendChat = async () => {
-    if (!chatInputText.trim() || isLlmThinking) return;
-    const text = chatInputText.trim();
-    setChatInputText('');
+  const executeCasualInGameChat = async (text?: string, overrideSticker?: Sticker) => {
+    const chatText = overrideSticker ? `[表情: ${overrideSticker.name}]` : (text || '').trim();
+    if (!chatText) return;
 
     setInGameChats((prev) => [
       ...prev,
       {
         id: `user_chat_${Date.now()}`,
         sender: 'user',
-        text,
+        text: chatText,
+        stickerUrl: overrideSticker?.url,
+        stickerName: overrideSticker?.name,
         timestamp: Date.now(),
       },
     ]);
@@ -1141,7 +1129,7 @@ export const GhostCardApp: React.FC<Props> = ({
 你的身份：${activeChar.name}
 核心特质：${activeChar.core.values.join('、')}
 语言风格：${activeChar.core.speech_filter}
-当前局势：已进行 ${turnCount} 轮，你的手牌 ${charHand.length} 张，主控手牌 ${userHand.length} 张。
+当前局势：已进行 ${turnCount} 轮，你的手牌 ${charHand.length} 张，主控手牌 ${userHand.length} 张。当前回合：${currentTurn === 'user' ? '主控回合' : '你的回合'}。
 请以第一人称对主控的话做出极具真情实感、生动调侃、或心虚/得意的心理战回应。包含动作描写和台词。`;
 
         const messages = [
@@ -1150,7 +1138,7 @@ export const GhostCardApp: React.FC<Props> = ({
             role: c.sender === 'user' ? ('user' as const) : ('assistant' as const),
             content: c.text,
           })),
-          { role: 'user' as const, content: `（在牌桌前对你说）：${text}` },
+          { role: 'user' as const, content: overrideSticker ? `（在牌桌前向你发送了表情包【${overrideSticker.name}】）` : `（在牌桌前对你说）：${chatText}` },
         ];
 
         const reply = await callLlm(activeConfig, messages);
@@ -1182,6 +1170,55 @@ export const GhostCardApp: React.FC<Props> = ({
     }
   };
 
+  const handleSendStickerInGame = (sticker: Sticker) => {
+    executeCasualInGameChat(undefined, sticker);
+  };
+
+  // -------------------------------------------------------------
+  // Main Natural Language Intent Resolution Controller
+  // -------------------------------------------------------------
+  const handleSendChat = async () => {
+    if (!chatInputText.trim() || isLlmThinking) return;
+    const text = chatInputText.trim();
+    setChatInputText('');
+
+    // 1. Shuffling intent
+    if (/洗牌|打乱|重新理|洗下手|乱序/.test(text)) {
+      handleShuffleUserHand(text);
+      return;
+    }
+
+    // 2. User Turn (Drawing or talking)
+    if (currentTurn === 'user') {
+      const isDrawWord = /(抽|拿|要|就这|就它|翻牌|选这|抓|来一张|选第|拿第|抽第|右边|左边|中间|抽它|要它|就这一张|拿过来|决定了|开牌|第一张|第二张|第三张|第四张|第五张|刚才那张|拿走这个|选这张|抽这张|我就要|抽这个)/.test(text);
+      const isConfirmation = /(好|行|确认|就这个|就这张|来吧|冲|看牌|同意|可以|就它了)/.test(text) && selectedCard?.zone === 'char';
+
+      if (isDrawWord || isConfirmation) {
+        let targetIdx = selectedCard?.zone === 'char' ? selectedCard.index : (hoveredCharCardIdx ?? 0);
+        if (/第1张|第一张|最左/.test(text)) targetIdx = 0;
+        else if (/第2张|第二张/.test(text) && charHand.length > 1) targetIdx = 1;
+        else if (/第3张|第三张/.test(text) && charHand.length > 2) targetIdx = 2;
+        else if (/第4张|第四张/.test(text) && charHand.length > 3) targetIdx = 3;
+        else if (/第5张|第五张/.test(text) && charHand.length > 4) targetIdx = 4;
+        else if (/第6张|第六张/.test(text) && charHand.length > 5) targetIdx = 5;
+        else if (/最右|右边/.test(text)) targetIdx = charHand.length - 1;
+        else if (/中间/.test(text)) targetIdx = Math.floor(charHand.length / 2);
+
+        await executeUserDrawCard(targetIdx, text);
+        return;
+      }
+    }
+
+    // 3. Character Turn (Psychological Interjection / Resolution)
+    if (currentTurn === 'character') {
+      await executeCharacterDrawWithSpeech(text);
+      return;
+    }
+
+    // 4. Otherwise, casual in-game talk
+    await executeCasualInGameChat(text);
+  };
+
   // Surrender Handler
   const handleSurrender = () => {
     setShowSurrenderModal(false);
@@ -1190,7 +1227,7 @@ export const GhostCardApp: React.FC<Props> = ({
 
   // Load Match History
   const openHistoryModal = async () => {
-    const list = await idbLoadGameMatches(currentCharacterId);
+    const list = await idbLoadGameMatches(selectedOpponentId);
     const ghostList = list.filter((m) => m.gameType === 'ghost_card');
     setMatchHistoryList(ghostList);
     setShowHistoryModal(true);
@@ -1199,16 +1236,25 @@ export const GhostCardApp: React.FC<Props> = ({
   return (
     <div id="ghost-card-app-container" className="flex flex-col h-full bg-stone-950 text-stone-100 select-none overflow-hidden font-sans">
       {/* 1. Header Navigation Bar */}
-      <div className="flex items-center justify-between px-3 py-2 bg-stone-900 border-b border-stone-800 shrink-0">
+      <div className="flex items-center justify-between px-2.5 py-1.5 bg-stone-900 border-b border-stone-800 shrink-0">
         <div className="flex items-center space-x-2">
-          <div className="w-8 h-8 rounded-full overflow-hidden border border-amber-500/50 bg-stone-800 flex items-center justify-center">
-            {charAvatar ? (
-              <img src={charAvatar} alt={characterName} className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-sm font-bold text-amber-400">🐾</span>
-            )}
-          </div>
-          <div>
+          {onExit && (
+            <button
+              onClick={onExit}
+              className="p-1 rounded-lg text-stone-400 hover:text-stone-100 hover:bg-stone-800 transition active:scale-95"
+              title="返回大厅"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+          )}
+
+          <GameCharacterSelector
+            selectedCharacterId={selectedOpponentId}
+            onSelectCharacter={handleSwitchOpponent}
+            compact={true}
+          />
+
+          <div className="hidden sm:block">
             <div className="flex items-center space-x-1.5">
               <span className="text-xs font-bold text-stone-200">{characterName}</span>
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30">
@@ -1216,7 +1262,7 @@ export const GhostCardApp: React.FC<Props> = ({
               </span>
             </div>
             <div className="text-[10px] text-stone-400">
-              第 {turnCount} 轮 · {currentTurn === 'user' ? '主控抽牌（左右滑动选牌）' : `角色抽牌（主控心理拉扯）`}
+              第 {turnCount} 轮 · {currentTurn === 'user' ? '主控抽牌' : `角色抽牌`}
             </div>
           </div>
         </div>
@@ -1229,7 +1275,7 @@ export const GhostCardApp: React.FC<Props> = ({
             className="p-1.5 rounded-lg text-stone-400 hover:text-stone-200 hover:bg-stone-800"
             title={soundEnabled ? '音效开启' : '音效静音'}
           >
-            {soundEnabled ? <Volume2 className="w-4 h-4 text-amber-400" /> : <VolumeX className="w-4 h-4" />}
+            {soundEnabled ? <Volume2 className="w-4 h-4 text-amber-400" /> : <VolumeX className="w-4 h-4 text-stone-500" />}
           </button>
           <button
             id="ghost-card-rules-btn"
@@ -1266,7 +1312,7 @@ export const GhostCardApp: React.FC<Props> = ({
         </div>
       </div>
 
-      {/* 2. Character Zone (Top Arena: Face-down Cards in Fan / Arc with Interactive Slide / Hover) */}
+      {/* 2. Character Zone (Top Arena: Face-down Cards in Fan / Arc with Interactive Slide / Focus) */}
       <div className="relative pt-3 pb-2 px-3 bg-gradient-to-b from-stone-900/80 to-stone-950/40 border-b border-stone-800/70 shrink-0">
         <div className="flex items-center justify-between text-xs text-stone-400 mb-1.5">
           <div className="flex items-center space-x-1.5">
@@ -1278,7 +1324,7 @@ export const GhostCardApp: React.FC<Props> = ({
           {currentTurn === 'user' && !winner && (
             <span className="text-[11px] text-amber-400 flex items-center space-x-1 animate-pulse font-medium">
               <Sparkle className="w-3 h-3 text-amber-300" />
-              <span>左右滑动手指试探 · 点击抽牌</span>
+              <span>{selectedCard?.zone === 'char' ? '已关注此牌 · 可打字交流或直接抽取' : '滑动悬停试探 · 点击关注'}</span>
             </span>
           )}
         </div>
@@ -1299,76 +1345,84 @@ export const GhostCardApp: React.FC<Props> = ({
               }
             }
           }}
-          className="flex items-center justify-center py-3 min-h-[105px] overflow-x-auto touch-none select-none"
+          className="flex items-center justify-center py-2 min-h-[95px] overflow-x-auto touch-none select-none relative"
         >
           {charHand.length === 0 ? (
-            <div className="text-xs text-emerald-400 py-4 flex items-center space-x-1">
+            <div className="text-xs text-emerald-400 py-3 flex items-center space-x-1">
               <CheckCircle2 className="w-4 h-4" />
               <span>手牌已全部清空！</span>
             </div>
           ) : (
-            <div className="flex items-center justify-center -space-x-3 sm:-space-x-4 px-4 py-2">
+            <div className="flex items-center justify-center -space-x-3 sm:-space-x-4 px-4 py-1">
               {charHand.map((card, idx) => {
                 const isHovered = hoveredCharCardIdx === idx;
-                const canDraw = currentTurn === 'user' && !isLlmThinking && !winner;
+                const isSelected = selectedCard?.zone === 'char' && selectedCard.index === idx;
                 return (
-                  <button
+                  <div
                     key={card.id || idx}
                     id={`char-card-${idx}`}
-                    disabled={!canDraw}
                     onMouseEnter={() => handleHoverCharCard(idx)}
-                    onClick={() => handleUserDrawCard(idx)}
-                    className={`relative w-13 h-22 sm:w-15 sm:h-24 rounded-xl border-2 transition-all duration-200 flex flex-col items-center justify-between p-1.5 select-none ${
-                      canDraw ? 'cursor-pointer' : 'cursor-default opacity-85'
-                    } ${
-                      isHovered && canDraw
-                        ? 'bg-gradient-to-b from-stone-700 via-stone-800 to-amber-950/60 border-amber-300 ring-4 ring-amber-400/70 shadow-[0_0_25px_rgba(251,191,36,0.65)] -translate-y-5 scale-110 z-30 animate-pulse'
+                    onClick={() => handleSelectCard('char', idx, card)}
+                    className={`relative w-12 h-20 sm:w-14 sm:h-22 rounded-xl border-2 transition-all duration-200 flex flex-col items-center justify-between p-1.5 select-none cursor-pointer ${
+                      isSelected
+                        ? 'bg-gradient-to-b from-amber-700 via-stone-800 to-amber-950 border-amber-300 ring-4 ring-amber-400 shadow-[0_0_25px_rgba(251,191,36,0.8)] -translate-y-5 scale-110 z-30'
+                        : isHovered
+                        ? 'bg-gradient-to-b from-stone-700 via-stone-800 to-amber-950/60 border-amber-400/80 ring-2 ring-amber-400/50 shadow-lg -translate-y-3 scale-105 z-20'
                         : 'bg-gradient-to-b from-stone-800 to-stone-900 border-stone-700 shadow-md z-10'
                     }`}
                   >
                     {/* Hover indicator badge */}
-                    {isHovered && canDraw && (
-                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap bg-amber-400 text-stone-950 font-extrabold text-[9px] px-1.5 py-0.2 rounded-full shadow-lg border border-amber-200 animate-bounce flex items-center space-x-0.5">
-                        <span>✨ 试探中</span>
+                    {isHovered && !isSelected && (
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap bg-amber-500 text-stone-950 font-bold text-[9px] px-1.5 py-0.2 rounded-full shadow-lg animate-bounce">
+                        <span>试探中</span>
+                      </div>
+                    )}
+                    {isSelected && (
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap bg-amber-400 text-stone-950 font-extrabold text-[9px] px-2 py-0.5 rounded-full shadow-lg border border-amber-200 animate-pulse">
+                        <span>✦ 当前关注</span>
                       </div>
                     )}
 
                     <div className="text-[9px] text-stone-400 font-mono self-start">🐾</div>
-                    <div className="flex flex-col items-center">
+                    <div className="flex flex-col items-center justify-center">
                       <span className="text-base sm:text-lg">🐶</span>
-                      <span className="text-[8px] text-stone-400 font-mono tracking-tight">第{idx + 1}张</span>
+                      <span className="text-[9px] text-amber-500/80 font-mono tracking-wider">✦ ✦</span>
                     </div>
                     <div className="text-[9px] text-stone-500 font-mono self-end">🐾</div>
-                  </button>
+                  </div>
                 );
               })}
             </div>
           )}
         </div>
 
-        {/* User draw confirm button when a card is actively hovered */}
-        {currentTurn === 'user' && hoveredCharCardIdx !== null && !winner && (
-          <div className="mt-1 flex justify-center">
-            <button
-              id="ghost-card-confirm-draw-btn"
-              onClick={() => handleUserDrawCard(hoveredCharCardIdx)}
-              className="py-1.5 px-4 rounded-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-stone-950 font-bold text-xs shadow-[0_0_15px_rgba(245,158,11,0.4)] flex items-center space-x-1.5 transition-all transform hover:scale-105"
-            >
-              <Pointer className="w-3.5 h-3.5" />
-              <span>👉 我想抽这张 (第 {hoveredCharCardIdx + 1} 张)</span>
-            </button>
+        {/* Real-time floating reaction bubble when user hovers or focuses on a card */}
+        {hoveredCharCardIdx !== null && charHand[hoveredCharCardIdx] && !winner && (
+          <div className="mt-1 mx-2 p-2 bg-stone-900/90 border border-amber-500/20 rounded-xl backdrop-blur-sm shadow-md transition-all">
+            <div className="flex items-center space-x-1 text-[11px] text-amber-300 font-medium mb-0.5">
+              <Sparkles className="w-3 h-3 text-amber-400 shrink-0" />
+              <span>{characterName} 的微反应 · 指尖悬停</span>
+            </div>
+            <div className="text-xs text-stone-200 italic leading-snug">
+              {characterSpeech || '……（目光微微晃动，神色莫测）'}
+            </div>
+            {characterAction && (
+              <div className="text-[10px] text-stone-400 mt-0.5">
+                {characterAction}
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* 3. Middle Area: Stream Dialogue, Inner Thought & Psychological Choice Option Bubble */}
+      {/* 3. Middle Area: Discard Pile & Live Dialogue Log */}
       <div className="flex-1 flex flex-col min-h-0 bg-stone-950/90 relative">
-        {/* Dynamic Discard Pile Indicator */}
-        <div className="px-3 py-1.5 bg-stone-900/50 border-b border-stone-800/40 flex items-center justify-between text-[11px] text-stone-400 shrink-0">
+        {/* Discard Pile Status */}
+        <div className="px-3 py-1 bg-stone-900/60 border-b border-stone-800/40 flex items-center justify-between text-[11px] text-stone-400 shrink-0">
           <div className="flex items-center space-x-2">
             <span className="flex items-center space-x-1 text-stone-300">
-              <Layers className="w-3.5 h-3.5 text-amber-400" />
-              <span>已消除弃牌堆:</span>
+              <Layers className="w-3 h-3 text-amber-400" />
+              <span>弃牌堆:</span>
             </span>
             <span className="text-amber-400 font-mono font-semibold">{discardPile.length} 对</span>
           </div>
@@ -1382,207 +1436,101 @@ export const GhostCardApp: React.FC<Props> = ({
           )}
         </div>
 
-        {/* Scrollable Timeline Stream */}
-        <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-3 space-y-2.5">
-          {inGameChats.map((msg) => {
-            const isChar = msg.sender === 'character';
-            const isSys = msg.sender === 'system';
-            return (
-              <div
-                key={msg.id}
-                className={`flex flex-col ${
-                  isSys ? 'items-center my-1' : isChar ? 'items-start' : 'items-end'
-                }`}
-              >
-                {isSys ? (
-                  <div className="text-[10px] text-stone-400 bg-stone-900/80 px-2.5 py-1 rounded-full border border-stone-800/80 text-center max-w-[90%]">
-                    {msg.text}
-                  </div>
-                ) : isChar ? (
-                  <div className="flex items-start space-x-2 max-w-[85%]">
-                    <div className="w-6 h-6 rounded-full overflow-hidden shrink-0 mt-0.5 border border-stone-700">
-                      {charAvatar ? (
-                        <img src={charAvatar} alt="" className="w-full h-full object-cover" />
-                      ) : (
-                        <span className="text-xs">🐾</span>
-                      )}
+        {/* Scrollable Compact Timeline Stream */}
+        <div className="flex-1 min-h-0 p-2 overflow-hidden flex flex-col justify-end">
+          <div
+            ref={chatScrollRef}
+            className="h-full overflow-y-auto p-2.5 space-y-2 bg-stone-900/70 rounded-xl border border-stone-800/80 shadow-inner"
+          >
+            {inGameChats.map((msg) => {
+              const isChar = msg.sender === 'character';
+              const isSys = msg.sender === 'system';
+              return (
+                <div
+                  key={msg.id}
+                  className={`flex flex-col ${
+                    isSys ? 'items-center my-0.5' : isChar ? 'items-start' : 'items-end'
+                  }`}
+                >
+                  {isSys ? (
+                    <div className="text-[10px] text-stone-400 bg-stone-900/90 px-2 py-0.5 rounded-full border border-stone-800 text-center max-w-[90%]">
+                      {msg.text}
                     </div>
-                    <div className="flex flex-col space-y-1">
-                      <div className="bg-stone-900 border border-stone-800 text-stone-200 text-xs px-3 py-2 rounded-2xl rounded-tl-none shadow-sm leading-relaxed">
-                        {msg.text}
+                  ) : isChar ? (
+                    <div className="flex items-start space-x-1.5 max-w-[85%]">
+                      <div className="w-5 h-5 rounded-full overflow-hidden shrink-0 mt-0.5 border border-stone-700">
+                        {charAvatar ? (
+                          <img src={charAvatar} alt="" className="w-full h-full object-cover" />
+                        ) : (
+                          <span className="text-[10px]">🐾</span>
+                        )}
                       </div>
-                      {/* Character Inner Thought */}
-                      {msg.thought && (
-                        <div className="text-[11px] text-amber-400/80 italic bg-amber-950/20 border border-amber-800/30 px-2.5 py-1 rounded-xl">
-                          💭 {msg.thought}
+                      <div className="flex flex-col space-y-0.5">
+                        <div className="bg-stone-900 border border-stone-800 text-stone-200 text-xs px-2.5 py-1.5 rounded-2xl rounded-tl-none shadow-sm leading-relaxed">
+                          {msg.stickerUrl && (
+                            <img
+                              src={msg.stickerUrl}
+                              alt={msg.stickerName || '表情包'}
+                              className="w-20 h-20 object-contain rounded-lg mb-1 border border-stone-700/50 bg-stone-950/40 p-0.5"
+                            />
+                          )}
+                          <div>{msg.text}</div>
                         </div>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="bg-amber-600 text-white text-xs px-3 py-2 rounded-2xl rounded-tr-none shadow-sm max-w-[85%] leading-relaxed">
-                    {msg.text}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* LLM Thinking indicator */}
-          {isLlmThinking && (
-            <div className="flex items-center space-x-2 text-stone-400 text-xs py-1">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-amber-400" />
-              <span>{characterName} 正在凝视你的微表情并进行心理战推演……</span>
-            </div>
-          )}
-        </div>
-
-        {/* ------------------------------------------------------------- */}
-        {/* CHARACTER TURN PSYCHOLOGICAL BLUFFING CONTROLLER */}
-        {/* ------------------------------------------------------------- */}
-        {currentTurn === 'character' && !winner && (
-          <div className="p-3 bg-stone-900/95 border-t border-amber-500/30 shadow-2xl shrink-0 backdrop-blur-md">
-            {/* Phase 1: Player selects cards + Tactic direction */}
-            {userTacticPhase === 'select_tactic' && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-xs text-amber-300 font-semibold">
-                  <span className="flex items-center space-x-1">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    <span>第 1 步：在下方手牌点击选中 1~多张，然后选择大方向：</span>
-                  </span>
-                  <span className="text-[10px] text-stone-400">
-                    已选: {selectedUserCardIndices.length > 0 ? selectedUserCardIndices.map((i) => `第${i + 1}张`).join(',') : '整把手牌'}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    id="tactic-provoke-btn"
-                    disabled={isLlmThinking}
-                    onClick={() => handleConfirmTactic('provoke')}
-                    className="p-2.5 rounded-xl bg-gradient-to-r from-rose-950/70 to-rose-900/50 hover:from-rose-900 hover:to-rose-800 border border-rose-500/60 text-xs text-rose-200 transition-all shadow flex flex-col items-center justify-center space-y-0.5 group"
-                  >
-                    <div className="flex items-center space-x-1 font-bold text-rose-300">
-                      <Flame className="w-3.5 h-3.5 text-rose-400 group-hover:scale-110 transition-transform" />
-                      <span>🔥 【挑逗】让它选</span>
-                    </div>
-                    <span className="text-[10px] text-stone-300">挑衅诱导 · “有种你选这几张”</span>
-                  </button>
-
-                  <button
-                    id="tactic-plead-btn"
-                    disabled={isLlmThinking}
-                    onClick={() => handleConfirmTactic('plead')}
-                    className="p-2.5 rounded-xl bg-gradient-to-r from-blue-950/70 to-blue-900/50 hover:from-blue-900 hover:to-blue-800 border border-blue-500/60 text-xs text-blue-200 transition-all shadow flex flex-col items-center justify-center space-y-0.5 group"
-                  >
-                    <div className="flex items-center space-x-1 font-bold text-blue-300">
-                      <Shield className="w-3.5 h-3.5 text-blue-400 group-hover:scale-110 transition-transform" />
-                      <span>🥺 【求饶】不想让它选</span>
-                    </div>
-                    <span className="text-[10px] text-stone-300">慌张掩护 · “求求你别碰这几张”</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Phase 2: AI is Hovering on a card + Player Interjects Speech or Swaps */}
-            {userTacticPhase === 'interject_speech' && charHoveredUserCardIdx !== null && (
-              <div className="space-y-2.5">
-                <div className="flex items-center justify-between text-xs font-semibold">
-                  {isProactiveInitiative ? (
-                    <div className="flex items-center space-x-1.5 text-amber-300 font-bold animate-pulse">
-                      <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                      <span>⚡【先发制人】{characterName} 直觉锁定你的【第 {charHoveredUserCardIdx + 1} 张牌】！</span>
+                        {msg.thought && (
+                          <div className="text-[10px] text-amber-400/80 italic bg-amber-950/20 border border-amber-800/30 px-2 py-0.5 rounded-lg">
+                            💭 {msg.thought}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ) : (
-                    <div className="flex items-center space-x-1.5 text-rose-400 animate-pulse">
-                      <Pointer className="w-3.5 h-3.5" />
-                      <span>{characterName} 正在悬停你的【第 {charHoveredUserCardIdx + 1} 张牌】！</span>
+                    <div className="bg-amber-600 text-white text-xs px-2.5 py-1.5 rounded-2xl rounded-tr-none shadow-sm max-w-[85%] leading-relaxed flex flex-col items-end">
+                      {msg.stickerUrl && (
+                        <img
+                          src={msg.stickerUrl}
+                          alt={msg.stickerName || '表情包'}
+                          className="w-20 h-20 object-contain rounded-lg mb-1 border border-amber-400/40 bg-black/20 p-0.5"
+                        />
+                      )}
+                      <div>{msg.text}</div>
                     </div>
                   )}
-                  <button
-                    id="ghost-card-swap-cards-btn"
-                    onClick={handleSwapCardsAndRestartTactic}
-                    className="text-[11px] px-2 py-0.5 rounded-lg bg-stone-800 hover:bg-stone-700 border border-stone-600 text-stone-300 flex items-center space-x-1 transition"
-                  >
-                    <Shuffle className="w-3 h-3 text-amber-400" />
-                    <span>🔀 换牌打乱重选</span>
-                  </button>
                 </div>
+              );
+            })}
 
-                {/* Quick Speech Bubbles for Language Tug-of-war */}
-                <div className="grid grid-cols-2 gap-1.5">
-                  {(isProactiveInitiative
-                    ? [
-                        '“你直觉这么准？有种就真抽它！”',
-                        '“别碰！那张是我的底牌！”',
-                        '“抽吧抽吧，抽完你可别后悔～”',
-                        '“算你狠，不过你真敢拿吗？”',
-                      ]
-                    : currentTactic === 'provoke'
-                    ? [
-                        '“有胆你就真抽这张，看谁笑到最后～”',
-                        '“我就知道你会选这张，快抽吧！”',
-                      ]
-                    : [
-                        '“真的求你了别选这张，我认输还不行嘛！”',
-                        '“……你手下留情，选别的牌好不好？”',
-                      ]
-                  ).map((phrase, pIdx) => (
-                    <button
-                      key={pIdx}
-                      disabled={isLlmThinking}
-                      onClick={() => handlePlayerSubmitInterjection(phrase)}
-                      className="p-1.5 rounded-lg bg-stone-800/80 hover:bg-stone-700 border border-stone-700 text-[11px] text-stone-300 text-left truncate hover:border-amber-400 transition"
-                      title={phrase}
-                    >
-                      {phrase}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Custom speech input box */}
-                <div className="flex items-center space-x-2">
-                  <input
-                    id="interject-speech-input"
-                    type="text"
-                    value={interjectInputText}
-                    onChange={(e) => setInterjectInputText(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handlePlayerSubmitInterjection(interjectInputText)}
-                    placeholder={
-                      isProactiveInitiative
-                        ? `进行语言拉扯（向角色施压/示弱/虚张声势）……`
-                        : `输入心理战施压/真诚拉扯话术（或直接点击确认）……`
-                    }
-                    className="flex-1 bg-stone-950 border border-stone-700 rounded-xl px-3 py-1.5 text-xs text-stone-200 placeholder-stone-500 focus:outline-none focus:border-amber-500"
-                  />
-                  <button
-                    id="interject-speech-submit-btn"
-                    disabled={isLlmThinking}
-                    onClick={() => handlePlayerSubmitInterjection(interjectInputText)}
-                    className="py-1.5 px-3 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs shadow transition shrink-0"
-                  >
-                    {isProactiveInitiative ? '语言拉扯并确认' : '确认让ta抽'}
-                  </button>
-                </div>
+            {isLlmThinking && (
+              <div className="flex items-center space-x-2 text-stone-400 text-xs py-0.5">
+                <Loader2 className="w-3 h-3 animate-spin text-amber-400" />
+                <span>{characterName} 正在推演心理博弈……</span>
               </div>
             )}
           </div>
-        )}
+        </div>
       </div>
 
-      {/* 4. Player Hand Zone (Bottom Arena: Face-up Cards with Ranks, Multi-select & Hover Targeting) */}
+      {/* 4. Player Hand Zone (Bottom Arena: Face-up Cards with Ranks & Free Card Selection) */}
       <div className="p-3 bg-stone-900 border-t border-stone-800 shrink-0">
         <div className="flex items-center justify-between text-xs text-stone-400 mb-1.5">
-          <div className="flex items-center space-x-1.5">
-            <span className="font-semibold text-stone-200">主控手牌 (你自己)</span>
+          <div className="flex items-center space-x-2">
+            <span className="font-semibold text-stone-200">主控手牌</span>
             <span className="text-[10px] px-1.5 rounded-full bg-stone-800 text-stone-300 font-mono">
               {userHand.length} 张
             </span>
+            <button
+              id="ghost-card-shuffle-hand-btn"
+              disabled={isLlmThinking || !!winner}
+              onClick={() => handleShuffleUserHand()}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-stone-800 hover:bg-stone-700 border border-stone-700 text-stone-300 flex items-center space-x-1 transition"
+              title="洗乱手中卡牌次序"
+            >
+              <Shuffle className="w-2.5 h-2.5 text-amber-400" />
+              <span>洗牌</span>
+            </button>
           </div>
           {userHand.some((c) => c.isGhost) && (
-            <span className="text-[11px] text-amber-400 font-medium flex items-center space-x-1 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/30 animate-pulse">
-              <span>🐾 鬼牌在你手中！</span>
+            <span className="text-[11px] text-amber-400 font-medium flex items-center space-x-1 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/30">
+              <span>🐾 鬼牌在你手中</span>
             </span>
           )}
         </div>
@@ -1598,25 +1546,21 @@ export const GhostCardApp: React.FC<Props> = ({
             <div className="flex items-center justify-center -space-x-3 px-2 py-1">
               {userHand.map((card, idx) => {
                 const isGhost = card.isGhost;
-                const isSelectedForTactic = selectedUserCardIndices.includes(idx);
+                const isSelected = selectedCard?.zone === 'user' && selectedCard.index === idx;
                 const isAiHovered = currentTurn === 'character' && charHoveredUserCardIdx === idx;
 
                 return (
                   <div
                     key={card.id || idx}
                     id={`user-card-${idx}`}
-                    onClick={() => handleToggleSelectUserCard(idx)}
-                    className={`relative w-13 h-22 sm:w-15 sm:h-24 rounded-xl border-2 transition-all duration-200 flex flex-col items-center justify-between p-1.5 select-none ${
-                      currentTurn === 'character' && userTacticPhase === 'select_tactic'
-                        ? 'cursor-pointer hover:-translate-y-3'
-                        : ''
-                    } ${
+                    onClick={() => handleSelectCard('user', idx, card)}
+                    className={`relative w-13 h-22 sm:w-15 sm:h-24 rounded-xl border-2 transition-all duration-200 flex flex-col items-center justify-between p-1.5 select-none cursor-pointer ${
                       isAiHovered
                         ? isProactiveInitiative
                           ? 'border-amber-300 ring-4 ring-amber-400/90 shadow-[0_0_35px_rgba(251,191,36,0.95)] -translate-y-5 scale-110 z-30 bg-gradient-to-b from-amber-950/80 via-stone-900 to-amber-950 text-stone-100 animate-pulse'
                           : 'border-rose-400 ring-4 ring-rose-500/80 shadow-[0_0_25px_rgba(244,63,94,0.7)] -translate-y-4 scale-105 z-30 bg-gradient-to-b from-rose-950/70 to-stone-900 text-stone-100 animate-pulse'
-                        : isSelectedForTactic
-                        ? 'border-amber-400 ring-2 ring-amber-400/60 -translate-y-2 z-20 bg-amber-950/30'
+                        : isSelected
+                        ? 'border-amber-400 ring-3 ring-amber-400/70 -translate-y-3 scale-105 z-20 bg-amber-950/30'
                         : isGhost
                         ? 'bg-gradient-to-b from-purple-950 via-stone-900 to-amber-950/80 border-amber-400 shadow-amber-500/30 z-10'
                         : 'bg-gradient-to-b from-stone-100 to-stone-200 text-stone-900 border-stone-300'
@@ -1634,18 +1578,18 @@ export const GhostCardApp: React.FC<Props> = ({
                         {isProactiveInitiative ? (
                           <>
                             <Sparkles className="w-2.5 h-2.5 text-stone-950" />
-                            <span>⚡ 直觉先发锁定！</span>
+                            <span>⚡ 直觉锁定！</span>
                           </>
                         ) : (
-                          <span>👇 {characterName} 悬停中</span>
+                          <span>👇 正在关注</span>
                         )}
                       </div>
                     )}
 
-                    {/* Selected checkbox for tactic */}
-                    {isSelectedForTactic && !isAiHovered && (
-                      <div className="absolute -top-2 -right-1 bg-amber-500 text-stone-950 rounded-full w-4 h-4 flex items-center justify-center text-[10px] font-bold shadow">
-                        ✓
+                    {/* Selected Badge */}
+                    {isSelected && !isAiHovered && (
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-amber-400 text-stone-950 font-bold text-[9px] px-1.5 py-0.2 rounded-full shadow">
+                        选中
                       </div>
                     )}
 
@@ -1684,7 +1628,15 @@ export const GhostCardApp: React.FC<Props> = ({
           )}
         </div>
 
-        {/* Live Chat Input Bar */}
+        {/* In-Game Sticker Selection Bar */}
+        <InGameStickerBar
+          currentCharacterId={selectedOpponentId}
+          characterName={characterName}
+          onSelectSticker={handleSendStickerInGame}
+          disabled={isLlmThinking || !!winner}
+        />
+
+        {/* Live Chat Input Bar (Always Active) */}
         <div className="mt-2 flex items-center space-x-2">
           <input
             id="ghost-card-chat-input"
@@ -1692,7 +1644,13 @@ export const GhostCardApp: React.FC<Props> = ({
             value={chatInputText}
             onChange={(e) => setChatInputText(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && handleSendChat()}
-            placeholder={`对 ${characterName} 说话或进行闲聊试探……`}
+            placeholder={
+              selectedCard?.zone === 'char'
+                ? `已关注对方这张牌 · 可打字交流或直接输入“抽这张”……`
+                : selectedCard?.zone === 'user'
+                ? `已关注自己这张牌 · 可说话互动或点击“洗牌”……`
+                : `对 ${characterName} 说话、试探或输入“抽牌/洗牌”……`
+            }
             className="flex-1 bg-stone-950 border border-stone-800 rounded-xl px-3 py-1.5 text-xs text-stone-200 placeholder-stone-500 focus:outline-none focus:border-amber-500"
           />
           <button
@@ -1844,11 +1802,11 @@ export const GhostCardApp: React.FC<Props> = ({
             </div>
             <div className="text-xs text-stone-300 space-y-2 leading-relaxed">
               <p>• <strong>紧凑牌组</strong>：共 17 张牌（8 对普通配对牌 + 1 张鬼牌 🐾）。开局自动消除起手对子。</p>
-              <p>• <strong>主控抽牌（滑动试探）</strong>：手指在角色展开的手牌上左右滑动，轮廓闪烁光效，实时查看角色对每张牌的微表情与心理防线，选中后点击确认抽牌。</p>
-              <p>• <strong>角色抽牌（挑逗与求饶博弈）</strong>：
-                <br />1. 主控选择手牌并确立大方向：<strong>【挑逗（让它选）】</strong> 或 <strong>【求饶（不想让它选）】</strong>。
-                <br />2. 角色进行心理推演，将手指悬停在某张牌上试探。
-                <br />3. 主控可输入言语施压/心理战拉扯，或点击<strong>【换牌重新洗牌】</strong>；角色做出最终抽牌决断并发表感言！
+              <p>• <strong>主控抽牌（滑动试探与自然表达）</strong>：手指在角色展开的手牌上左右滑动或点击关注，实时感知角色微表情与心理防线，在输入框自然输入“抽这张/就它”或直接交流即可抽取。</p>
+              <p>• <strong>角色抽牌（实时心理拉扯与自由洗牌）</strong>：
+                <br />1. 角色端详主控手牌并将手指悬停在某张牌上方试探。
+                <br />2. 主控可通过输入框自由说话、误导、试探、保持沉默，或随时点击<strong>【洗牌】</strong>打乱阵型。
+                <br />3. 角色根据主控的微反应与言语完成最终抽牌决断！
               </p>
               <p>• <strong>胜负判定</strong>：率先清空手牌者获得胜利！最后手里留下鬼牌 🐾 的人落败。</p>
             </div>

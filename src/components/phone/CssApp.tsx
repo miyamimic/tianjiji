@@ -101,7 +101,7 @@ export default function CssApp() {
   };
 
   const handleResetDesktopOrder = () => {
-    const defaultOrder = ['stickers', 'ghost_card', 'game', 'persona', 'wallpaper', 'llm', 'ambience', 'dictionary', 'css'];
+    const defaultOrder = ['game_lobby', 'persona', 'wallpaper', 'llm', 'ambience', 'dictionary', 'css'];
     savePhoneAppsOrder(defaultOrder);
     window.dispatchEvent(new CustomEvent('windchime_layout_change'));
     setImportNotice('已恢复手机桌面默认应用排布！');

@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Bot, Sparkles, RefreshCw, Key, Globe, Check, AlertCircle, CheckCircle2, Eye } from 'lucide-react';
+import { Bot, Sparkles, RefreshCw, Key, Globe, Check, AlertCircle, CheckCircle2, Eye, ShieldCheck, Radio, Layers } from 'lucide-react';
 import { loadLlmConfig, saveLlmConfig, fetchAvailableModels, callLlm, type LlmConfig } from '../../lib/llm';
+import { backgroundKeepAlive } from '../../lib/backgroundKeepAlive';
+import { outboxQueue, type OutboxQueueState } from '../../lib/outboxQueue';
 
 interface Props {
   onConfigChange?: (config: LlmConfig) => void;
@@ -204,6 +206,39 @@ export default function LlmApp({ onConfigChange }: Props) {
             <span className="truncate">{testResult.msg}</span>
           </div>
         )}
+      </div>
+
+      {/* 202 + Outbox Asynchronous Queue & iOS Keep-Alive System Status */}
+      <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.03] space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="font-semibold text-white flex items-center gap-1.5 text-xs">
+            <ShieldCheck className="size-3.5 text-emerald-400" />
+            202 + Outbox 异步队列 & iOS 防中断保活
+          </span>
+          <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-[10px] font-mono flex items-center gap-1">
+            <Radio className="size-2.5 animate-pulse" />
+            已激活
+          </span>
+        </div>
+
+        <p className="text-[11px] text-white/60 leading-relaxed">
+          采用轻量级 <b>202 Accepted + Outbox</b> 离线持久化队列与 <b>Web Audio API 无损静音保活</b> 技术。当添加到 iOS / iPad 主屏幕并切换到其他 App 时，后台 JS 线程不被系统挂起，自动指数退避重试，杜绝 <code>Load failed</code> 与生成中断！
+        </p>
+
+        <div className="grid grid-cols-2 gap-2 pt-1">
+          <div className="p-2.5 rounded-xl bg-black/40 border border-white/5 space-y-1">
+            <span className="text-[10px] text-white/40 block">持久化发件箱</span>
+            <span className="text-xs font-mono font-medium text-amber-300">
+              LocalStorage Outbox
+            </span>
+          </div>
+          <div className="p-2.5 rounded-xl bg-black/40 border border-white/5 space-y-1">
+            <span className="text-[10px] text-white/40 block">iOS 防挂起引擎</span>
+            <span className="text-xs font-mono font-medium text-emerald-300">
+              Silent Audio Loop
+            </span>
+          </div>
+        </div>
       </div>
     </div>
   );

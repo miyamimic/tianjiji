@@ -11,6 +11,7 @@ import NumbedNoticeModal from '@/components/NumbedNoticeModal';
 import LeafLoader from '@/components/LeafLoader';
 import WindChime, { type AppId } from '@/components/WindChime';
 import GameInviteModal from '@/components/GameInviteModal';
+import OutboxStatusBar from '@/components/OutboxStatusBar';
 import { useEngine } from '@/hooks/useEngine';
 import { loadLlmConfig, isLlmConfigured, type LlmConfig } from '@/lib/llm';
 import { loadCustomCss, applyCustomCss, loadCustomChatBg } from '@/lib/customStore';
@@ -161,6 +162,24 @@ export default function App() {
     }
   };
 
+  const handleReroll = async (messageId: string, feedback?: { score?: number; reason?: string }) => {
+    setIsLoading(true);
+    try {
+      const res = await engine.rerollMessage(messageId, feedback, llmReady ? llmConfig : undefined);
+      if (res && res.numbedKeys && res.numbedKeys.length > 0) {
+        setNumbedModalInfo({
+          characterName: res.characterName || character.name,
+          numbedKeys: res.numbedKeys,
+          isSensitized: (res.sensitizedKeys && res.sensitizedKeys.length > 0) || false,
+        });
+      }
+    } catch (e) {
+      console.error('重roll生成失败', e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const bgSrc = scene === 'welcome' ? '/welcome_bg.png' : (customChatBg || '/chat_bg.png');
   const bg = BG_SIZE[scene];            // 原始图像素尺寸
   const pos = BG_OBJECT_POS[scene];     // 竖屏时的 object-position（横屏无效）
@@ -240,6 +259,9 @@ export default function App() {
           />
         </div>
 
+        {/* 202 Async Outbox & iOS Background Keep-Alive Status Island */}
+        <OutboxStatusBar />
+
         {/* Wind Chime Pulldown Control Panel (Anchored top-left, left of avatar) */}
         <WindChime
           currentBg={customChatBg}
@@ -311,7 +333,7 @@ export default function App() {
                       onRollback={(id) => engine.rollbackToMessage(id)}
                       onEdit={(id, text) => engine.editMessage(id, text)}
                       onTriggerReply={handleRequestReply}
-                      onAddUserMsgOnly={(id, text) => engine.addUserMessageOnly(text, id)}
+                      onReroll={handleReroll}
                     />
                   </div>
                 ))}
@@ -322,9 +344,7 @@ export default function App() {
             <div className="pointer-events-auto">
               <ChatInput
                 onSend={handleSend}
-                onSendSticker={(sticker, text) => engine.sendUserSticker(sticker, text)}
                 onRequestReply={() => handleRequestReply()}
-                onOpenStickerApp={() => setForceOpenApp('stickers')}
                 disabled={isLoading}
                 llmReady={llmReady}
               />
@@ -381,7 +401,7 @@ export default function App() {
         onStart={(invite) => {
           acceptGameInvite(invite.id);
           setActiveInviteModal(null);
-          setForceOpenApp('game');
+          setForceOpenApp('game_lobby');
         }}
         onReject={(invite) => {
           rejectGameInvite(invite.id);
@@ -397,7 +417,7 @@ export default function App() {
       {stickerToast && (
         <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-4 duration-300 pointer-events-auto">
           <div
-            onClick={() => setForceOpenApp('stickers')}
+            onClick={() => setForceOpenApp('game_lobby')}
             className={`flex items-center gap-3 px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-xl border cursor-pointer hover:scale-105 transition active:scale-95 ${
               stickerToast.by === 'ai'
                 ? 'bg-purple-950/90 border-purple-400/50 text-purple-100 shadow-purple-900/40'
@@ -416,7 +436,7 @@ export default function App() {
             )}
             <div className="text-xs font-medium space-y-0.5">
               <p>{stickerToast.message}</p>
-              <p className="text-[10px] opacity-70 underline">点击前往【表情包工坊】查看详情与回忆快照 ➔</p>
+              <p className="text-[10px] opacity-70 underline">点击前往【游戏大厅·表情专区】查看详情 ➔</p>
             </div>
           </div>
         </div>

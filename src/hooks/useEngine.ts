@@ -68,9 +68,13 @@ import {
   isStickerStolenByAi, 
   type Sticker 
 } from '../lib/stickerStore';
+import { outboxQueue, type OutboxTaskResult } from '../lib/outboxQueue';
+import { backgroundKeepAlive } from '../lib/backgroundKeepAlive';
 
 
-const STORAGE_KEY = '__rp_engine_state';
+const STORAGE_PREFIX = '__rp_engine_char_state_';
+const ACTIVE_CHAR_KEY = '__rp_engine_active_char_id';
+const LEGACY_STORAGE_KEY = '__rp_engine_state';
 
 type SavedState = {
   characterId: string;
@@ -80,13 +84,26 @@ type SavedState = {
   messages: ChatMessage[];
 };
 
-function loadSavedState(): SavedState | null {
+function getStorageKeyForChar(characterId: string): string {
+  return `${STORAGE_PREFIX}${characterId}`;
+}
+
+function loadSavedStateForChar(characterId: string): SavedState | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as SavedState;
-    if (!parsed.characterId || !parsed.emotion) return null;
-    return parsed;
+    const raw = localStorage.getItem(getStorageKeyForChar(characterId));
+    if (raw) {
+      const parsed = JSON.parse(raw) as SavedState;
+      if (parsed.characterId && parsed.emotion) return parsed;
+    }
+    // Fallback: check legacy storage if character matches
+    const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacyRaw) {
+      const legacy = JSON.parse(legacyRaw) as SavedState;
+      if (legacy && legacy.characterId === characterId) {
+        return legacy;
+      }
+    }
+    return null;
   } catch {
     return null;
   }
@@ -112,7 +129,8 @@ function saveState(s: SessionState) {
       triggeredAnchors: s.triggeredAnchors,
       messages: s.messages,
     };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(getStorageKeyForChar(s.characterId), JSON.stringify(data));
+    localStorage.setItem(ACTIVE_CHAR_KEY, s.characterId);
   } catch {
     // non-fatal
   }
@@ -124,12 +142,16 @@ export function useEngine() {
 
   const saved = useRef<SavedState | null>(null);
   if (!saved.current) {
-    saved.current = loadSavedState();
+    const savedActiveCharId = typeof window !== 'undefined' ? localStorage.getItem(ACTIVE_CHAR_KEY) : null;
+    const initialCharId = savedActiveCharId || MOCK_CHARACTERS[0].character_id;
+    saved.current = loadSavedStateForChar(initialCharId);
   }
 
   const initCharacter = saved.current?.characterId
     ? getCharacterById(saved.current.characterId) ?? MOCK_CHARACTERS[0]
-    : MOCK_CHARACTERS[0];
+    : (typeof window !== 'undefined' && localStorage.getItem(ACTIVE_CHAR_KEY)
+        ? getCharacterById(localStorage.getItem(ACTIVE_CHAR_KEY)!) ?? MOCK_CHARACTERS[0]
+        : MOCK_CHARACTERS[0]);
 
   const stateRef = useRef<SessionState>({
     sessionId: '',
@@ -151,6 +173,28 @@ export function useEngine() {
   useEffect(() => {
     readyRef.current = true;
     rerender();
+
+    // Listen for outbox tasks completed in background or across tab switches
+    const unsub = outboxQueue.onCompleted((task) => {
+      const s = stateRef.current;
+      if (task.payload.characterId === s.characterId && task.result) {
+        // If replies not already in messages, sync them
+        const newMsgIds = new Set(task.result.newReplies.map((r) => r.id));
+        const hasAny = s.messages.some((m) => newMsgIds.has(m.id));
+        if (!hasAny && task.result.newReplies.length > 0) {
+          s.emotion = { ...task.result.updatedEmotion };
+          s.backgroundThreads = task.result.updatedThreads.map((t) => ({
+            content: t.content,
+            remaining_turns: t.remaining_turns ?? 3,
+          }));
+          s.messages = [...s.messages, ...task.result.newReplies];
+          saveState(s);
+          rerender();
+        }
+      }
+    });
+
+    return () => unsub();
   }, [rerender]);
 
   const persist = useCallback((s: SessionState) => {
@@ -304,9 +348,37 @@ export function useEngine() {
   const switchCharacter = useCallback(
     (characterId: string) => {
       const s = stateRef.current;
+      if (s.characterId === characterId) return;
+
+      // 1. Persist current character's conversation state
+      saveState(s);
+
+      // 2. Locate target character
       const newChar = getCharacterById(characterId);
       if (!newChar) return;
-      const newState = switchCharacterState(s, newChar);
+
+      // 3. Load target character's saved state or initialize clean session state
+      const savedForNewChar = loadSavedStateForChar(characterId);
+      const newState: SessionState = savedForNewChar
+        ? {
+            sessionId: `sess_${newChar.character_id}`,
+            characterId: newChar.character_id,
+            characterName: newChar.name,
+            emotion: savedForNewChar.emotion ?? { ...newChar.emotion.baseline },
+            backgroundThreads: savedForNewChar.backgroundThreads ?? newChar.background_threads.active.map((t) => ({ ...t })),
+            triggeredAnchors: savedForNewChar.triggeredAnchors ?? [],
+            messages: savedForNewChar.messages ?? [],
+          }
+        : {
+            sessionId: `sess_${newChar.character_id}_${Date.now()}`,
+            characterId: newChar.character_id,
+            characterName: newChar.name,
+            emotion: { ...newChar.emotion.baseline },
+            backgroundThreads: newChar.background_threads.active.map((t) => ({ ...t })),
+            triggeredAnchors: [],
+            messages: [],
+          };
+
       stateRef.current = newState;
       previousEmotionRef.current = null;
       emotionConfirmedRef.current = true;
@@ -561,154 +633,54 @@ export function useEngine() {
             : undefined,
         });
 
-        // Defensive guardrail LLM call with auto-regeneration
-        const rawText = await callLlmWithGuardrail(llmConfig, llmMessages, character);
-        const structuredList = parseStructuredLlmResponses(rawText);
-
-        const now = Date.now();
-        let maxIntensityThisTurn = 1;
-        const netDeltaThisTurn: Partial<EmotionVector> = {};
-        const turnNumbedKeys: string[] = [];
-        const turnSensitizedKeys: string[] = [];
-
-        structuredList.forEach((structured, idx) => {
-          const intensity = structured.emotion_intensity ?? 3;
-          if (intensity > maxIntensityThisTurn) maxIntensityThisTurn = intensity;
-
-          if (structured.emotion_delta && Object.keys(structured.emotion_delta).length > 0) {
-            // 1. Emotion Intensity Calibration (1-5 multiplier)
-            const calibratedDelta = applyIntensityCalibration(structured.emotion_delta, intensity);
-
-            // 2. Multi-turn Emotion Inertia & Saturation Numbing
-            const { finalDelta, numbedKeys, sensitizedKeys } = processMultiTurnInertia(
-              s.emotion,
-              calibratedDelta,
-              emotionHistoryRef.current,
-            );
-
-            if (numbedKeys.length > 0) {
-              numbedKeys.forEach((nk) => {
-                if (!turnNumbedKeys.includes(nk)) turnNumbedKeys.push(nk);
-              });
-            }
-            if (sensitizedKeys.length > 0) {
-              sensitizedKeys.forEach((sk) => {
-                if (!turnSensitizedKeys.includes(sk)) turnSensitizedKeys.push(sk);
-              });
-            }
-
-            s.emotion = addEmotion(s.emotion, finalDelta);
-
-            // Track net delta for dynamic episodic memory trigger
-            for (const k of EMOTION_KEYS) {
-              const d = finalDelta[k];
-              if (d !== undefined && d !== null) {
-                netDeltaThisTurn[k] = (netDeltaThisTurn[k] || 0) + d;
-              }
-            }
-          }
-
-          if (structured.triggered_memory) {
-            s.backgroundThreads.push({
-              content: structured.triggered_memory,
-              remaining_turns: 3,
-            });
-          }
-
-          newReplies.push({
-            id: `char-${now}-${idx}`,
-            role: 'character',
-            content: structured.reply,
-            segments: parseSegments(structured.reply),
-            timestamp: now + idx * 10,
-            character_id: character.character_id,
-            snapshot: captureSnapshot(s),
-          });
+        // 202 Accepted: Asynchronous Outbox Enqueue with iOS Background Keep-Alive
+        const enqueueRes = outboxQueue.enqueue('chat_reply', {
+          characterId: character.character_id,
+          character,
+          triggerInput,
+          messageId,
+          llmConfig,
+          llmMessages,
+          currentEmotionSnapshot: { ...s.emotion },
+          backgroundThreads: s.backgroundThreads.map((t) => ({ ...t })),
+          dynamicMemoriesContext,
+          targetMsgContent: targetMsg?.content,
         });
 
-        // 3. High Emotional Volatility Episodic Memory Generation
-        const maxDeltaVal = Math.max(0, ...Object.values(netDeltaThisTurn).map((v) => Math.abs(v || 0)));
-        if ((maxIntensityThisTurn >= 4 || maxDeltaVal >= 0.2) && triggerInput !== '...' && triggerInput.trim().length >= 2) {
-          let topEmotionKey: EmotionKey = 'sadness';
-          let topMag = 0;
-          for (const k of EMOTION_KEYS) {
-            const val = Math.abs(netDeltaThisTurn[k] || 0);
-            if (val > topMag) {
-              topMag = val;
-              topEmotionKey = k;
+        // Await Outbox worker completion with auto-retry resilience
+        const taskResult = await new Promise<OutboxTaskResult>((resolve, reject) => {
+          const pollInterval = setInterval(() => {
+            const task = outboxQueue.getTask(enqueueRes.taskId);
+            if (!task) {
+              clearInterval(pollInterval);
+              reject(new Error('任务已被移除或取消'));
+              return;
             }
-          }
+            if (task.status === 'completed' && task.result) {
+              clearInterval(pollInterval);
+              resolve(task.result);
+            } else if (task.status === 'failed') {
+              clearInterval(pollInterval);
+              reject(new Error(task.error || '生成失败'));
+            } else if (task.status === 'cancelled') {
+              clearInterval(pollInterval);
+              reject(new Error('生成已取消'));
+            }
+          }, 150);
+        });
 
-          // Extract meaningful keywords from user's message
-          const cleanWords = triggerInput
-            .replace(/[^\u4e00-\u9fa5a-zA-Z0-9]/g, ' ')
-            .split(/\s+/)
-            .filter((w) => w.length >= 2 && !['什么', '怎么', '这个', '那个', '因为', '所以', '虽然', '但是'].includes(w));
-          const keywords = cleanWords.slice(0, 3);
+        // Apply updated emotion and threads from outbox
+        s.emotion = { ...taskResult.updatedEmotion };
+        s.backgroundThreads = taskResult.updatedThreads.map((t) => ({
+          content: t.content,
+          remaining_turns: t.remaining_turns ?? 3,
+        }));
+        newReplies.push(...taskResult.newReplies);
 
-          if (keywords.length > 0) {
-            const dynamicMemory: DynamicMemory = {
-              id: `dyn_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-              character_id: character.character_id,
-              topic_keywords: keywords,
-              emotion_type: topEmotionKey,
-              intensity: maxIntensityThisTurn,
-              user_trigger_summary: `主控说："${triggerInput.slice(0, 35)}${triggerInput.length > 35 ? '...' : ''}"`,
-              character_reaction_summary: `${character.name}对这番话产生了显著的${EMOTION_NAMES[topEmotionKey]}共鸣`,
-              created_at: Date.now(),
-              recall_count: 0,
-            };
-            saveDynamicMemory(character.character_id, dynamicMemory);
-          }
-        }
-
-        // 4. Record to multi-turn emotion history (keep last 8)
+        // Record to multi-turn emotion history
         emotionHistoryRef.current.push({ ...s.emotion });
         if (emotionHistoryRef.current.length > 8) {
           emotionHistoryRef.current.shift();
-        }
-
-        // 5. Game Invitation Trigger with Frequency Cooldown and Debug Switch
-        const isGomokuKeyword = /下棋|五子棋|下盘棋|陪我下棋|对弈|下一局/.test(triggerInput);
-        const isGhostCardKeyword = /捉鬼牌|抽鬼牌|鬼牌|抽牌游戏|玩捉鬼牌|来局捉鬼牌/.test(triggerInput);
-        const gameInviteItem = structuredList.find((st) => st.game_invite);
-        
-        // Character Active Invite: must obey turn frequency limit
-        if (gameInviteItem?.game_invite && canCharacterSendInvite(character.character_id)) {
-          const invite: GameInvitation = {
-            id: `invite_${Date.now()}`,
-            gameType: 'gomoku',
-            characterId: character.character_id,
-            characterName: character.name,
-            inviteText: gameInviteItem.game_invite.text || `“棋盘已经为你备好了，要不要与我下一盘五子棋？”`,
-            timestamp: Date.now(),
-            status: 'pending',
-          };
-          recordCharacterInviteSent(character.character_id);
-          setPendingGameInvite(invite);
-        } else if (isGhostCardKeyword && isGameDebugShortcutEnabled()) {
-          const invite: GameInvitation = {
-            id: `invite_ghost_${Date.now()}`,
-            gameType: 'ghost_card',
-            characterId: character.character_id,
-            characterName: character.name,
-            inviteText: `“牌已经洗好了，要不要来一局惊险刺激的捉鬼牌？看看谁会把鬼牌留在手里🐾”`,
-            timestamp: Date.now(),
-            status: 'pending',
-          };
-          setPendingGameInvite(invite);
-        } else if (isGomokuKeyword && isGameDebugShortcutEnabled()) {
-          // Local debug shortcut mode
-          const invite: GameInvitation = {
-            id: `invite_${Date.now()}`,
-            gameType: 'gomoku',
-            characterId: character.character_id,
-            characterName: character.name,
-            inviteText: `“棋盘已经备妥，今日便与你手谈一局五子棋。”`,
-            timestamp: Date.now(),
-            status: 'pending',
-          };
-          setPendingGameInvite(invite);
         }
 
         lastFallbackRef.current = false;
@@ -741,8 +713,8 @@ export function useEngine() {
 
         return {
           replies: newReplies,
-          numbedKeys: turnNumbedKeys,
-          sensitizedKeys: turnSensitizedKeys,
+          numbedKeys: taskResult.numbedKeys,
+          sensitizedKeys: taskResult.sensitizedKeys,
           characterName: character.name,
         };
       } catch (err) {
@@ -805,6 +777,246 @@ export function useEngine() {
       characterName: character.name,
     };
   }, [persist, rerender]);
+
+  // -------------------------------------------------------------
+  // Reroll Message (Direct clean reroll or with score & reason feedback)
+  // -------------------------------------------------------------
+  const rerollMessage = useCallback(
+    async (
+      messageId: string,
+      feedback?: { score?: number; reason?: string },
+      llmConfig?: LlmConfig
+    ) => {
+      const s = stateRef.current;
+      const msgIndex = s.messages.findIndex((m) => m.id === messageId);
+      if (msgIndex === -1) return;
+
+      const targetMsg = s.messages[msgIndex];
+      let triggerInput = '...';
+
+      if (targetMsg.role === 'character') {
+        // Rollback AI turn: find preceding user message
+        let userMsgIndex = -1;
+        for (let i = msgIndex - 1; i >= 0; i--) {
+          if (s.messages[i].role === 'user') {
+            userMsgIndex = i;
+            break;
+          }
+        }
+
+        if (userMsgIndex !== -1) {
+          const userMsg = s.messages[userMsgIndex];
+          triggerInput = userMsg.content;
+          s.messages = s.messages.slice(0, userMsgIndex + 1);
+          if (userMsg.snapshot) {
+            s.emotion = { ...userMsg.snapshot.emotion };
+            s.backgroundThreads = userMsg.snapshot.backgroundThreads.map((t) => ({ ...t }));
+            s.triggeredAnchors = userMsg.snapshot.triggeredAnchors.map((a) => ({ ...a }));
+          }
+        } else {
+          s.messages = s.messages.slice(0, msgIndex);
+          if (targetMsg.snapshot) {
+            s.emotion = { ...targetMsg.snapshot.emotion };
+            s.backgroundThreads = targetMsg.snapshot.backgroundThreads.map((t) => ({ ...t }));
+            s.triggeredAnchors = targetMsg.snapshot.triggeredAnchors.map((a) => ({ ...a }));
+          }
+        }
+      } else {
+        triggerInput = targetMsg.content;
+        s.messages = s.messages.slice(0, msgIndex + 1);
+        if (targetMsg.snapshot) {
+          s.emotion = { ...targetMsg.snapshot.emotion };
+          s.backgroundThreads = targetMsg.snapshot.backgroundThreads.map((t) => ({ ...t }));
+          s.triggeredAnchors = targetMsg.snapshot.triggeredAnchors.map((a) => ({ ...a }));
+        }
+      }
+
+      const character = getCharacterById(s.characterId) ?? MOCK_CHARACTERS[0];
+      const decayRate = loadEmotionDecayRate();
+      s.emotion = decayEmotionTowardsBaseline(s.emotion, character.emotion.baseline, decayRate);
+
+      previousEmotionRef.current = { ...s.emotion };
+      emotionConfirmedRef.current = false;
+      lastIntentRef.current = null;
+
+      const matchedDynamicMemories = findRelevantDynamicMemories(character.character_id, triggerInput);
+      let dynamicMemoriesContext = '';
+      if (matchedDynamicMemories.length > 0) {
+        const topMem = matchedDynamicMemories[0];
+        const kwStr = topMem.topic_keywords.join('、');
+        dynamicMemoriesContext = `主控在当前对话中触及了与「${kwStr}」相关的过往事件与话题。\n【过往高情绪回忆】：${topMem.user_trigger_summary}，你当时内心对这件事产生了强烈的${EMOTION_NAMES[topMem.emotion_type]}反应。\n请务必在你的内心独白（thought）或细微动作中展现出你一直清楚地记着这件事！`;
+      }
+
+      const result = processChat(
+        { ...s, emotion: { ...s.emotion }, backgroundThreads: s.backgroundThreads.map((t) => ({ ...t })) },
+        character,
+        triggerInput
+      );
+
+      s.backgroundThreads = result.backgroundThreads;
+      s.triggeredAnchors = result.triggeredAnchors;
+      lastIntentRef.current = result.intent;
+
+      const newReplies: ChatMessage[] = [];
+
+      // Construct targetMsgInstruction based on feedback
+      let targetMsgInstruction: string | undefined = undefined;
+      if (feedback && (feedback.score !== undefined || feedback.reason?.trim())) {
+        const scorePart = feedback.score !== undefined ? `评分：【${feedback.score}星/5星（${feedback.score}分）】` : '';
+        const reasonPart = feedback.reason?.trim() ? `改进理由与调整要求：“${feedback.reason.trim()}”` : '';
+        targetMsgInstruction = `（【主控打分与重roll/刷新反馈】：${[scorePart, reasonPart].filter(Boolean).join('，')}。请严格根据主控给出的评分与意见，调整情绪温差、肢体动作细节与台词深度，重新生成更具质感的全新回复！）`;
+      }
+
+      if (llmConfig && isLlmConfigured(llmConfig)) {
+        try {
+          const emotionSummary = Object.entries(s.emotion)
+            .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
+            .join(', ');
+
+          const pipelineLayers = loadPromptLayers();
+          const llmMessages = assemblePipelineLlmMessages(pipelineLayers, {
+            character,
+            emotionSummary,
+            backgroundThreads: s.backgroundThreads.map((t) => t.content),
+            dynamicMemoriesContext,
+            chatHistory: s.messages,
+            targetMsgInstruction,
+          });
+
+          const rawText = await callLlmWithGuardrail(llmConfig, llmMessages, character);
+          const structuredList = parseStructuredLlmResponses(rawText);
+
+          const now = Date.now();
+          let maxIntensityThisTurn = 1;
+          const netDeltaThisTurn: Partial<EmotionVector> = {};
+          const turnNumbedKeys: string[] = [];
+          const turnSensitizedKeys: string[] = [];
+
+          structuredList.forEach((structured, idx) => {
+            const intensity = structured.emotion_intensity ?? 3;
+            if (intensity > maxIntensityThisTurn) maxIntensityThisTurn = intensity;
+
+            if (structured.emotion_delta && Object.keys(structured.emotion_delta).length > 0) {
+              const calibratedDelta = applyIntensityCalibration(structured.emotion_delta, intensity);
+              const { finalDelta, numbedKeys, sensitizedKeys } = processMultiTurnInertia(
+                s.emotion,
+                calibratedDelta,
+                emotionHistoryRef.current
+              );
+
+              if (numbedKeys.length > 0) {
+                numbedKeys.forEach((nk) => {
+                  if (!turnNumbedKeys.includes(nk)) turnNumbedKeys.push(nk);
+                });
+              }
+              if (sensitizedKeys.length > 0) {
+                sensitizedKeys.forEach((sk) => {
+                  if (!turnSensitizedKeys.includes(sk)) turnSensitizedKeys.push(sk);
+                });
+              }
+
+              s.emotion = addEmotion(s.emotion, finalDelta);
+
+              for (const k of EMOTION_KEYS) {
+                const d = finalDelta[k];
+                if (d !== undefined && d !== null) {
+                  netDeltaThisTurn[k] = (netDeltaThisTurn[k] || 0) + d;
+                }
+              }
+            }
+
+            if (structured.triggered_memory) {
+              s.backgroundThreads.push({
+                content: structured.triggered_memory,
+                remaining_turns: 3,
+              });
+            }
+
+            newReplies.push({
+              id: `char-${now}-${idx}`,
+              role: 'character',
+              content: structured.reply,
+              segments: parseSegments(structured.reply),
+              timestamp: now + idx * 10,
+              character_id: character.character_id,
+              snapshot: captureSnapshot(s),
+            });
+          });
+
+          emotionHistoryRef.current.push({ ...s.emotion });
+          if (emotionHistoryRef.current.length > 8) {
+            emotionHistoryRef.current.shift();
+          }
+
+          lastFallbackRef.current = false;
+
+          // Attach sticker if applicable
+          const charStickers = getCharacterStickers(character.character_id);
+          if (charStickers.length > 0 && newReplies.length > 0) {
+            const shouldSendSticker = Math.random() < 0.35 || /表情包|表情|图/.test(triggerInput);
+            if (shouldSendSticker) {
+              const randomStk = charStickers[Math.floor(Math.random() * charStickers.length)];
+              const lastReply = newReplies[newReplies.length - 1];
+              if (!lastReply.sticker) {
+                lastReply.sticker = {
+                  id: randomStk.id,
+                  name: randomStk.name,
+                  url: randomStk.url,
+                  category: randomStk.category,
+                  ownerType: 'ai',
+                  characterId: character.character_id,
+                  isStolen: randomStk.isStolen,
+                  stolenMeta: randomStk.stolenMeta,
+                };
+              }
+            }
+          }
+
+          s.messages = [...s.messages, ...newReplies];
+          persist(s);
+          rerender();
+
+          return {
+            replies: newReplies,
+            numbedKeys: turnNumbedKeys,
+            sensitizedKeys: turnSensitizedKeys,
+            characterName: character.name,
+          };
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.warn('LLM call error during reroll, using local fallback:', errMsg);
+          s.emotion = result.emotion;
+          newReplies.push({
+            ...result.reply,
+            id: `char-fallback-${Date.now()}`,
+            snapshot: captureSnapshot(s),
+            llmError: errMsg,
+          });
+          lastFallbackRef.current = true;
+        }
+      } else {
+        s.emotion = result.emotion;
+        newReplies.push({
+          ...result.reply,
+          id: `char-mock-${Date.now()}`,
+          snapshot: captureSnapshot(s),
+        });
+        lastFallbackRef.current = true;
+      }
+
+      s.messages = [...s.messages, ...newReplies];
+      persist(s);
+      rerender();
+
+      return {
+        replies: newReplies,
+        numbedKeys: [],
+        sensitizedKeys: [],
+        characterName: character.name,
+      };
+    },
+    [persist, rerender]
+  );
 
   // -------------------------------------------------------------
   // Handle User Rejection of Game Invitation (Pipeline Integration)
@@ -1051,6 +1263,7 @@ export function useEngine() {
     rollbackToMessage,
     editMessage,
     addUserMessageOnly,
+    rerollMessage,
     triggerCharacterReply,
     handleUserRejectGameInvite,
     handleGameFinished,

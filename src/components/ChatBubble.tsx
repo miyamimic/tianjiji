@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import type { MessageSegment, ChatMessage, StickerMeta } from '../data/types';
-import { History, Clock, Edit2, CornerDownLeft, Plus, AlertCircle, RefreshCw, Sparkles, Check, Smile, Info } from 'lucide-react';
+import { History, Clock, Edit2, CornerDownLeft, AlertCircle, RefreshCw, RotateCcw, Star, Sparkles, Check, Smile, Info } from 'lucide-react';
 import { loadUserAvatar, loadCharAvatar } from '../lib/customStore';
 import { userStealAiSticker, isStickerStolenByUser, subscribeStickers } from '../lib/stickerStore';
 
@@ -11,7 +11,7 @@ interface Props {
   onRollback?: (id: string) => void;
   onEdit?: (id: string, newContent: string) => void;
   onTriggerReply?: (id: string) => void;
-  onAddUserMsgOnly?: (id: string, text: string) => void;
+  onReroll?: (id: string, feedback?: { score?: number; reason?: string }) => void;
 }
 
 function formatTime(ts: number) {
@@ -64,15 +64,16 @@ export default function ChatBubble({
   onRollback,
   onEdit,
   onTriggerReply,
-  onAddUserMsgOnly,
+  onReroll,
 }: Props) {
   const isUser = message.role === 'user';
   const isWarning = message.content.includes('⚠️') || message.content.includes('拦截');
 
   const [isEditing, setIsEditing] = useState(false);
   const [editVal, setEditVal] = useState(message.content);
-  const [isAddingUserMsg, setIsAddingUserMsg] = useState(false);
-  const [userMsgVal, setUserMsgVal] = useState('');
+  const [isRerolling, setIsRerolling] = useState(false);
+  const [rerollScore, setRerollScore] = useState<number>(3);
+  const [rerollReason, setRerollReason] = useState<string>('');
   const [showErrorDetail, setShowErrorDetail] = useState(false);
   const [showSnapshotModal, setShowSnapshotModal] = useState(false);
 
@@ -96,14 +97,6 @@ export default function ChatBubble({
     if (onEdit && editVal.trim()) {
       onEdit(message.id, editVal);
       setIsEditing(false);
-    }
-  };
-
-  const handleAddUserMsg = () => {
-    if (onAddUserMsgOnly && userMsgVal.trim()) {
-      onAddUserMsgOnly(message.id, userMsgVal);
-      setIsAddingUserMsg(false);
-      setUserMsgVal('');
     }
   };
 
@@ -281,19 +274,19 @@ export default function ChatBubble({
                 </button>
               )}
 
-              {/* 3. 追加 */}
-              {onAddUserMsgOnly && (
+              {/* 3. 刷新 / 重roll */}
+              {onReroll && (
                 <button
-                  onClick={() => setIsAddingUserMsg(!isAddingUserMsg)}
+                  onClick={() => setIsRerolling(!isRerolling)}
                   className={`flex items-center gap-1 px-1.5 py-0.5 rounded border transition-all cursor-pointer ${
-                    isAddingUserMsg
-                      ? 'bg-emerald-950/30 border-emerald-500/30 text-emerald-300'
+                    isRerolling
+                      ? 'bg-amber-950/40 border-amber-500/40 text-amber-300'
                       : 'bg-white/5 hover:bg-white/10 border-white/5 hover:border-white/15 text-white/60 hover:text-white'
                   }`}
-                  title="在此气泡后直接插入我的下一句话（不触发AI自动回复）"
+                  title="刷新重新生成此条回复（支持打分反馈或直接纯净重roll）"
                 >
-                  <Plus className="size-2.5 text-emerald-400" />
-                  <span>追加</span>
+                  <RefreshCw className={`size-2.5 text-amber-400 ${isRerolling ? 'rotate-180 transition-transform duration-300' : ''}`} />
+                  <span>刷新</span>
                 </button>
               )}
 
@@ -319,40 +312,113 @@ export default function ChatBubble({
             </div>
           )}
 
-          {/* Inline input for appending user message */}
-          {isAddingUserMsg && (
+          {/* Inline Reroll & Scoring Panel */}
+          {isRerolling && (
             <div
-              className={`mt-1 w-full max-w-[320px] rounded-lg border border-[hsl(28_85%_62%/0.3)] bg-[hsl(222_28%_8%/0.95)] p-2 space-y-1.5 shadow-md ${
+              className={`mt-1.5 w-full max-w-[340px] rounded-xl border border-amber-500/30 bg-[hsl(222_28%_8%/0.97)] p-3 space-y-2.5 shadow-xl backdrop-blur-md ${
                 isUser ? 'self-end' : 'self-start'
               }`}
             >
-              <p className="text-[9px] text-[hsl(28_85%_62%)] font-medium">
-                追加不触发自动回复的发言内容：
-              </p>
-              <input
-                type="text"
-                value={userMsgVal}
-                onChange={(e) => setUserMsgVal(e.target.value)}
-                className="w-full bg-black/40 text-white text-xs rounded p-1 border border-white/10 focus:border-[hsl(28_85%_62%)] focus:outline-none"
-                placeholder="在此气泡后直接插入我的发言..."
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleAddUserMsg();
-                  }
-                }}
-              />
-              <div className="flex gap-1.5 justify-end">
+              <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
+                <div className="flex items-center gap-1.5 text-xs text-amber-300 font-medium">
+                  <RefreshCw className="size-3 text-amber-400" />
+                  <span>重新生成回复 (重roll)</span>
+                </div>
                 <button
-                  onClick={() => setIsAddingUserMsg(false)}
-                  className="px-1.5 py-0.5 rounded bg-white/5 hover:bg-white/10 text-[10px] text-white/60 transition cursor-pointer"
+                  onClick={() => setIsRerolling(false)}
+                  className="text-white/40 hover:text-white text-xs px-1 cursor-pointer"
+                  title="关闭"
                 >
-                  取消
+                  ✕
                 </button>
+              </div>
+
+              {/* Mode 1: 直接重roll (Direct clean reroll without injection) */}
+              <div className="p-2 rounded-lg bg-white/5 border border-white/5 space-y-1.5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-semibold text-white/90">直接重roll</span>
+                  <span className="text-[9.5px] text-white/40">纯净重新生成 · 不注入提示</span>
+                </div>
                 <button
-                  onClick={handleAddUserMsg}
-                  className="px-2 py-0.5 rounded bg-[hsl(28_85%_62%/0.8)] hover:bg-[hsl(28_85%_62%)] text-[10px] text-white transition cursor-pointer"
+                  onClick={() => {
+                    onReroll?.(message.id);
+                    setIsRerolling(false);
+                  }}
+                  className="w-full py-1.5 px-2 rounded-lg bg-gradient-to-r from-amber-500/15 to-orange-500/15 hover:from-amber-500/25 hover:to-orange-500/25 border border-amber-500/30 hover:border-amber-400/50 text-amber-200 text-xs font-medium flex items-center justify-center gap-1.5 transition cursor-pointer active:scale-[0.98]"
                 >
-                  追加
+                  <RotateCcw className="size-3 text-amber-400" />
+                  <span>直接重roll（不注入额外提示）</span>
+                </button>
+              </div>
+
+              {/* Mode 2: 打分反馈重roll (Score & Reason injection) */}
+              <div className="p-2.5 rounded-lg bg-white/5 border border-white/5 space-y-2">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-semibold text-white/90">打分反馈重roll</span>
+                  <span className="text-[9.5px] text-amber-400/80">发送评分与原因给模型</span>
+                </div>
+
+                {/* Star/Score Selector (1 - 5) */}
+                <div className="flex items-center justify-between px-0.5">
+                  <span className="text-[10px] text-white/50">满意度评分:</span>
+                  <div className="flex items-center gap-1">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <button
+                        key={star}
+                        type="button"
+                        onClick={() => setRerollScore(star)}
+                        className={`p-0.5 rounded transition cursor-pointer ${
+                          rerollScore >= star ? 'text-amber-400 scale-110' : 'text-white/20 hover:text-white/40'
+                        }`}
+                        title={`${star} 分`}
+                      >
+                        <Star className="size-3.5 fill-current" />
+                      </button>
+                    ))}
+                    <span className="text-[10.5px] text-amber-300 font-mono ml-1 font-medium">{rerollScore}分</span>
+                  </div>
+                </div>
+
+                {/* Quick Feedback Tags */}
+                <div className="space-y-1">
+                  <span className="text-[9.5px] text-white/40">快捷调整建议:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {['情绪太生硬', '缺少动作心理', '不够贴合人设', '太冷淡了', '想要更宠溺', '直入主题少废话'].map((tag) => (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => {
+                          setRerollReason((prev) => (prev ? `${prev}，${tag}` : tag));
+                        }}
+                        className="px-1.5 py-0.5 rounded text-[9px] bg-white/5 hover:bg-amber-500/15 border border-white/10 hover:border-amber-400/30 text-white/70 hover:text-amber-200 transition cursor-pointer"
+                      >
+                        +{tag}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Text Input for Reason */}
+                <textarea
+                  value={rerollReason}
+                  onChange={(e) => setRerollReason(e.target.value)}
+                  placeholder="输入评分原因或调整要求（例如：语气更温柔一点、多写心理独白...）"
+                  className="w-full bg-black/40 text-white text-xs rounded-lg p-2 border border-white/10 focus:border-amber-500 focus:outline-none min-h-[46px] placeholder:text-white/25"
+                />
+
+                {/* Submit Rated Reroll */}
+                <button
+                  onClick={() => {
+                    onReroll?.(message.id, {
+                      score: rerollScore,
+                      reason: rerollReason,
+                    });
+                    setIsRerolling(false);
+                  }}
+                  className="w-full py-1.5 px-2 rounded-lg bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-500 hover:to-orange-500 text-stone-950 font-bold text-xs flex items-center justify-center gap-1.5 transition shadow cursor-pointer active:scale-[0.98]"
+                >
+                  <Sparkles className="size-3 text-stone-950" />
+                  <span>提交评分并重roll</span>
                 </button>
               </div>
             </div>

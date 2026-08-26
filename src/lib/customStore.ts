@@ -1119,7 +1119,7 @@ export interface VisualConfigPayload {
 }
 
 export function exportVisualConfig(): string {
-  const defaultOrder = ['stickers', 'ghost_card', 'game', 'persona', 'wallpaper', 'llm', 'ambience', 'dictionary', 'css'];
+  const defaultOrder = ['game_lobby', 'persona', 'wallpaper', 'llm', 'ambience', 'dictionary', 'css'];
   const payload: VisualConfigPayload = {
     version: '2.0',
     exported_at: new Date().toISOString(),
