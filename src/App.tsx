@@ -164,7 +164,7 @@ export default function App() {
       className="relative w-full flex items-center justify-center overflow-hidden bg-[#fdf6f7] french-fine-grain"
       style={{ height: '100vh', width: '100vw' }}
     >
-      {/* 手机端高精度像素绿叶飘落加载动画 */}
+      {/* 手机端实景 Live 壁纸加载动画 */}
       {!leafDone && portrait && (
         <LeafLoader onComplete={() => setLeafDone(true)} />
       )}
