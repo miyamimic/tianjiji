@@ -31,7 +31,7 @@ function SpeechSegment({ text, isUser }: { text: string; isUser?: boolean }) {
 function ActionSegment({ text }: { text: string }) {
   const clean = text.replace(/^[（(]|[\n）)]$/g, '').replace(/^[(（]|[\n)）]$/g, '').trim();
   return (
-    <p className="whitespace-pre-wrap not-italic font-normal font-sans leading-relaxed text-[#b83d5a] text-[13.5px] my-0.5 select-text">
+    <p className="whitespace-pre-wrap not-italic font-normal font-sans leading-relaxed text-[#d78b9b] text-[13.5px] my-0.5 select-text">
       {clean}
     </p>
   );
@@ -40,7 +40,7 @@ function ActionSegment({ text }: { text: string }) {
 function ThoughtSegment({ text }: { text: string }) {
   const clean = text.replace(/^\*+|\*+$/g, '').replace(/^[（(]|[）)]$/g, '').trim();
   return (
-    <p className="whitespace-pre-wrap italic font-nanchankeben font-normal leading-relaxed text-[#c49a3f] text-[12px] my-0.5 select-text">
+    <p className="whitespace-pre-wrap italic font-nanchankeben font-normal leading-relaxed text-[#aea59d] text-[13px] my-0.5 select-text">
       *{clean}*
     </p>
   );
