@@ -488,36 +488,36 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
     switch (role) {
       case 'system':
         return (
-          <span className="px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-mono font-bold bg-cyan-500/15 text-cyan-400 border border-cyan-500/30 flex items-center gap-1">
-            <Cpu size={11} /> SYSTEM
+          <span className="px-2 py-0.5 rounded-lg text-[10px] sm:text-[11px] font-mono font-bold bg-[#fae1e8] text-[#8c243e] border border-[#f2cad4] flex items-center gap-1">
+            <Cpu size={11} className="text-[#b83d5a]" /> SYSTEM
           </span>
         );
       case 'user':
         return (
-          <span className="px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-mono font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center gap-1">
-            <User size={11} /> USER
+          <span className="px-2 py-0.5 rounded-lg text-[10px] sm:text-[11px] font-mono font-bold bg-[#ffedd5] text-[#9a3412] border border-[#fed7aa] flex items-center gap-1">
+            <User size={11} className="text-[#ea580c]" /> USER
           </span>
         );
       case 'assistant':
         return (
-          <span className="px-2 py-0.5 rounded text-[10px] sm:text-[11px] font-mono font-bold bg-purple-500/15 text-purple-400 border border-purple-500/30 flex items-center gap-1">
-            <Bot size={11} /> ASSISTANT
+          <span className="px-2 py-0.5 rounded-lg text-[10px] sm:text-[11px] font-mono font-bold bg-[#f3e8ff] text-[#6b21a8] border border-[#e9d5ff] flex items-center gap-1">
+            <Bot size={11} className="text-[#9333ea]" /> ASSISTANT
           </span>
         );
     }
   };
 
   return (
-    <div className="space-y-4 sm:space-y-6 text-neutral-200">
+    <div className="space-y-4 sm:space-y-5 text-[#4a3431] font-serif">
       {/* Top View Mode Switcher: Dedicated Editor vs Dedicated Preview Block */}
-      <div className="flex items-center justify-between bg-neutral-900/90 p-1.5 rounded-xl border border-white/10 text-xs select-none">
+      <div className="flex items-center justify-between bg-[#fae6ec] p-1.5 rounded-2xl border border-[#f2cad4] text-xs select-none">
         <div className="flex items-center gap-1 w-full sm:w-auto">
           <button
             onClick={() => setViewMode('editor')}
-            className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all ${
+            className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
               viewMode === 'editor'
-                ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md'
-                : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'
+                ? 'bg-[#b83d5a] text-white shadow-sm'
+                : 'text-[#785b56] hover:text-[#4a3431] hover:bg-[#f5d5de]'
             }`}
           >
             <Layers size={15} />
@@ -526,10 +526,10 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
 
           <button
             onClick={() => setViewMode('preview')}
-            className={`flex-1 sm:flex-initial px-4 py-2 rounded-lg font-semibold flex items-center justify-center gap-2 transition-all ${
+            className={`flex-1 sm:flex-initial px-4 py-2 rounded-xl font-bold flex items-center justify-center gap-2 transition-all cursor-pointer ${
               viewMode === 'preview'
-                ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md'
-                : 'text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800'
+                ? 'bg-[#b83d5a] text-white shadow-sm'
+                : 'text-[#785b56] hover:text-[#4a3431] hover:bg-[#f5d5de]'
             }`}
           >
             <Eye size={15} />
@@ -538,10 +538,10 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
         </div>
 
         {/* Desktop Quick Indicator */}
-        <div className="hidden md:flex items-center gap-3 text-xs text-neutral-400 pr-3 font-mono">
-          <span>总字符: <strong className="text-cyan-400">{totalChars}</strong></span>
+        <div className="hidden md:flex items-center gap-3 text-xs text-[#785b56] pr-3 font-mono">
+          <span>总字符: <strong className="text-[#b83d5a]">{totalChars}</strong></span>
           <span>•</span>
-          <span>预估 Token: <strong className="text-amber-400">~{approxTokens}</strong></span>
+          <span>预估 Token: <strong className="text-[#a0522d]">~{approxTokens}</strong></span>
         </div>
       </div>
 
@@ -549,22 +549,22 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
       {/* VIEW 1: DEDICATED PREVIEW BLOCK (单独整块展示，不悬空)                       */}
       {/* ========================================================================= */}
       {viewMode === 'preview' && (
-        <div className="rounded-2xl border border-cyan-500/30 bg-neutral-900 shadow-2xl overflow-hidden flex flex-col space-y-0 animate-fade-in">
+        <div className="rounded-3xl border-2 border-[#f2cad4] bg-[#fffafb] shadow-xl overflow-hidden flex flex-col space-y-0 animate-fade-in">
           {/* Header */}
-          <div className="p-3.5 sm:p-4 border-b border-neutral-800 bg-neutral-950/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="p-3.5 sm:p-4 border-b border-[#f2cad4] bg-[#fae1e8] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 shrink-0">
+              <div className="p-2 rounded-2xl bg-[#fff5f7] text-[#b83d5a] border border-[#f2cad4] shrink-0">
                 <Code2 size={18} />
               </div>
               <div>
-                <h3 className="text-sm sm:text-base font-bold text-neutral-100 flex items-center gap-2">
+                <h3 className="text-sm sm:text-base font-bold text-[#4a3431] flex items-center gap-2">
                   LLM 实际注入消息 Payload 全量视图
-                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-normal">
-                    {assembledMessages.length} Messages
+                  <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-[#fcedf1] text-[#732641] font-semibold border border-[#f2cad4]">
+                    {assembledMessages.length} 条消息
                   </span>
                 </h3>
-                <p className="text-[11px] text-neutral-400">
-                  按当前图层配置实时编译生成的请求体，真实反映引擎下发的数据。
+                <p className="text-[11px] text-[#785b56]">
+                  按当前图层配置实时编译生成的请求体，真实反映引擎下发给大模型的数据。
                 </p>
               </div>
             </div>
@@ -572,15 +572,15 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
             <div className="flex items-center gap-2 self-end sm:self-auto">
               <button
                 onClick={handleCopyPayload}
-                className="px-3 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 text-xs font-medium flex items-center gap-1.5 transition-colors active:scale-95"
+                className="px-3 py-1.5 rounded-xl bg-[#fff5f7] hover:bg-[#fae1e8] text-[#732641] border border-[#f2cad4] text-xs font-semibold flex items-center gap-1.5 transition-colors active:scale-95 cursor-pointer"
               >
-                {copied ? <Check size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
                 <span>{copied ? '已复制' : '复制 JSON'}</span>
               </button>
 
               <button
                 onClick={() => setViewMode('editor')}
-                className="px-3 py-1.5 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/60 text-cyan-300 border border-cyan-500/40 text-xs font-medium flex items-center gap-1 transition-colors"
+                className="px-3 py-1.5 rounded-xl bg-[#b83d5a] hover:bg-[#a0314c] text-white text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
               >
                 <span>返回编辑</span>
               </button>
@@ -588,14 +588,14 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
           </div>
 
           {/* Navigation Sub-Tabs & Metrics */}
-          <div className="px-3.5 py-2.5 border-b border-neutral-800 bg-neutral-900/90 flex flex-wrap items-center justify-between gap-2.5">
+          <div className="px-3.5 py-2.5 border-b border-[#f2cad4] bg-[#fdf0f4] flex flex-wrap items-center justify-between gap-2.5">
             <div className="flex flex-wrap items-center gap-1.5">
               <button
                 onClick={() => setPreviewTab('payload_json')}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+                className={`px-2.5 py-1.5 rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer ${
                   previewTab === 'payload_json'
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold'
-                    : 'text-neutral-400 hover:text-neutral-200 bg-neutral-800/40'
+                    ? 'bg-[#b83d5a] text-white font-bold shadow-xs'
+                    : 'text-[#785b56] hover:text-[#4a3431] bg-[#fae1e8]'
                 }`}
               >
                 <FileJson size={13} />
@@ -604,10 +604,10 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
 
               <button
                 onClick={() => setPreviewTab('chat_stream')}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+                className={`px-2.5 py-1.5 rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer ${
                   previewTab === 'chat_stream'
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold'
-                    : 'text-neutral-400 hover:text-neutral-200 bg-neutral-800/40'
+                    ? 'bg-[#b83d5a] text-white font-bold shadow-xs'
+                    : 'text-[#785b56] hover:text-[#4a3431] bg-[#fae1e8]'
                 }`}
               >
                 <MessageSquare size={13} />
@@ -616,10 +616,10 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
 
               <button
                 onClick={() => setPreviewTab('raw_system')}
-                className={`px-2.5 py-1.5 rounded-lg text-xs font-medium transition-all flex items-center gap-1.5 ${
+                className={`px-2.5 py-1.5 rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer ${
                   previewTab === 'raw_system'
-                    ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold'
-                    : 'text-neutral-400 hover:text-neutral-200 bg-neutral-800/40'
+                    ? 'bg-[#b83d5a] text-white font-bold shadow-xs'
+                    : 'text-[#785b56] hover:text-[#4a3431] bg-[#fae1e8]'
                 }`}
               >
                 <AlignLeft size={13} />
@@ -627,48 +627,48 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
               </button>
             </div>
 
-            <div className="flex items-center gap-2 text-[11px] text-neutral-400 font-mono">
-              <span>总字数: <strong className="text-cyan-400">{totalChars}</strong></span>
+            <div className="flex items-center gap-2 text-[11px] text-[#785b56] font-mono">
+              <span>总字数: <strong className="text-[#b83d5a]">{totalChars}</strong></span>
               <span>•</span>
-              <span>预估 Token: <strong className="text-amber-400">~{approxTokens}</strong></span>
+              <span>预估 Token: <strong className="text-[#a0522d]">~{approxTokens}</strong></span>
             </div>
           </div>
 
           {/* Content Area */}
-          <div className="p-3.5 sm:p-5 bg-neutral-950/70 font-mono text-xs max-h-[65vh] overflow-y-auto custom-scrollbar">
+          <div className="p-3.5 sm:p-5 bg-[#fff8fa] font-mono text-xs max-h-[65vh] overflow-y-auto custom-scrollbar">
             {/* Tab 1: JSON Payload */}
             {previewTab === 'payload_json' && (
-              <pre className="p-3.5 sm:p-4 rounded-xl bg-neutral-900 border border-neutral-800 text-cyan-100 overflow-x-auto whitespace-pre-wrap leading-relaxed">
+              <pre className="p-3.5 sm:p-4 rounded-2xl bg-[#fff2f5] border border-[#f2cad4] text-[#4a3431] overflow-x-auto whitespace-pre-wrap leading-relaxed">
                 {JSON.stringify(assembledMessages, null, 2)}
               </pre>
             )}
 
             {/* Tab 2: Visual Chat Stream */}
             {previewTab === 'chat_stream' && (
-              <div className="space-y-3">
+              <div className="space-y-3 font-serif">
                 {assembledMessages.map((msg, idx) => (
                   <div
                     key={idx}
                     className={`p-3.5 sm:p-4 rounded-2xl border transition-all ${
                       msg.role === 'system'
-                        ? 'bg-cyan-950/20 border-cyan-500/30'
+                        ? 'bg-[#fdf0f4] border-[#f2cad4]'
                         : msg.role === 'user'
-                          ? 'bg-amber-950/20 border-amber-500/30'
-                          : 'bg-purple-950/20 border-purple-500/30'
+                          ? 'bg-[#fff7f0] border-[#fed7aa]'
+                          : 'bg-[#faebf7] border-[#e9d5ff]'
                     }`}
                   >
                     <div className="flex items-center justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <span className="w-5 h-5 rounded-full bg-neutral-800 text-[10px] font-bold flex items-center justify-center text-neutral-300">
+                        <span className="w-5 h-5 rounded-full bg-[#fcedf1] border border-[#f2cad4] text-[10px] font-bold flex items-center justify-center text-[#732641]">
                           {idx + 1}
                         </span>
                         {getRoleBadge(msg.role as PromptLayerRole)}
                       </div>
-                      <span className="text-[10px] text-neutral-500 font-mono">
+                      <span className="text-[10px] text-[#785b56] font-mono">
                         {msg.content.length} 字符
                       </span>
                     </div>
-                    <div className="whitespace-pre-wrap text-neutral-200 leading-relaxed text-xs">
+                    <div className="whitespace-pre-wrap text-[#4a3431] leading-relaxed text-xs">
                       {msg.content}
                     </div>
                   </div>
@@ -678,7 +678,7 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
 
             {/* Tab 3: Merged System Raw Text */}
             {previewTab === 'raw_system' && (
-              <div className="p-3.5 sm:p-4 rounded-xl bg-neutral-900 border border-neutral-800 text-neutral-200 whitespace-pre-wrap leading-relaxed">
+              <div className="p-3.5 sm:p-4 rounded-2xl bg-[#fff2f5] border border-[#f2cad4] text-[#4a3431] whitespace-pre-wrap leading-relaxed font-serif">
                 {assembledMessages
                   .filter(m => m.role === 'system')
                   .map((m, idx) => `=== [System Message Block ${idx + 1}] ===\n${m.content}`)
@@ -689,16 +689,16 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
         </div>
       )}
 
-      {/* VIEW 2: LAYER EDITOR VIEW (移动端友好、按钮无重叠、无悬空) */}
+      {/* VIEW 2: LAYER EDITOR VIEW */}
       {viewMode === 'editor' && (
         <>
           {/* Notification Feedback */}
           {ioNotice && (
-            <div className="p-3 rounded-xl bg-cyan-500/20 border border-cyan-500/40 text-cyan-200 text-xs flex items-center justify-between shadow-lg animate-in fade-in-0">
-              <span>{ioNotice}</span>
+            <div className="p-3 rounded-2xl bg-[#fae1e8] border border-[#f2cad4] text-[#732641] text-xs flex items-center justify-between shadow-sm animate-in fade-in-0">
+              <span className="font-semibold">{ioNotice}</span>
               <button 
                 onClick={() => setIoNotice(null)}
-                className="text-cyan-300 hover:text-white font-bold ml-2 text-xs"
+                className="text-[#b83d5a] hover:text-[#732641] font-bold ml-2 text-xs cursor-pointer"
               >
                 ✕
               </button>
@@ -706,13 +706,13 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
           )}
 
           {/* Prompt Pipeline Export / Import Toolbar */}
-          <div className="bg-gradient-to-r from-neutral-900 via-neutral-900 to-indigo-950/40 p-3.5 sm:p-4 rounded-2xl border border-indigo-500/20 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="bg-[#fcf0f4] p-3.5 sm:p-4 rounded-3xl border border-[#f2cad4] shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div className="space-y-0.5">
-              <span className="font-bold text-indigo-300 flex items-center gap-1.5 text-xs">
-                <FileJson className="size-3.5 text-indigo-400" />
+              <span className="font-bold text-[#732641] flex items-center gap-1.5 text-xs">
+                <FileJson className="size-3.5 text-[#b83d5a]" />
                 提示词编排导入 / 导出 (Prompt Pipeline IO)
               </span>
-              <p className="text-[10px] text-neutral-400">
+              <p className="text-[10px] text-[#785b56]">
                 可将当前组装的多层提示词流水线一键导出为 JSON 配置文件或 Markdown 规范文档，便于共享和迁移。
               </p>
             </div>
@@ -721,30 +721,30 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
               <button
                 type="button"
                 onClick={handleExportPromptJson}
-                className="px-2.5 py-1.5 rounded-lg border border-indigo-400/40 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-200 font-semibold text-[11px] flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-xs"
+                className="px-2.5 py-1.5 rounded-xl border border-[#f2cad4] bg-[#fae1e8] hover:bg-[#f7d0dc] text-[#732641] font-semibold text-[11px] flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-2xs"
                 title="导出为 JSON 编排配置文件"
               >
-                <Download className="size-3 text-indigo-300" />
+                <Download className="size-3 text-[#b83d5a]" />
                 <span>导出 JSON</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleExportPromptMarkdown}
-                className="px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-neutral-300 font-medium text-[11px] flex items-center gap-1 active:scale-95 transition-all cursor-pointer"
+                className="px-2.5 py-1.5 rounded-xl border border-[#f2cad4] bg-[#fae1e8] hover:bg-[#f7d0dc] text-[#732641] font-semibold text-[11px] flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-2xs"
                 title="导出为 Markdown 规范文档"
               >
-                <FileText className="size-3 text-cyan-300" />
+                <FileText className="size-3 text-[#b83d5a]" />
                 <span>导出 Markdown</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => promptFileInputRef.current?.click()}
-                className="px-2.5 py-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-neutral-300 font-medium text-[11px] flex items-center gap-1 active:scale-95 transition-all cursor-pointer"
+                className="px-2.5 py-1.5 rounded-xl border border-[#f2cad4] bg-[#fae1e8] hover:bg-[#f7d0dc] text-[#732641] font-semibold text-[11px] flex items-center gap-1 active:scale-95 transition-all cursor-pointer shadow-2xs"
                 title="导入 JSON 提示词流水线"
               >
-                <Upload className="size-3 text-purple-300" />
+                <Upload className="size-3 text-[#b83d5a]" />
                 <span>导入编排</span>
               </button>
 
@@ -759,32 +759,30 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
           </div>
 
           {/* Top Banner & Control Actions */}
-          <div className="bg-gradient-to-r from-neutral-900 via-neutral-900 to-cyan-950/40 p-4 sm:p-5 rounded-2xl border border-cyan-500/20 shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-60 h-60 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none" />
-
+          <div className="bg-gradient-to-r from-[#fdf0f4] via-[#fbe8ef] to-[#f8dce5] p-4 sm:p-5 rounded-3xl border border-[#f2cad4] shadow-sm relative overflow-hidden">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-3.5 relative z-10">
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <div className="p-1.5 sm:p-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 shadow-inner">
-                    <Layers size={18} className="animate-pulse" />
+                  <div className="p-1.5 sm:p-2 rounded-2xl bg-[#fff5f7] text-[#b83d5a] border border-[#f2cad4] shadow-2xs">
+                    <Layers size={18} />
                   </div>
-                  <h2 className="text-base sm:text-lg font-bold text-neutral-100 flex flex-wrap items-center gap-1.5">
+                  <h2 className="text-base sm:text-lg font-bold text-[#4a3431] flex flex-wrap items-center gap-1.5">
                     LLM 动态提示词流水线
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-normal border border-cyan-500/30">
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-[#fae1e8] text-[#732641] font-semibold border border-[#f2cad4]">
                       模块化可拖拽
                     </span>
                   </h2>
                 </div>
-                <p className="text-[11px] sm:text-xs text-neutral-400 leading-relaxed">
-                  自由编辑并切换 <code className="text-cyan-300 font-mono">system</code>、<code className="text-amber-300 font-mono">user</code>、<code className="text-purple-300 font-mono">assistant</code> 角色，增删图层并拖拽排序。
+                <p className="text-[11px] sm:text-xs text-[#785b56] leading-relaxed">
+                  自由编辑并切换 <code className="text-[#8c243e] font-mono font-bold bg-[#fae1e8] px-1 py-0.5 rounded">system</code>、<code className="text-[#9a3412] font-mono font-bold bg-[#ffedd5] px-1 py-0.5 rounded">user</code>、<code className="text-[#6b21a8] font-mono font-bold bg-[#f3e8ff] px-1 py-0.5 rounded">assistant</code> 角色，增删图层并拖拽排序。
                 </p>
               </div>
 
-              {/* Action Buttons: Wrapped properly on Mobile */}
+              {/* Action Buttons */}
               <div className="flex flex-wrap items-center gap-2 pt-1 sm:pt-0">
                 <button
                   onClick={() => setViewMode('preview')}
-                  className="flex-1 sm:flex-initial px-3 py-1.5 rounded-xl bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/40 text-xs font-medium flex items-center justify-center gap-1.5 transition-all active:scale-95 whitespace-nowrap"
+                  className="flex-1 sm:flex-initial px-3 py-1.5 rounded-xl bg-[#fae1e8] hover:bg-[#f7d0dc] text-[#732641] border border-[#f2cad4] text-xs font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-95 whitespace-nowrap cursor-pointer"
                 >
                   <Eye size={14} />
                   <span>查看 Payload ({assembledMessages.length})</span>
@@ -792,7 +790,7 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
 
                 <button
                   onClick={handleResetDefaults}
-                  className="px-2.5 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 border border-neutral-700 text-xs font-medium flex items-center justify-center gap-1 transition-all active:scale-95 whitespace-nowrap"
+                  className="px-2.5 py-1.5 rounded-xl bg-[#fff5f7] hover:bg-[#fae1e8] text-[#785b56] hover:text-[#4a3431] border border-[#f2cad4] text-xs font-semibold flex items-center justify-center gap-1 transition-all active:scale-95 whitespace-nowrap cursor-pointer"
                   title="重置为初始推荐模板"
                 >
                   <RotateCcw size={13} />
@@ -801,35 +799,35 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
 
                 <button
                   onClick={handleSaveAll}
-                  className="flex-1 sm:flex-initial px-4 py-1.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md shadow-cyan-900/30 active:scale-95 whitespace-nowrap"
+                  className="flex-1 sm:flex-initial px-4 py-1.5 rounded-xl bg-[#b83d5a] hover:bg-[#a0314c] text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 whitespace-nowrap cursor-pointer"
                 >
-                  {saved ? <Check size={14} className="text-emerald-300" /> : <Sparkles size={14} />}
+                  {saved ? <Check size={14} className="text-emerald-200" /> : <Sparkles size={14} />}
                   <span>{saved ? '已保存！' : '保存流水线'}</span>
                 </button>
               </div>
             </div>
 
             {/* Quick Toolbar: Expand/Collapse & Layer count indicator */}
-            <div className="mt-3 pt-2.5 border-t border-neutral-800/80 flex flex-wrap items-center justify-between gap-2 text-[11px] text-neutral-400">
+            <div className="mt-3 pt-2.5 border-t border-[#f2cad4]/80 flex flex-wrap items-center justify-between gap-2 text-[11px] text-[#785b56]">
               <div className="flex items-center gap-2">
-                <span className="flex items-center gap-1 text-neutral-300 font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  已启用：<strong className="text-cyan-400 font-mono">{layers.filter(l => l.enabled).length}</strong> / {layers.length}
+                <span className="flex items-center gap-1 text-[#4a3431] font-semibold">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                  已启用：<strong className="text-[#b83d5a] font-mono">{layers.filter(l => l.enabled).length}</strong> / {layers.length}
                 </span>
-                <span className="text-neutral-600">|</span>
-                <span>预估：<strong className="text-amber-300 font-mono">~{approxTokens}</strong> Token</span>
+                <span className="text-[#f2cad4]">|</span>
+                <span>预估：<strong className="text-[#a0522d] font-mono">~{approxTokens}</strong> Token</span>
               </div>
 
               <div className="flex items-center gap-1.5">
                 <button
                   onClick={() => handleToggleAll(true)}
-                  className="px-2 py-0.5 rounded-md bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 text-[10px] transition-colors"
+                  className="px-2 py-0.5 rounded-lg bg-[#fae1e8] hover:bg-[#f7d0dc] text-[#732641] text-[10px] font-semibold transition-colors cursor-pointer border border-[#f2cad4]"
                 >
                   展开全部
                 </button>
                 <button
                   onClick={() => handleToggleAll(false)}
-                  className="px-2 py-0.5 rounded-md bg-neutral-800/80 hover:bg-neutral-700 text-neutral-300 text-[10px] transition-colors"
+                  className="px-2 py-0.5 rounded-lg bg-[#fae1e8] hover:bg-[#f7d0dc] text-[#732641] text-[10px] font-semibold transition-colors cursor-pointer border border-[#f2cad4]"
                 >
                   折叠全部
                 </button>
@@ -837,7 +835,7 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
             </div>
           </div>
 
-          {/* Layer List (Draggable & Modular, Mobile-Responsive) */}
+          {/* Layer List (Draggable & Modular) */}
           <div className="space-y-3">
             {layers.map((layer, index) => {
               const isExpanded = expandedMap[layer.id] ?? false;
@@ -854,29 +852,29 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
                   onDragEnd={() => { setDraggedIdx(null); setDragOverIdx(null); }}
                   className={`rounded-2xl border transition-all duration-200 overflow-hidden ${
                     isDragging 
-                      ? 'opacity-40 scale-[0.98] border-cyan-500/80 bg-neutral-900/80 shadow-2xl' 
+                      ? 'opacity-40 scale-[0.98] border-[#b83d5a] bg-[#fcebf0] shadow-xl' 
                       : isOver
-                        ? 'border-cyan-400 bg-cyan-950/20 shadow-lg'
+                        ? 'border-[#b83d5a] bg-[#fcebf0] shadow-md'
                         : layer.enabled 
-                          ? 'bg-neutral-900/90 border-neutral-800 hover:border-neutral-700 shadow-md' 
-                          : 'bg-neutral-950/60 border-neutral-800/50 opacity-65'
+                          ? 'bg-[#fffafb] border-[#f2cad4] hover:border-[#e07a93] shadow-xs' 
+                          : 'bg-[#fcf5f7] border-[#eed4dc] opacity-75'
                   }`}
                 >
-                  {/* Layer Card Header - Mobile-Optimized Grid / Flex Layout */}
+                  {/* Layer Card Header */}
                   <div className="p-3 sm:p-4 space-y-2 select-none">
                     {/* Row 1: Drag handle, Order, Role, and Action Tools */}
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-1.5 min-w-0">
                         {/* Drag Handle */}
                         <div 
-                          className="cursor-grab active:cursor-grabbing p-1 -ml-1 rounded text-neutral-500 hover:text-cyan-400 hover:bg-neutral-800/80 transition-colors"
+                          className="cursor-grab active:cursor-grabbing p-1 -ml-1 rounded-lg text-[#b3999e] hover:text-[#b83d5a] hover:bg-[#fae1e8] transition-colors"
                           title="按住拖拽调整顺序"
                         >
                           <GripVertical size={16} />
                         </div>
 
                         {/* Order Number */}
-                        <span className="w-5 h-5 rounded bg-neutral-800 border border-neutral-700 flex items-center justify-center text-[10px] font-mono font-bold text-neutral-300 shrink-0">
+                        <span className="w-5 h-5 rounded-lg bg-[#fae1e8] border border-[#f2cad4] flex items-center justify-center text-[10px] font-mono font-bold text-[#732641] shrink-0">
                           {index + 1}
                         </span>
 
@@ -886,10 +884,10 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
                           onChange={(e) => handleUpdateLayer(layer.id, { role: e.target.value as PromptLayerRole })}
                           className={`text-[11px] sm:text-xs font-bold font-mono px-2 py-0.5 rounded-lg border focus:outline-none transition-all cursor-pointer ${
                             layer.role === 'system'
-                              ? 'bg-cyan-950/60 text-cyan-300 border-cyan-500/40'
+                              ? 'bg-[#fae1e8] text-[#8c243e] border-[#f2cad4]'
                               : layer.role === 'user'
-                                ? 'bg-amber-950/60 text-amber-300 border-amber-500/40'
-                                : 'bg-purple-950/60 text-purple-300 border-purple-500/40'
+                                ? 'bg-[#ffedd5] text-[#9a3412] border-[#fed7aa]'
+                                : 'bg-[#f3e8ff] text-[#6b21a8] border-[#e9d5ff]'
                           }`}
                         >
                           <option value="system">SYSTEM</option>
@@ -901,11 +899,11 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
                       {/* Header Right Actions */}
                       <div className="flex items-center gap-1 shrink-0">
                         {/* Up / Down Reorder Buttons */}
-                        <div className="flex items-center rounded-lg bg-neutral-800/80 p-0.5 border border-neutral-700/80">
+                        <div className="flex items-center rounded-lg bg-[#fae1e8] p-0.5 border border-[#f2cad4]">
                           <button
                             disabled={index === 0}
                             onClick={() => handleMoveLayer(index, 'up')}
-                            className="p-1 rounded text-neutral-400 hover:text-cyan-300 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-neutral-700 transition-colors"
+                            className="p-1 rounded-md text-[#785b56] hover:text-[#b83d5a] disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#fcedf1] transition-colors cursor-pointer"
                             title="向上移动"
                           >
                             <ArrowUp size={12} />
@@ -913,7 +911,7 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
                           <button
                             disabled={index === layers.length - 1}
                             onClick={() => handleMoveLayer(index, 'down')}
-                            className="p-1 rounded text-neutral-400 hover:text-cyan-300 disabled:opacity-30 disabled:cursor-not-allowed hover:bg-neutral-700 transition-colors"
+                            className="p-1 rounded-md text-[#785b56] hover:text-[#b83d5a] disabled:opacity-30 disabled:cursor-not-allowed hover:bg-[#fcedf1] transition-colors cursor-pointer"
                             title="向下移动"
                           >
                             <ArrowDown size={12} />
@@ -923,7 +921,7 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
                         {/* Duplicate */}
                         <button
                           onClick={() => handleDuplicateLayer(layer)}
-                          className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 transition-colors hidden sm:block"
+                          className="p-1.5 rounded-lg text-[#785b56] hover:text-[#4a3431] hover:bg-[#fae1e8] transition-colors hidden sm:block cursor-pointer"
                           title="复制图层"
                         >
                           <Copy size={13} />
@@ -932,7 +930,7 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
                         {/* Delete */}
                         <button
                           onClick={() => handleDeleteLayer(layer.id)}
-                          className="p-1.5 rounded-lg text-neutral-400 hover:text-rose-400 hover:bg-rose-950/30 transition-colors"
+                          className="p-1.5 rounded-lg text-[#785b56] hover:text-rose-600 hover:bg-[#fee2e2] transition-colors cursor-pointer"
                           title="删除图层"
                         >
                           <Trash2 size={13} />
@@ -941,10 +939,10 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
                         {/* Enable/Disable Toggle */}
                         <button
                           onClick={() => handleToggleEnabled(layer.id)}
-                          className={`px-2 py-0.5 rounded-md text-[11px] font-semibold border transition-all ${
+                          className={`px-2 py-0.5 rounded-md text-[11px] font-bold border transition-all cursor-pointer ${
                             layer.enabled
-                              ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30'
-                              : 'bg-neutral-800 text-neutral-400 border-neutral-700'
+                              ? 'bg-[#dcfce7] text-emerald-800 border-[#86efac]'
+                              : 'bg-[#fcedf1] text-[#785b56] border-[#f2cad4]'
                           }`}
                         >
                           {layer.enabled ? '已启用' : '停用'}
@@ -953,7 +951,7 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
                         {/* Expand / Collapse */}
                         <button
                           onClick={() => handleToggleExpand(layer.id)}
-                          className="p-1 rounded-lg text-neutral-400 hover:text-neutral-200 hover:bg-neutral-800 transition-colors"
+                          className="p-1 rounded-lg text-[#785b56] hover:text-[#4a3431] hover:bg-[#fae1e8] transition-colors cursor-pointer"
                         >
                           {isExpanded ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                         </button>
@@ -966,7 +964,7 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
                         type="text"
                         value={layer.name}
                         onChange={(e) => handleUpdateLayer(layer.id, { name: e.target.value })}
-                        className="bg-neutral-800/40 hover:bg-neutral-800/70 focus:bg-neutral-800 px-2.5 py-1 rounded-lg text-xs sm:text-sm font-semibold text-neutral-100 focus:outline-none focus:ring-1 focus:ring-cyan-500/50 w-full truncate transition-colors border border-transparent focus:border-cyan-500/40"
+                        className="bg-[#fff0f4] hover:bg-[#fcebf0] focus:bg-[#fff5f7] px-2.5 py-1 rounded-xl text-xs sm:text-sm font-bold text-[#4a3431] focus:outline-none focus:ring-1 focus:ring-[#b83d5a]/50 w-full truncate transition-colors border border-[#f2cad4] focus:border-[#b83d5a]"
                         placeholder="输入图层标题..."
                       />
                     </div>
@@ -974,45 +972,45 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
 
                   {/* Layer Description (if collapsed) */}
                   {layer.description && !isExpanded && (
-                    <div className="px-3 sm:px-4 pb-2.5 text-[11px] text-neutral-400 truncate flex items-center gap-1">
-                      <Info size={12} className="text-neutral-500 shrink-0" />
+                    <div className="px-3 sm:px-4 pb-2.5 text-[11px] text-[#785b56] truncate flex items-center gap-1">
+                      <Info size={12} className="text-[#b83d5a] shrink-0" />
                       <span>{layer.description}</span>
                     </div>
                   )}
 
                   {/* Layer Expanded Body */}
                   {isExpanded && (
-                    <div className="px-3 sm:px-4 pb-3.5 pt-1 border-t border-neutral-800/80 bg-neutral-950/40 space-y-3">
+                    <div className="px-3 sm:px-4 pb-3.5 pt-1 border-t border-[#f2cad4] bg-[#fff5f7] space-y-3">
                       {/* Layer Description Input */}
                       <div className="flex items-center gap-2">
-                        <span className="text-[10px] text-neutral-400 font-medium shrink-0">备注说明:</span>
+                        <span className="text-[10px] text-[#785b56] font-semibold shrink-0">备注说明:</span>
                         <input
                           type="text"
                           value={layer.description || ''}
                           onChange={(e) => handleUpdateLayer(layer.id, { description: e.target.value })}
                           placeholder="添加图层说明..."
-                          className="bg-neutral-900/80 border border-neutral-800 rounded-lg px-2 py-0.5 text-xs text-neutral-300 w-full focus:outline-none focus:border-cyan-500/50"
+                          className="bg-[#fffbfb] border border-[#f2cad4] rounded-xl px-2.5 py-0.5 text-xs text-[#4a3431] w-full focus:outline-none focus:border-[#b83d5a]"
                         />
                       </div>
 
                       {/* Special controls for History Context Layer */}
                       {layer.type === 'history_context' ? (
-                        <div className="p-3 sm:p-4 rounded-xl bg-neutral-900/90 border border-neutral-800 space-y-2.5">
+                        <div className="p-3 sm:p-4 rounded-2xl bg-[#fffafb] border border-[#f2cad4] space-y-2.5">
                           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                            <span className="text-xs font-semibold text-neutral-200 flex items-center gap-1.5">
-                              <MessageSquare size={13} className="text-cyan-400" />
+                            <span className="text-xs font-bold text-[#4a3431] flex items-center gap-1.5">
+                              <MessageSquare size={13} className="text-[#b83d5a]" />
                               历史消息注入上限：
-                              <strong className="text-cyan-300 font-mono text-sm">{layer.historyLimit ?? 12} 条</strong>
+                              <strong className="text-[#b83d5a] font-mono text-sm">{layer.historyLimit ?? 12} 条</strong>
                             </span>
                             <div className="flex flex-wrap items-center gap-1">
                               {[0, 6, 12, 20, 30, 50].map((count) => (
                                 <button
                                   key={count}
                                   onClick={() => handleUpdateLayer(layer.id, { historyLimit: count })}
-                                  className={`px-2 py-0.5 rounded text-[10px] font-mono border transition-all ${
+                                  className={`px-2 py-0.5 rounded-lg text-[10px] font-mono border transition-all cursor-pointer ${
                                     (layer.historyLimit ?? 12) === count
-                                      ? 'bg-cyan-500/20 text-cyan-300 border-cyan-500/40 font-bold'
-                                      : 'bg-neutral-800 text-neutral-400 border-neutral-700 hover:text-neutral-200'
+                                      ? 'bg-[#b83d5a] text-white border-[#b83d5a] font-bold shadow-2xs'
+                                      : 'bg-[#fae1e8] text-[#732641] border-[#f2cad4] hover:bg-[#f7d0dc]'
                                   }`}
                                 >
                                   {count === 0 ? '纯指令' : `${count}条`}
@@ -1028,21 +1026,21 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
                             step="1"
                             value={layer.historyLimit ?? 12}
                             onChange={(e) => handleUpdateLayer(layer.id, { historyLimit: parseInt(e.target.value, 10) })}
-                            className="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-cyan-400"
+                            className="w-full h-1.5 bg-[#f2cad4] rounded-lg appearance-none cursor-pointer accent-[#b83d5a]"
                           />
-                          <p className="text-[10px] text-neutral-400 leading-relaxed">
-                            💡 对话运行时，引擎将在此位置提取最近 <strong className="text-neutral-200">{layer.historyLimit ?? 12}</strong> 条历史记录打包注入。
+                          <p className="text-[10px] text-[#785b56] leading-relaxed">
+                            💡 对话运行时，引擎将在此位置提取最近 <strong className="text-[#4a3431] font-bold">{layer.historyLimit ?? 12}</strong> 条历史记录打包注入。
                           </p>
                         </div>
                       ) : (
                         /* Standard Content Textarea */
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between">
-                            <label className="text-[11px] font-semibold text-neutral-300 flex items-center gap-1">
-                              <FileCode size={13} className="text-cyan-400" />
+                            <label className="text-[11px] font-bold text-[#4a3431] flex items-center gap-1">
+                              <FileCode size={13} className="text-[#b83d5a]" />
                               提示词内容模版
                             </label>
-                            <span className="text-[10px] text-neutral-500 font-mono">
+                            <span className="text-[10px] text-[#785b56] font-mono">
                               {layer.content.length} 字符
                             </span>
                           </div>
@@ -1052,13 +1050,13 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
                             onChange={(e) => handleUpdateLayer(layer.id, { content: e.target.value })}
                             rows={Math.min(12, Math.max(3, layer.content.split('\n').length + 1))}
                             placeholder="在此输入要注入给 LLM 的提示词内容..."
-                            className="w-full bg-neutral-900 border border-neutral-800 rounded-xl p-2.5 text-xs font-mono text-neutral-200 focus:outline-none focus:border-cyan-500/50 focus:ring-1 focus:ring-cyan-500/30 leading-relaxed transition-all resize-y"
+                            className="w-full bg-[#fffbfb] border border-[#f2cad4] rounded-2xl p-2.5 text-xs font-mono text-[#4a3431] focus:outline-none focus:border-[#b83d5a] focus:ring-1 focus:ring-[#b83d5a]/30 leading-relaxed transition-all resize-y"
                           />
 
                           {/* Template Variable Quick Insert Bar */}
                           <div className="pt-1 flex flex-wrap items-center gap-1">
-                            <span className="text-[10px] text-neutral-400 flex items-center gap-1 mr-0.5">
-                              <Sparkles size={11} className="text-cyan-400" /> 插入变量:
+                            <span className="text-[10px] text-[#785b56] flex items-center gap-1 mr-0.5">
+                              <Sparkles size={11} className="text-[#b83d5a]" /> 插入变量:
                             </span>
                             {[
                               { key: '{characterName}', label: '角色名' },
@@ -1075,7 +1073,7 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
                               <button
                                 key={item.key}
                                 onClick={() => handleInsertVariable(layer.id, item.key)}
-                                className="px-1.5 py-0.5 rounded bg-neutral-800/90 hover:bg-cyan-950/60 hover:text-cyan-300 hover:border-cyan-500/40 text-neutral-300 border border-neutral-700/80 text-[10px] font-mono transition-colors"
+                                className="px-1.5 py-0.5 rounded-lg bg-[#fae1e8] hover:bg-[#f7d0dc] text-[#732641] border border-[#f2cad4] text-[10px] font-mono transition-colors cursor-pointer"
                               >
                                 +{item.label}
                               </button>
@@ -1090,17 +1088,17 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
             })}
           </div>
 
-          {/* Add New Layer Toolbar (Mobile-Friendly wrap) */}
-          <div className="p-3.5 sm:p-4 rounded-2xl bg-neutral-900/60 border border-dashed border-neutral-800 hover:border-cyan-500/40 transition-colors space-y-2.5">
-            <div className="flex items-center gap-1.5 text-xs text-neutral-400">
-              <BookmarkPlus size={15} className="text-cyan-400" />
-              <span>添加新图层，支持设置 <strong className="text-neutral-200">System</strong>、<strong className="text-neutral-200">User</strong> 或 <strong className="text-neutral-200">Assistant</strong> 角色</span>
+          {/* Add New Layer Toolbar */}
+          <div className="p-3.5 sm:p-4 rounded-3xl bg-[#fff8fa] border-2 border-dashed border-[#f2cad4] hover:border-[#b83d5a]/60 transition-colors space-y-2.5">
+            <div className="flex items-center gap-1.5 text-xs text-[#785b56]">
+              <BookmarkPlus size={15} className="text-[#b83d5a]" />
+              <span>添加新图层，支持设置 <strong className="text-[#8c243e]">System</strong>、<strong className="text-[#9a3412]">User</strong> 或 <strong className="text-[#6b21a8]">Assistant</strong> 角色</span>
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
               <button
                 onClick={() => handleAddLayerPreset('system')}
-                className="px-2.5 py-1.5 rounded-xl bg-cyan-950/40 hover:bg-cyan-900/50 text-cyan-300 border border-cyan-500/30 text-xs font-medium flex items-center gap-1 transition-colors"
+                className="px-2.5 py-1.5 rounded-xl bg-[#fae1e8] hover:bg-[#f7d0dc] text-[#8c243e] border border-[#f2cad4] text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
               >
                 <Plus size={12} />
                 <span>+ System 规则</span>
@@ -1108,7 +1106,7 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
 
               <button
                 onClick={() => handleAddLayerPreset('user')}
-                className="px-2.5 py-1.5 rounded-xl bg-amber-950/40 hover:bg-amber-900/50 text-amber-300 border border-amber-500/30 text-xs font-medium flex items-center gap-1 transition-colors"
+                className="px-2.5 py-1.5 rounded-xl bg-[#ffedd5] hover:bg-[#fed7aa] text-[#9a3412] border border-[#fed7aa] text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
               >
                 <Plus size={12} />
                 <span>+ User 消息</span>
@@ -1116,7 +1114,7 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
 
               <button
                 onClick={() => handleAddLayerPreset('assistant')}
-                className="px-2.5 py-1.5 rounded-xl bg-purple-950/40 hover:bg-purple-900/50 text-purple-300 border border-purple-500/30 text-xs font-medium flex items-center gap-1 transition-colors"
+                className="px-2.5 py-1.5 rounded-xl bg-[#f3e8ff] hover:bg-[#e9d5ff] text-[#6b21a8] border border-[#e9d5ff] text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
               >
                 <Plus size={12} />
                 <span>+ Assistant 响应</span>
@@ -1125,62 +1123,62 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
               <div className="relative">
                 <button
                   onClick={() => setAddMenuOpen(!addMenuOpen)}
-                  className="px-2.5 py-1.5 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 text-xs font-medium flex items-center gap-1 transition-colors"
+                  className="px-2.5 py-1.5 rounded-xl bg-[#fae1e8] hover:bg-[#f7d0dc] text-[#732641] border border-[#f2cad4] text-xs font-bold flex items-center gap-1 transition-colors cursor-pointer"
                 >
                   <span>更多模版...</span>
                   <ChevronDown size={13} />
                 </button>
 
                 {addMenuOpen && (
-                  <div className="absolute left-0 sm:left-auto sm:right-0 bottom-full mb-2 w-60 sm:w-64 bg-neutral-900 border border-neutral-700 rounded-xl shadow-2xl p-1.5 z-30 space-y-1">
+                  <div className="absolute left-0 sm:left-auto sm:right-0 bottom-full mb-2 w-60 sm:w-64 bg-[#fffafb] border-2 border-[#f2cad4] rounded-2xl shadow-xl p-1.5 z-30 space-y-1">
                     <button
                       onClick={() => handleAddLayerPreset('few_shot_user')}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-neutral-800 text-xs text-neutral-200 flex items-center gap-2 transition-colors"
+                      className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-[#fae1e8] text-xs text-[#4a3431] flex items-center gap-2 transition-colors cursor-pointer"
                     >
-                      <UserCheck size={14} className="text-amber-400 shrink-0" />
+                      <UserCheck size={14} className="text-[#ea580c] shrink-0" />
                       <div>
-                        <div className="font-semibold">Few-Shot 主控提问示例</div>
-                        <div className="text-[10px] text-neutral-400">示范主控动作与提问格式</div>
+                        <div className="font-bold">Few-Shot 主控提问示例</div>
+                        <div className="text-[10px] text-[#785b56]">示范主控动作与提问格式</div>
                       </div>
                     </button>
                     <button
                       onClick={() => handleAddLayerPreset('few_shot_asst')}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-neutral-800 text-xs text-neutral-200 flex items-center gap-2 transition-colors"
+                      className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-[#fae1e8] text-xs text-[#4a3431] flex items-center gap-2 transition-colors cursor-pointer"
                     >
-                      <Bot size={14} className="text-purple-400 shrink-0" />
+                      <Bot size={14} className="text-[#9333ea] shrink-0" />
                       <div>
-                        <div className="font-semibold">Few-Shot 角色回复示例</div>
-                        <div className="text-[10px] text-neutral-400">示范心理、动作、台词与 Delta</div>
+                        <div className="font-bold">Few-Shot 角色回复示例</div>
+                        <div className="text-[10px] text-[#785b56]">示范心理、动作、台词与 Delta</div>
                       </div>
                     </button>
                     <button
                       onClick={() => handleAddLayerPreset('history')}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-neutral-800 text-xs text-neutral-200 flex items-center gap-2 transition-colors"
+                      className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-[#fae1e8] text-xs text-[#4a3431] flex items-center gap-2 transition-colors cursor-pointer"
                     >
-                      <MessageSquare size={14} className="text-emerald-400 shrink-0" />
+                      <MessageSquare size={14} className="text-emerald-700 shrink-0" />
                       <div>
-                        <div className="font-semibold">历史对话注入窗口 (History)</div>
-                        <div className="text-[10px] text-neutral-400">注入最近 N 条往来消息</div>
+                        <div className="font-bold">历史对话注入窗口 (History)</div>
+                        <div className="text-[10px] text-[#785b56]">注入最近 N 条往来消息</div>
                       </div>
                     </button>
                     <button
                       onClick={() => handleAddLayerPreset('custom_rules')}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-neutral-800 text-xs text-neutral-200 flex items-center gap-2 transition-colors"
+                      className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-[#fae1e8] text-xs text-[#4a3431] flex items-center gap-2 transition-colors cursor-pointer"
                     >
-                      <Shield size={14} className="text-cyan-400 shrink-0" />
+                      <Shield size={14} className="text-[#b83d5a] shrink-0" />
                       <div>
-                        <div className="font-semibold">防破防与沉浸感守则</div>
-                        <div className="text-[10px] text-neutral-400">强化不跳戏与亲密描写指令</div>
+                        <div className="font-bold">防破防与沉浸感守则</div>
+                        <div className="text-[10px] text-[#785b56]">强化不跳戏与亲密描写指令</div>
                       </div>
                     </button>
                     <button
                       onClick={() => handleAddLayerPreset('worldbook')}
-                      className="w-full text-left px-2.5 py-1.5 rounded-lg hover:bg-neutral-800 text-xs text-neutral-200 flex items-center gap-2 transition-colors"
+                      className="w-full text-left px-2.5 py-1.5 rounded-xl hover:bg-[#fae1e8] text-xs text-[#4a3431] flex items-center gap-2 transition-colors cursor-pointer"
                     >
-                      <Sparkles size={14} className="text-blue-400 shrink-0" />
+                      <Sparkles size={14} className="text-[#b83d5a] shrink-0" />
                       <div>
-                        <div className="font-semibold">世界观与场景设定 (Worldbook)</div>
-                        <div className="text-[10px] text-neutral-400">剧情时间、地点与特殊设定</div>
+                        <div className="font-bold">世界观与场景设定 (Worldbook)</div>
+                        <div className="text-[10px] text-[#785b56]">剧情时间、地点与特殊设定</div>
                       </div>
                     </button>
                   </div>
@@ -1189,18 +1187,18 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
             </div>
           </div>
 
-          {/* Bottom Save Bar (Static in modal, not floating awkwardly) */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 rounded-2xl bg-neutral-900/90 border border-neutral-800 shadow-lg">
-            <div className="flex items-center gap-2 text-xs text-neutral-400 text-center sm:text-left">
+          {/* Bottom Save Bar */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 p-3.5 rounded-3xl bg-[#fae1e8] border border-[#f2cad4] shadow-sm">
+            <div className="flex items-center gap-2 text-xs text-[#785b56] text-center sm:text-left">
               <span>
-                共 <strong className="text-cyan-400 font-mono">{layers.length}</strong> 个图层 (<strong className="text-emerald-400 font-mono">{layers.filter(l => l.enabled).length}</strong> 已启用)，修改即时作用于引擎。
+                共 <strong className="text-[#b83d5a] font-mono font-bold">{layers.length}</strong> 个图层 (<strong className="text-emerald-700 font-mono font-bold">{layers.filter(l => l.enabled).length}</strong> 已启用)，修改即时作用于引擎。
               </span>
             </div>
 
             <div className="flex items-center gap-2 w-full sm:w-auto">
               <button
                 onClick={() => setViewMode('preview')}
-                className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-200 border border-neutral-700 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                className="flex-1 sm:flex-initial px-3.5 py-2 rounded-xl bg-[#fff5f7] hover:bg-[#fae1e8] text-[#732641] border border-[#f2cad4] text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
               >
                 <Eye size={14} />
                 <span>实时 Payload 预览</span>
@@ -1208,9 +1206,9 @@ export default function PromptInjectionEditor({ currentCharacterId, onUpdated }:
 
               <button
                 onClick={handleSaveAll}
-                className="flex-1 sm:flex-initial px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-md shadow-cyan-900/40 active:scale-95"
+                className="flex-1 sm:flex-initial px-5 py-2 rounded-xl bg-[#b83d5a] hover:bg-[#a0314c] text-white text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95 cursor-pointer"
               >
-                {saved ? <Check size={14} className="text-emerald-300" /> : <Sparkles size={14} />}
+                {saved ? <Check size={14} className="text-emerald-200" /> : <Sparkles size={14} />}
                 <span>{saved ? '已保存！' : '保存所有图层'}</span>
               </button>
             </div>

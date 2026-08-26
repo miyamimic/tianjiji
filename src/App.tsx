@@ -15,6 +15,7 @@ import OutboxStatusBar from '@/components/OutboxStatusBar';
 import { useEngine } from '@/hooks/useEngine';
 import { loadLlmConfig, isLlmConfigured, type LlmConfig } from '@/lib/llm';
 import { loadCustomCss, applyCustomCss, loadCustomChatBg } from '@/lib/customStore';
+import { loadCurrentTheme, THEME_PRESETS, loadGrainIntensity } from '@/lib/themeSystem';
 import { 
   subscribeGameInvite, 
   acceptGameInvite, 
@@ -45,11 +46,25 @@ export default function App() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
 
+  const [currentThemeId, setCurrentThemeId] = useState(() => loadCurrentTheme());
+
   const [stickerToast, setStickerToast] = useState<{
     by: 'user' | 'ai';
     message: string;
     stickerUrl?: string;
   } | null>(null);
+
+  useEffect(() => {
+    const handleThemeChanged = () => {
+      setCurrentThemeId(loadCurrentTheme());
+    };
+    window.addEventListener('tianjiji_theme_changed', handleThemeChanged);
+    window.addEventListener('tianjiji_theme_elements_changed', handleThemeChanged);
+    return () => {
+      window.removeEventListener('tianjiji_theme_changed', handleThemeChanged);
+      window.removeEventListener('tianjiji_theme_elements_changed', handleThemeChanged);
+    };
+  }, []);
 
   useEffect(() => {
     const handleStickerStolen = (e: Event) => {
@@ -60,103 +75,68 @@ export default function App() {
           message: customEvt.detail.message,
           stickerUrl: customEvt.detail.stickerUrl,
         });
-        setTimeout(() => {
-          setStickerToast(null);
-        }, 3600);
+        setTimeout(() => setStickerToast(null), 3500);
       }
     };
-    window.addEventListener('rp_sticker_stolen_event', handleStickerStolen);
-    return () => {
-      window.removeEventListener('rp_sticker_stolen_event', handleStickerStolen);
-    };
+    window.addEventListener('sticker_stolen_event', handleStickerStolen);
+    return () => window.removeEventListener('sticker_stolen_event', handleStickerStolen);
   }, []);
 
+  // Listen to game invites
   useEffect(() => {
     const unsub = subscribeGameInvite((invite) => {
-      if (invite && invite.status === 'pending') {
+      if (invite) {
         setActiveInviteModal(invite);
-      } else {
-        setActiveInviteModal(null);
       }
     });
     return unsub;
   }, []);
 
+  // Inject user-custom CSS on startup
   useEffect(() => {
-    const css = loadCustomCss();
-    applyCustomCss(css);
-    const bg = loadCustomChatBg();
-    if (bg) {
-      setCustomChatBg(bg);
-    }
+    applyCustomCss(loadCustomCss());
+    document.documentElement.style.setProperty('--grain-opacity', String(loadGrainIntensity()));
   }, []);
 
-  // 检测横屏 / 竖屏（用视口宽高比，不是设备方向，避免依赖 device orientation API）
+  // Resize listener
   useEffect(() => {
-    const recompute = () => {
+    const handleResize = () => {
       const isPort = isPortraitViewport(window.innerWidth, window.innerHeight);
       setPortrait(isPort);
-      // 如果处于手机竖屏模式，确保场景为 chat 界面
-      if (isPort) {
-        setScene('chat');
-      }
     };
-    recompute();
-    window.addEventListener('resize', recompute);
-    window.addEventListener('orientationchange', recompute);
-    return () => {
-      window.removeEventListener('resize', recompute);
-      window.removeEventListener('orientationchange', recompute);
-    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const character = engine.getCharacter();
-  const emotion = engine.getEmotion();
-  const previousEmotion = engine.getPreviousEmotion();
-  const emotionConfirmed = engine.getEmotionConfirmed();
-  const threads = engine.getBackgroundThreads();
-  const anchors = engine.getTriggeredAnchors();
   const messages = engine.getMessages();
-  const intent = engine.getLastIntent();
-  const fallback = engine.getLastFallback();
 
-  const llmReady = isLlmConfigured(llmConfig);
-
+  // Auto scroll chat
   useEffect(() => {
-    if (scrollRef.current && scene === 'chat') {
+    if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, isLoading, scene]);
+  }, [messages, isLoading]);
 
-  if (!engine.ready) {
-    return (
-      <div className="h-screen w-full flex items-center justify-center bg-black">
-        <div className="text-white/40 animate-pulse">正在进入房间...</div>
-      </div>
-    );
-  }
+  const character = engine.getCharacter();
+  const llmReady = isLlmConfigured(llmConfig);
 
-  const handleSend = (text: string) => {
+  const handleSend = async (text: string) => {
+    setIsLoading(true);
     try {
-      engine.addUserMessageOnly(text);
+      await engine.sendMessage(text, llmReady ? llmConfig : undefined);
     } catch (e) {
-      console.error('发送失败', e);
+      console.error('发送消息推演失败', e);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleRequestReply = async (messageId?: string) => {
+  const handleTriggerReply = async (messageId?: string) => {
     setIsLoading(true);
     try {
-      const res = await engine.triggerCharacterReply(messageId, llmReady ? llmConfig : undefined);
-      if (res && res.numbedKeys && res.numbedKeys.length > 0) {
-        setNumbedModalInfo({
-          characterName: res.characterName || character.name,
-          numbedKeys: res.numbedKeys,
-          isSensitized: (res.sensitizedKeys && res.sensitizedKeys.length > 0) || false,
-        });
-      }
+      await engine.triggerCharacterReply(messageId, llmReady ? llmConfig : undefined);
     } catch (e) {
-      console.error('回复生成失败', e);
+      console.error('主动触发回复推演失败', e);
     } finally {
       setIsLoading(false);
     }
@@ -165,14 +145,7 @@ export default function App() {
   const handleReroll = async (messageId: string, feedback?: { score?: number; reason?: string }) => {
     setIsLoading(true);
     try {
-      const res = await engine.rerollMessage(messageId, feedback, llmReady ? llmConfig : undefined);
-      if (res && res.numbedKeys && res.numbedKeys.length > 0) {
-        setNumbedModalInfo({
-          characterName: res.characterName || character.name,
-          numbedKeys: res.numbedKeys,
-          isSensitized: (res.sensitizedKeys && res.sensitizedKeys.length > 0) || false,
-        });
-      }
+      await engine.rerollMessage(messageId, feedback, llmReady ? llmConfig : undefined);
     } catch (e) {
       console.error('重roll生成失败', e);
     } finally {
@@ -181,16 +154,14 @@ export default function App() {
   };
 
   const bgSrc = scene === 'welcome' ? '/welcome_bg.png' : (customChatBg || '/chat_bg.png');
-  const bg = BG_SIZE[scene];            // 原始图像素尺寸
-  const pos = BG_OBJECT_POS[scene];     // 竖屏时的 object-position（横屏无效）
-  // 横屏时：舞台严格按图片比例居中，图片 1:1 不裁切
-  // 竖屏时：舞台铺满视口（无黑边），背景图用 cover + 偏移保证主体/光点可见
+  const bg = BG_SIZE[scene];
+  const pos = BG_OBJECT_POS[scene];
   const stageRatio = bg;
 
   return (
     <div
       ref={wrapRef}
-      className="relative w-full flex items-center justify-center overflow-hidden bg-black"
+      className="relative w-full flex items-center justify-center overflow-hidden bg-[#fdf6f7] french-fine-grain"
       style={{ height: '100vh', width: '100vw' }}
     >
       {/* 手机端高精度像素绿叶飘落加载动画 */}
@@ -203,13 +174,11 @@ export default function App() {
         className="relative overflow-hidden shadow-2xl"
         style={
           portrait
-            // ---------- 竖屏（手机端）：铺满视口，背景图 cover + 左侧保留裁切 ----------
             ? {
                 width: '100vw',
                 height: '100vh',
                 aspectRatio: undefined,
               }
-            // ---------- 横屏（桌面 / 横屏手机）：按原图像素比例居中，图片绝不裁切 ----------
             : {
                 aspectRatio: `${stageRatio.w} / ${stageRatio.h}`,
                 width: `min(100vw, calc(100vh * ${stageRatio.w} / ${stageRatio.h}))`,
@@ -217,9 +186,7 @@ export default function App() {
               }
         }
       >
-        {/* LAYER 1: BACKGROUND IMAGE
-              横屏：舞台比例 = 图片比例，object-cover ≡ object-contain，不裁切
-              竖屏：object-cover + 自定义 object-position (chat x: 0 保证左侧主体人物完整可见) */}
+        {/* LAYER 1: BACKGROUND IMAGE */}
         <img
           key={bgSrc}
           src={bgSrc}
@@ -235,7 +202,7 @@ export default function App() {
         {/* LAYER 2: CANVAS OVERLAY — 钟表指针 + 呼吸光点 */}
         <SceneCanvas scene={scene} />
 
-        {/* LAYER 3: INTERACTION HOTSPOTS — z-40 需高于 chat 消息层(z-20) */}
+        {/* LAYER 3: INTERACTION HOTSPOTS */}
         <HotspotLayer
           scene={scene}
           onEnterChat={() => setScene('chat')}
@@ -262,7 +229,7 @@ export default function App() {
         {/* 202 Async Outbox & iOS Background Keep-Alive Status Island */}
         <OutboxStatusBar />
 
-        {/* Wind Chime Pulldown Control Panel (Anchored top-left, left of avatar) */}
+        {/* Wind Chime Pulldown Control Panel */}
         <WindChime
           currentBg={customChatBg}
           onBgChange={(newBg) => setCustomChatBg(newBg)}
@@ -289,62 +256,41 @@ export default function App() {
           }}
         />
 
-        {/* CHAT 场景才显示的消息区 + 输入框
-              - 手机竖屏：侧边栏改为 overlay（absolute 盖在主内容上），不再 pr-80 push 主内容
-              - 横屏：保留 pr-80（把主内容左推，避免与侧边栏重叠） */}
+        {/* CHAT 场景消息区 + 输入框 */}
         {scene === 'chat' && (
           <div
             className={`pointer-events-none absolute inset-0 z-20 flex flex-col pt-14 transition-[padding] duration-300 ${(!portrait && sidebarOpen) ? 'pr-80' : 'pr-0'}`}
           >
             <div ref={scrollRef} className="pointer-events-auto flex-1 overflow-y-auto chat-scroll">
               <div className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-3">
-                {messages.length === 0 && (
-                  <div className="px-3 py-8 sm:py-12 text-center">
-                    <div className="mx-auto mb-3 sm:mb-4 size-14 sm:size-16 rounded-full bg-gradient-to-br from-[hsl(28_85%_62%)] to-[hsl(28_85%_62%/0.6)] flex items-center justify-center text-xl sm:text-2xl font-bold text-[hsl(28_30%_10%)] shadow-xl shadow-[hsl(28_85%_62%/0.3)]">
+                {messages.map((msg) => (
+                  <ChatBubble
+                    key={msg.id}
+                    message={msg}
+                    characterName={character.name}
+                    characterId={character.character_id}
+                    onRollback={(id) => engine.rollbackToMessage(id)}
+                    onEdit={(id, newContent) => engine.editMessage(id, newContent)}
+                    onTriggerReply={handleTriggerReply}
+                    onReroll={handleReroll}
+                  />
+                ))}
+
+                {isLoading && (
+                  <div className="flex items-start gap-2.5 px-2">
+                    <div className="size-8 shrink-0 rounded-full bg-gradient-to-br from-[#fcd3de] to-[#f7a8be] flex items-center justify-center text-xs font-serif font-bold text-[#8a3854] ring-2 ring-white shadow-md border border-[#f2d0d9]">
                       {character.name.charAt(0)}
                     </div>
-                    <h1 className="text-lg sm:text-xl font-semibold text-white mb-1 sm:mb-2 drop-shadow-lg">
-                      正在与 {character.name} 对话
-                    </h1>
-                    <p className="text-xs sm:text-sm text-white/50 max-w-md mx-auto leading-relaxed mb-4 sm:mb-6 drop-shadow">
-                      {llmReady
-                        ? '已连接 LLM，角色回复由 AI 生成'
-                        : '本地演示模式 · 在设置中配置 LLM 接口以启用 AI 回复'}
-                    </p>
-                    <div className="flex flex-wrap gap-2 justify-center">
-                      {['我真的破防了emo', '不行，我做不到', '想你', '你胸肌练得不错'].map((s) => (
-                        <button
-                          key={s}
-                          onClick={() => handleSend(s)}
-                          className="rounded-full border border-white/15 bg-black/30 px-3 sm:px-4 py-1.5 text-xs sm:text-sm text-white/60 backdrop-blur-sm hover:border-[hsl(28_85%_62%/0.4)] hover:text-white hover:bg-black/50 transition-all"
-                        >
-                          {s}
-                        </button>
-                      ))}
-                    </div>
+                    <TypingIndicator />
                   </div>
                 )}
-                {messages.map((m) => (
-                  <div key={m.id} className={m.role === 'user' ? 'msg-enter-user' : 'msg-enter-char'}>
-                    <ChatBubble
-                      message={m}
-                      characterName={m.role === 'character' ? character.name : undefined}
-                      characterId={character.character_id}
-                      onRollback={(id) => engine.rollbackToMessage(id)}
-                      onEdit={(id, text) => engine.editMessage(id, text)}
-                      onTriggerReply={handleRequestReply}
-                      onReroll={handleReroll}
-                    />
-                  </div>
-                ))}
-                {isLoading && <TypingIndicator characterName={character.name} />}
               </div>
             </div>
 
             <div className="pointer-events-auto">
               <ChatInput
                 onSend={handleSend}
-                onRequestReply={() => handleRequestReply()}
+                onRequestReply={handleTriggerReply}
                 disabled={isLoading}
                 llmReady={llmReady}
               />
@@ -352,33 +298,23 @@ export default function App() {
           </div>
         )}
 
-        {/* Sidebar
-              - 手机竖屏：强制用 overlay 模式（absolute 盖在舞台上，有黑幕半透明遮罩）
-              - 横屏：保留默认布局（在舞台右侧独立列，80w 宽）*/}
+        {/* 侧边栏 */}
         <Sidebar
           isOpen={sidebarOpen}
           onToggle={() => setSidebarOpen((v) => !v)}
           characterId={character.character_id}
-          emotion={emotion}
-          previousEmotion={previousEmotion}
-          emotionConfirmed={emotionConfirmed}
+          emotion={engine.getEmotion()}
+          previousEmotion={engine.getPreviousEmotion()}
+          emotionConfirmed={engine.getEmotionConfirmed()}
           onConfirmEmotion={() => engine.confirmEmotion()}
-          threads={threads}
-          anchors={anchors}
-          intent={intent}
-          fallback={fallback}
+          threads={engine.getBackgroundThreads()}
+          anchors={engine.getTriggeredAnchors()}
+          intent={engine.getLastIntent()}
+          fallback={engine.getLastFallback()}
           characterName={character.name}
           overlayMode={portrait}
         />
       </div>
-
-      {/* 手机竖屏侧边栏打开时：舞台盖一层暗幕（侧栏 z-50 时才有用，这里仅视觉提示；Sidebar 自己带 backdrop）*/}
-      {portrait && sidebarOpen && (
-        <div
-          className="pointer-events-none absolute inset-0 z-40 bg-black/40"
-          aria-hidden="true"
-        />
-      )}
 
       <SettingsModal
         open={settingsOpen}
@@ -418,14 +354,10 @@ export default function App() {
         <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-top-4 duration-300 pointer-events-auto">
           <div
             onClick={() => setForceOpenApp('game_lobby')}
-            className={`flex items-center gap-3 px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-xl border cursor-pointer hover:scale-105 transition active:scale-95 ${
-              stickerToast.by === 'ai'
-                ? 'bg-purple-950/90 border-purple-400/50 text-purple-100 shadow-purple-900/40'
-                : 'bg-amber-950/90 border-amber-400/50 text-amber-100 shadow-amber-900/40'
-            }`}
+            className="flex items-center gap-3 px-4 py-2.5 rounded-2xl shadow-2xl backdrop-blur-xl border border-[#f2d0d9] bg-white/95 text-[#4a3e3d] cursor-pointer hover:scale-105 transition active:scale-95 font-serif"
           >
             {stickerToast.stickerUrl && (
-              <div className="size-8 rounded-xl overflow-hidden bg-black/50 border border-white/20 shrink-0">
+              <div className="size-8 rounded-xl overflow-hidden bg-[#fff0f3] border border-[#f2d0d9] shrink-0">
                 <img
                   src={stickerToast.stickerUrl}
                   alt="表情包"
@@ -436,7 +368,7 @@ export default function App() {
             )}
             <div className="text-xs font-medium space-y-0.5">
               <p>{stickerToast.message}</p>
-              <p className="text-[10px] opacity-70 underline">点击前往【游戏大厅·表情专区】查看详情 ➔</p>
+              <p className="text-[10px] text-[#e07a93] underline">点击前往【游戏大厅·表情专区】查看 ➔</p>
             </div>
           </div>
         </div>
@@ -444,4 +376,3 @@ export default function App() {
     </div>
   );
 }
-

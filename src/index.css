@@ -1,43 +1,48 @@
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;700&family=Press+Start+2P&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700;900&family=Noto+Sans+SC:wght@300;400;500;700&family=Zeyada&family=Caveat:wght@600&family=Press+Start+2P&display=swap');
 @import 'tailwindcss';
 
 @theme {
-  --color-background: hsl(222 28% 9%);
-  --color-foreground: hsl(210 15% 90%);
-  --color-card: hsl(220 22% 13%);
-  --color-card-foreground: hsl(210 15% 90%);
-  --color-primary: hsl(28 85% 62%);
-  --color-primary-foreground: hsl(28 30% 10%);
-  --color-secondary: hsl(217 18% 18%);
-  --color-secondary-foreground: hsl(210 15% 80%);
-  --color-muted: hsl(220 22% 13%);
-  --color-muted-foreground: hsl(217 10% 55%);
-  --color-accent: hsl(217 18% 18%);
-  --color-accent-foreground: hsl(210 15% 80%);
-  --color-border: hsl(217 12% 22%);
-  --color-input: hsl(217 12% 22%);
-  --color-ring: hsl(28 85% 62%);
-  --color-destructive: hsl(0 84% 60%);
-  --color-success: hsl(130 54% 42%);
-  --color-warning: hsl(26 90% 49%);
+  --color-background: #fff8f9;
+  --color-foreground: #4a3e3d;
+  --color-card: #ffffff;
+  --color-card-foreground: #4a3e3d;
+  --color-primary: #e07a93;
+  --color-primary-foreground: #ffffff;
+  --color-secondary: #fce7eb;
+  --color-secondary-foreground: #8a3854;
+  --color-muted: #fbf5f2;
+  --color-muted-foreground: #998380;
+  --color-accent: #fae29c;
+  --color-accent-foreground: #78350f;
+  --color-border: #f2d0d9;
+  --color-input: #fcede8;
+  --color-ring: #e07a93;
+  --color-destructive: #e11d48;
+  --color-success: #10b981;
+  --color-warning: #f59e0b;
 
+  --font-serif: 'Noto Serif SC', 'Songti SC', 'STSong', serif;
   --font-sans: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-pixel: 'Press Start 2P', monospace;
+  --font-art: 'Caveat', 'Zeyada', cursive;
+  --font-nanchankeben: '汉仪南禅刻本', 'HYNanChanKeBen', 'HYMingChanKeBen-W', '汉仪明禅刻本W', 'HYMingChanKeBen', 'FZSongKeBenXiuKaiS-R-GB', 'Songti SC', 'STSong', serif;
+  --font-shufang: '汉仪书仿95W', '汉仪书仿 95W', 'HYShuFang-95W', 'HYShuFang95W', '汉仪书仿', 'HYShuFang', 'FangSong', 'STFangsong', serif;
+  --font-qingkong: '晴空明朝', '晴空明朝体', 'Aozora Mincho', 'AozoraMincho', 'あおぞら明朝', 'Noto Serif SC', 'Songti SC', 'STSong', serif;
 
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.5rem;
-  --radius-xl: 0.75rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
 }
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 html, body {
-  background-color: transparent;
-  color: hsl(210 15% 90%);
-  font-family: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: #fcf8f6;
+  color: #4a3e3d;
+  font-family: 'Noto Serif SC', 'Noto Sans SC', -apple-system, BlinkMacSystemFont, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
@@ -47,52 +52,107 @@ html, body {
   min-height: 100vh;
 }
 
+/* ========================================================
+   1. Fine Grain Noise Shader Overlay (细颗粒胶片噪点)
+   ======================================================== */
+.french-fine-grain {
+  position: relative;
+}
+
+.french-fine-grain::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 99;
+  opacity: var(--grain-opacity, 0.35);
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.7'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  mix-blend-mode: overlay;
+}
+
+/* ========================================================
+   2. Stardew & French Lace Emboss Relief (法式浮雕蕾丝质感)
+   ======================================================== */
+.french-emboss-card {
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1.5px solid rgba(242, 208, 217, 0.85);
+  box-shadow: 
+    0 4px 20px -2px rgba(224, 122, 147, 0.12),
+    0 2px 6px -1px rgba(0, 0, 0, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9),
+    inset 0 -1px 0 rgba(224, 122, 147, 0.15);
+  border-radius: 1.25rem;
+}
+
+.french-lace-border {
+  border: 2px dashed #f2cad4;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.7);
+}
+
+.french-relief-text {
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.8), 0 2px 4px rgba(74, 62, 61, 0.08);
+}
+
+.stardew-pixel-box {
+  border: 2px solid #b87c5e;
+  box-shadow: 
+    inset -2px -2px 0 0 #8c5339,
+    inset 2px 2px 0 0 #fbd8bc,
+    2px 2px 0 0 rgba(0,0,0,0.15);
+  background-color: #fff9f0;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar {
-  width: 5px;
-  height: 5px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: transparent;
+  background: rgba(242, 208, 217, 0.15);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: hsl(217 12% 22%);
-  border-radius: 3px;
+  background: #e6b8c4;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: hsl(217 12% 30%);
+  background: #d89aa8;
 }
 
 /* Chat message slide-in animations */
 @keyframes msg-slide-right {
   from {
     opacity: 0;
-    transform: translateX(40px);
+    transform: translateX(30px) scale(0.96);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
   }
 }
 
 @keyframes msg-slide-left {
   from {
     opacity: 0;
-    transform: translateX(-40px);
+    transform: translateX(-30px) scale(0.96);
   }
   to {
     opacity: 1;
-    transform: translateX(0);
+    transform: translateX(0) scale(1);
   }
 }
 
 @keyframes msg-fade-in {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(10px);
   }
   to {
     opacity: 1;
@@ -101,11 +161,11 @@ html, body {
 }
 
 .msg-enter-user {
-  animation: msg-slide-right 0.35s ease-out;
+  animation: msg-slide-right 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .msg-enter-char {
-  animation: msg-slide-left 0.35s ease-out;
+  animation: msg-slide-left 0.35s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .msg-enter {
@@ -115,7 +175,7 @@ html, body {
 /* Chat overlay scroll area - hide scrollbar but allow scroll */
 .chat-scroll {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255,255,255,0.1) transparent;
+  scrollbar-color: rgba(224, 122, 147, 0.3) transparent;
 }
 
 /* Pixel rendering for canvas */
@@ -128,11 +188,11 @@ canvas {
 @keyframes typing-pulse {
   0%, 80%, 100% {
     opacity: 0.3;
-    transform: scale(0.8);
+    transform: scale(0.85);
   }
   40% {
     opacity: 1;
-    transform: scale(1);
+    transform: scale(1.1);
   }
 }
 
@@ -152,7 +212,23 @@ canvas {
 }
 
 .animate-chime-swing {
-  animation: chime-swing-anim 1.4s ease-in-out;
+  animation: chime-swing-anim 2.2s cubic-bezier(0.36, 0.07, 0.19, 0.97) forwards;
   transform-origin: top center;
 }
 
+/* French Cursive & Handwritten Accents */
+.art-font {
+  font-family: 'Caveat', 'Zeyada', cursive;
+}
+
+.font-nanchankeben {
+  font-family: '汉仪南禅刻本', 'HYNanChanKeBen', 'HYMingChanKeBen-W', '汉仪明禅刻本W', 'HYMingChanKeBen', 'FZSongKeBenXiuKaiS-R-GB', 'Songti SC', 'STSong', serif;
+}
+
+.font-shufang {
+  font-family: '汉仪书仿95W', '汉仪书仿 95W', 'HYShuFang-95W', 'HYShuFang95W', '汉仪书仿', 'HYShuFang', 'FangSong', 'STFangsong', serif;
+}
+
+.font-qingkong {
+  font-family: '晴空明朝', '晴空明朝体', 'Aozora Mincho', 'AozoraMincho', 'あおぞら明朝', 'Noto Serif SC', 'Songti SC', 'STSong', serif;
+}
