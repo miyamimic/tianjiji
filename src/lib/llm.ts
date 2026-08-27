@@ -430,6 +430,23 @@ function extractFromUnstructuredNarrative(raw: string): StructuredLlmResponse {
   };
 }
 
+function deduplicateStructuredResponses(list: StructuredLlmResponse[]): StructuredLlmResponse[] {
+  const result: StructuredLlmResponse[] = [];
+  const seenTexts = new Set<string>();
+
+  for (const item of list) {
+    if (!item || !item.reply) continue;
+    const normalized = item.reply.trim();
+    if (!normalized) continue;
+    if (!seenTexts.has(normalized)) {
+      seenTexts.add(normalized);
+      result.push(item);
+    }
+  }
+
+  return result.length > 0 ? result : (list.length > 0 ? [list[0]] : []);
+}
+
 export function parseStructuredLlmResponses(raw: string): StructuredLlmResponse[] {
   const cleaned = cleanRawLlmOutput(raw);
   if (!cleaned) return [];
@@ -465,7 +482,7 @@ export function parseStructuredLlmResponses(raw: string): StructuredLlmResponse[
       const parsed = JSON.parse(candidate);
       if (Array.isArray(parsed)) {
         const results = parsed.map(parseSingleStructuredItem).filter(Boolean) as StructuredLlmResponse[];
-        if (results.length > 0) return results;
+        if (results.length > 0) return deduplicateStructuredResponses(results);
       } else if (parsed && typeof parsed === 'object') {
         const res = parseSingleStructuredItem(parsed);
         if (res) return [res];
@@ -477,7 +494,7 @@ export function parseStructuredLlmResponses(raw: string): StructuredLlmResponse[
         const parsed = JSON.parse(repaired);
         if (Array.isArray(parsed)) {
           const results = parsed.map(parseSingleStructuredItem).filter(Boolean) as StructuredLlmResponse[];
-          if (results.length > 0) return results;
+          if (results.length > 0) return deduplicateStructuredResponses(results);
         } else if (parsed && typeof parsed === 'object') {
           const res = parseSingleStructuredItem(parsed);
           if (res) return [res];
@@ -510,7 +527,7 @@ export function parseStructuredLlmResponses(raw: string): StructuredLlmResponse[
         }
       }
     }
-    if (results.length > 0) return results;
+    if (results.length > 0) return deduplicateStructuredResponses(results);
   }
 
   // 3. Fallback to resilient narrative extractor (never breaks, ensures 100% stability)

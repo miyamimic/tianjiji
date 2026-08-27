@@ -169,6 +169,7 @@ export function useEngine() {
   const lastFallbackRef = useRef(false);
   const readyRef = useRef(false);
   const emotionHistoryRef = useRef<EmotionVector[]>([]);
+  const isEngineBusyRef = useRef(false);
 
   useEffect(() => {
     readyRef.current = true;
@@ -203,144 +204,159 @@ export function useEngine() {
 
   const sendMessage = useCallback(
     async (userInput: string, llmConfig?: LlmConfig) => {
-      const s = stateRef.current;
-      const character = getCharacterById(s.characterId) ?? MOCK_CHARACTERS[0];
-
-      previousEmotionRef.current = { ...s.emotion };
-      emotionConfirmedRef.current = true;
-
-      // 1. Natural Emotional Calming / Decay Curve (随轮数与时间自然平复趋向基准线)
-      const decayRate = loadEmotionDecayRate();
-      s.emotion = decayEmotionTowardsBaseline(s.emotion, character.emotion.baseline, decayRate);
-
-      // 2. Pre-process input through NLP Intent Analysis & AI Sensitive Interception
-      const sensitive = checkSensitiveWords(userInput);
-      let processedInput = userInput;
-
-      if (sensitive.matched) {
-        if (sensitive.blocked) {
-          // Block message sending! Output a warning bubble and abort processing.
-          const ts = Date.now();
-          const blockedWords = sensitive.matchedInterceptions.map((i) => i.word);
-          const warningMsg: ChatMessage = {
-            id: `sys-warning-${ts}`,
-            role: 'character',
-            content: `🛡️【AI敏感防御拦截】您的消息包含针对AI角色的敏感违规词（如："${blockedWords.join('、') || sensitive.matchedWords.join('、')}"），已触发前置安全防御拦截，此条消息已拒绝发送。`,
-            segments: [{ type: 'thought', text: '前置安全防御拦截成功' }],
-            timestamp: ts,
-            character_id: character.character_id,
-          };
-          s.messages = [...s.messages, warningMsg];
-          persist(s);
-          rerender();
-          return;
-        } else if (sensitive.censoredText !== userInput) {
-          processedInput = sensitive.censoredText;
-        }
-
-        // Apply severe emotional shifts from NLP Intent Analysis if mapped
-        if (sensitive.triggeredEmotion) {
-          const { key, delta } = sensitive.triggeredEmotion;
-          s.emotion[key] = Math.max(0, Math.min(1, s.emotion[key] + delta));
-        }
+      if (isEngineBusyRef.current) {
+        console.warn('Engine busy processing previous message, skipping duplicate send.');
+        return;
       }
+      isEngineBusyRef.current = true;
 
-      const userMsg: ChatMessage = {
-        id: `user-${Date.now()}`,
-        role: 'user',
-        content: processedInput,
-        segments: [{ type: 'speech', text: processedInput }],
-        timestamp: Date.now(),
-        snapshot: captureSnapshot(s),
-      };
-      s.messages = [...s.messages, userMsg];
-      rerender();
+      try {
+        const s = stateRef.current;
+        const character = getCharacterById(s.characterId) ?? MOCK_CHARACTERS[0];
 
-      await new Promise((r) => setTimeout(r, 200 + Math.random() * 150));
+        previousEmotionRef.current = { ...s.emotion };
+        emotionConfirmedRef.current = true;
 
-      const result = processChat(
-        { ...s, emotion: { ...s.emotion }, backgroundThreads: s.backgroundThreads.map((t) => ({ ...t })) },
-        character,
-        processedInput,
-      );
+        // 1. Natural Emotional Calming / Decay Curve (随轮数与时间自然平复趋向基准线)
+        const decayRate = loadEmotionDecayRate();
+        s.emotion = decayEmotionTowardsBaseline(s.emotion, character.emotion.baseline, decayRate);
 
-      s.backgroundThreads = result.backgroundThreads;
-      s.triggeredAnchors = result.triggeredAnchors;
-      lastIntentRef.current = result.intent;
+        // 2. Pre-process input through NLP Intent Analysis & AI Sensitive Interception
+        const sensitive = checkSensitiveWords(userInput);
+        let processedInput = userInput;
 
-      let reply: ChatMessage;
-
-      if (llmConfig && isLlmConfigured(llmConfig)) {
-        try {
-          const emotionSummary = Object.entries(s.emotion)
-            .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
-            .join(', ');
-          
-          const pipelineLayers = loadPromptLayers();
-          const llmMessages = assemblePipelineLlmMessages(pipelineLayers, {
-            character,
-            emotionSummary,
-            backgroundThreads: s.backgroundThreads.map((t) => t.content),
-            chatHistory: s.messages,
-          });
-
-          const rawText = await callLlm(llmConfig, llmMessages);
-          const structuredList = parseStructuredLlmResponses(rawText);
-          const now = Date.now();
-          const replies: ChatMessage[] = [];
-
-          structuredList.forEach((structured, idx) => {
-            if (structured.emotion_delta && Object.keys(structured.emotion_delta).length > 0) {
-              s.emotion = addEmotion(s.emotion, structured.emotion_delta);
-            } else if (idx === 0) {
-              s.emotion = result.emotion;
-            }
-
-            if (structured.triggered_memory) {
-              s.backgroundThreads.push({
-                content: structured.triggered_memory,
-                remaining_turns: 3,
-              });
-            }
-
-            replies.push({
-              id: `char-${now}-${idx}`,
+        if (sensitive.matched) {
+          if (sensitive.blocked) {
+            // Block message sending! Output a warning bubble and abort processing.
+            const ts = Date.now();
+            const blockedWords = sensitive.matchedInterceptions.map((i) => i.word);
+            const warningMsg: ChatMessage = {
+              id: `sys-warning-${ts}`,
               role: 'character',
-              content: structured.reply,
-              segments: parseSegments(structured.reply),
-              timestamp: now + idx * 10,
+              content: `🛡️【AI敏感防御拦截】您的消息包含针对AI角色的敏感违规词（如："${blockedWords.join('、') || sensitive.matchedWords.join('、')}"），已触发前置安全防御拦截，此条消息已拒绝发送。`,
+              segments: [{ type: 'thought', text: '前置安全防御拦截成功' }],
+              timestamp: ts,
               character_id: character.character_id,
-              snapshot: captureSnapshot(s),
-            });
-          });
+            };
+            s.messages = [...s.messages, warningMsg];
+            persist(s);
+            rerender();
+            return;
+          } else if (sensitive.censoredText !== userInput) {
+            processedInput = sensitive.censoredText;
+          }
 
-          s.messages = [...s.messages, ...replies];
-          lastFallbackRef.current = false;
-        } catch (err) {
-          const errMsg = err instanceof Error ? err.message : String(err);
-          console.warn('LLM call error, using local engine fallback:', errMsg);
+          // Apply severe emotional shifts from NLP Intent Analysis if mapped
+          if (sensitive.triggeredEmotion) {
+            const { key, delta } = sensitive.triggeredEmotion;
+            s.emotion[key] = Math.max(0, Math.min(1, s.emotion[key] + delta));
+          }
+        }
+
+        const userMsg: ChatMessage = {
+          id: `user-${Date.now()}`,
+          role: 'user',
+          content: processedInput,
+          segments: [{ type: 'speech', text: processedInput }],
+          timestamp: Date.now(),
+          snapshot: captureSnapshot(s),
+        };
+        s.messages = [...s.messages, userMsg];
+        rerender();
+
+        await new Promise((r) => setTimeout(r, 200 + Math.random() * 150));
+
+        const result = processChat(
+          { ...s, emotion: { ...s.emotion }, backgroundThreads: s.backgroundThreads.map((t) => ({ ...t })) },
+          character,
+          processedInput,
+        );
+
+        s.backgroundThreads = result.backgroundThreads;
+        s.triggeredAnchors = result.triggeredAnchors;
+        lastIntentRef.current = result.intent;
+
+        let reply: ChatMessage;
+
+        if (llmConfig && isLlmConfigured(llmConfig)) {
+          try {
+            const emotionSummary = Object.entries(s.emotion)
+              .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
+              .join(', ');
+            
+            const pipelineLayers = loadPromptLayers();
+            const llmMessages = assemblePipelineLlmMessages(pipelineLayers, {
+              character,
+              emotionSummary,
+              backgroundThreads: s.backgroundThreads.map((t) => t.content),
+              chatHistory: s.messages,
+            });
+
+            const rawText = await callLlm(llmConfig, llmMessages);
+            const structuredList = parseStructuredLlmResponses(rawText);
+            const now = Date.now();
+            const replies: ChatMessage[] = [];
+
+            structuredList.forEach((structured, idx) => {
+              if (structured.emotion_delta && Object.keys(structured.emotion_delta).length > 0) {
+                s.emotion = addEmotion(s.emotion, structured.emotion_delta);
+              } else if (idx === 0) {
+                s.emotion = result.emotion;
+              }
+
+              if (structured.triggered_memory) {
+                s.backgroundThreads.push({
+                  content: structured.triggered_memory,
+                  remaining_turns: 3,
+                });
+              }
+
+              replies.push({
+                id: `char-${now}-${idx}`,
+                role: 'character',
+                content: structured.reply,
+                segments: parseSegments(structured.reply),
+                timestamp: now + idx * 10,
+                character_id: character.character_id,
+                snapshot: captureSnapshot(s),
+              });
+            });
+
+            // Prevent duplicate message pushes
+            const existingIds = new Set(s.messages.map((m) => m.id));
+            const nonDupReplies = replies.filter((r) => !existingIds.has(r.id));
+            if (nonDupReplies.length > 0) {
+              s.messages = [...s.messages, ...nonDupReplies];
+            }
+            lastFallbackRef.current = false;
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            console.warn('LLM call error, using local engine fallback:', errMsg);
+            s.emotion = result.emotion;
+            reply = {
+              ...result.reply,
+              id: `char-fallback-${Date.now()}`,
+              snapshot: captureSnapshot(s),
+              llmError: errMsg,
+            };
+            s.messages = [...s.messages, reply];
+            lastFallbackRef.current = true;
+          }
+        } else {
           s.emotion = result.emotion;
           reply = {
             ...result.reply,
-            id: `char-fallback-${Date.now()}`,
             snapshot: captureSnapshot(s),
-            llmError: errMsg,
           };
           s.messages = [...s.messages, reply];
           lastFallbackRef.current = true;
         }
-      } else {
-        s.emotion = result.emotion;
-        reply = {
-          ...result.reply,
-          snapshot: captureSnapshot(s),
-        };
-        s.messages = [...s.messages, reply];
-        lastFallbackRef.current = true;
-      }
 
-      persist(s);
-      rerender();
+        persist(s);
+        rerender();
+      } finally {
+        isEngineBusyRef.current = false;
+      }
     },
     [persist, rerender],
   );
@@ -707,7 +723,12 @@ export function useEngine() {
           }
         }
 
-        s.messages = [...s.messages, ...newReplies];
+        // Deduplicate before adding to messages to avoid double appending
+        const existingIds = new Set(s.messages.map((m) => m.id));
+        const nonDup = newReplies.filter((r) => !existingIds.has(r.id));
+        if (nonDup.length > 0) {
+          s.messages = [...s.messages, ...nonDup];
+        }
         persist(s);
         rerender();
 
@@ -766,7 +787,11 @@ export function useEngine() {
       setPendingGameInvite(invite);
     }
 
-    s.messages = [...s.messages, ...newReplies];
+    const existingFallbackIds = new Set(s.messages.map((m) => m.id));
+    const nonDupFallback = newReplies.filter((r) => !existingFallbackIds.has(r.id));
+    if (nonDupFallback.length > 0) {
+      s.messages = [...s.messages, ...nonDupFallback];
+    }
     persist(s);
     rerender();
 
