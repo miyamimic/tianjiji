@@ -430,15 +430,15 @@ export default function WindChime({
         title="下拉风铃绳索，开启手机控制台"
       >
         {/* Top Ceiling Mounting Ring */}
-        <div className="w-3.5 h-2 bg-gradient-to-b from-amber-600 via-amber-400 to-amber-700 rounded-b-md shadow-md border border-amber-300/60" />
+        <div className="w-3.5 h-1.5 bg-gradient-to-b from-amber-300 via-amber-200 to-amber-500 rounded-b-md shadow-sm border border-amber-200/80" />
 
         {/* Dynamic Elastic Silken Rope */}
         <div 
-          className="w-[2px] bg-gradient-to-b from-amber-300 via-amber-400 to-amber-200 shadow-[0_0_8px_rgba(245,158,11,0.6)] transition-[height] duration-75 origin-top relative"
+          className="w-[1.5px] bg-gradient-to-b from-rose-400 via-rose-300 to-rose-400 shadow-[0_0_6px_rgba(244,63,94,0.35)] transition-[height] duration-75 origin-top relative"
           style={{ height: `${cordLength}px` }}
         />
 
-        {/* Wind Chime Bell Body & Striker */}
+        {/* Sakura Glass Wind Chime Bell Body & Striker */}
         <div 
           ref={chimeRef}
           onPointerDown={handlePointerDown}
@@ -452,47 +452,142 @@ export default function WindChime({
             }
           }}
           className={`flex flex-col items-center -mt-0.5 group touch-none transition-transform duration-150 relative ${
-            isDragging ? 'scale-110' : 'hover:scale-105 hover:rotate-3'
+            isDragging ? 'scale-110' : 'hover:scale-105'
           }`}
         >
           {/* Active Invitation Badge on the Bell */}
           {pendingInvite && (
-            <div className="absolute -top-1 -right-1 size-3 bg-red-500 rounded-full ring-2 ring-amber-300 shadow-md animate-ping" />
+            <div className="absolute -top-1 -right-1 size-3 bg-red-500 rounded-full ring-2 ring-pink-200 shadow-md animate-ping z-20" />
           )}
           {pendingInvite && (
-            <div className="absolute -top-1 -right-1 size-3 bg-red-500 rounded-full ring-2 ring-amber-300 shadow-md flex items-center justify-center text-[7px] text-white font-bold">
+            <div className="absolute -top-1 -right-1 size-3 bg-red-500 rounded-full ring-2 ring-pink-200 shadow-md flex items-center justify-center text-[7px] text-white font-bold z-20">
               !
             </div>
           )}
 
-          {/* Crystal Bell Cap */}
-          <div className="relative w-6 h-4.5 bg-gradient-to-b from-amber-200/95 via-amber-500 to-amber-800 rounded-t-full border border-amber-200/80 shadow-[0_4px_12px_rgba(245,158,11,0.5)] flex items-center justify-center">
-            <div className="w-2 h-2 rounded-full bg-white/80 shadow-inner" />
+          {/* Transparent Glass Bell Dome with Painted Sakura Motif (透明玻璃樱花风铃) */}
+          <div className="relative w-8 h-6 flex items-center justify-center">
+            {/* Ultra-realistic Glass Bell SVG */}
+            <svg 
+              viewBox="0 0 32 24" 
+              className="w-full h-full drop-shadow-[0_4px_10px_rgba(255,182,193,0.45)] overflow-visible"
+            >
+              <defs>
+                {/* Transparent Crystal Glass Gradient */}
+                <linearGradient id="sakuraGlassBody" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="#ffffff" stopOpacity="0.65" />
+                  <stop offset="25%" stopColor="#ffeef2" stopOpacity="0.25" />
+                  <stop offset="70%" stopColor="#fff5f7" stopOpacity="0.15" />
+                  <stop offset="100%" stopColor="#ffd8e2" stopOpacity="0.45" />
+                </linearGradient>
+
+                {/* Curved Specular Glare Highlight */}
+                <linearGradient id="sakuraGlare" x1="0%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
+                  <stop offset="100%" stopColor="#ffffff" stopOpacity="0.1" />
+                </linearGradient>
+
+                {/* Sakura Petal Color Gradient */}
+                <radialGradient id="sakuraPetalPink" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor="#ff4d79" />
+                  <stop offset="55%" stopColor="#ff85a2" />
+                  <stop offset="100%" stopColor="#ffccd8" />
+                </radialGradient>
+              </defs>
+
+              {/* Glass Dome Outline & Translucent Body */}
+              <path
+                d="M4 22 C4 9, 10 2, 16 2 C22 2, 28 9, 28 22 C24 23.5, 8 23.5, 4 22 Z"
+                fill="url(#sakuraGlassBody)"
+                stroke="rgba(255, 255, 255, 0.9)"
+                strokeWidth="0.85"
+              />
+
+              {/* Glass Rim Highlight Bottom Lip */}
+              <ellipse 
+                cx="16" 
+                cy="22" 
+                rx="12" 
+                ry="1.8" 
+                fill="rgba(255, 240, 245, 0.4)" 
+                stroke="rgba(255, 255, 255, 0.85)" 
+                strokeWidth="0.75" 
+              />
+
+              {/* Top Left Glossy Light Reflection Curve */}
+              <path
+                d="M8 6 C10 3.5, 13 3, 15 3 C13.5 4, 11 5, 9.5 9 C8.5 12, 8 16, 7 19 C6.5 15, 6.8 9.5, 8 6 Z"
+                fill="url(#sakuraGlare)"
+              />
+
+              {/* Right Edge Subtle Glass Specular Accent */}
+              <path
+                d="M23 5 C24.5 7, 25.5 10, 25.5 15 C24.8 12, 24 8, 23 5 Z"
+                fill="#ffffff"
+                opacity="0.6"
+              />
+
+              {/* Painted Sakura Blossom Motif 1 (Center-Left Blooming Flower) */}
+              <g transform="translate(13.5, 12.5) scale(0.62) rotate(12)">
+                {/* 5 Petals */}
+                <path d="M0 0 C-2.5 -5, -4 -7, 0 -9 C4 -7, 2.5 -5, 0 0 Z" fill="url(#sakuraPetalPink)" opacity="0.92" />
+                <path d="M0 0 C5 -2.5, 7 -4, 9 0 C7 4, 5 2.5, 0 0 Z" fill="url(#sakuraPetalPink)" opacity="0.92" />
+                <path d="M0 0 C2.5 5, 4 7, 0 9 C-4 7, -2.5 5, 0 0 Z" fill="url(#sakuraPetalPink)" opacity="0.92" />
+                <path d="M0 0 C-5 2.5, -7 4, -9 0 C-7 -4, -5 -2.5, 0 0 Z" fill="url(#sakuraPetalPink)" opacity="0.92" />
+                <path d="M0 0 C-4 -4, -6 -6, -2 -8 C1 -7, 0 -4, 0 0 Z" fill="url(#sakuraPetalPink)" opacity="0.85" />
+                {/* Flower Center Stamen & Core */}
+                <circle cx="0" cy="0" r="1.6" fill="#e11d48" />
+                <circle cx="0" cy="0" r="0.7" fill="#fff" />
+              </g>
+
+              {/* Painted Sakura Blossom Motif 2 (Small Drifting Petals & Buds) */}
+              <g transform="translate(21, 8) scale(0.4) rotate(40)">
+                <path d="M0 0 C-3 -4, -3 -6, 0 -7 C3 -6, 3 -4, 0 0 Z" fill="url(#sakuraPetalPink)" opacity="0.88" />
+                <circle cx="0" cy="0" r="1" fill="#e11d48" />
+              </g>
+              <g transform="translate(8.5, 16.5) scale(0.35) rotate(-25)">
+                <path d="M0 0 C-2.5 -4, -2.5 -6, 0 -7 C2.5 -6, 2.5 -4, 0 0 Z" fill="#ff758f" opacity="0.85" />
+              </g>
+              <g transform="translate(19.5, 17.5) scale(0.3) rotate(65)">
+                <path d="M0 0 C-2 -3, -2 -5, 0 -6 C2 -5, 2 -3, 0 0 Z" fill="#ff99b0" opacity="0.8" />
+              </g>
+            </svg>
+
+            {/* Suspended Crystal Clapper Bead Visible Inside Glass Dome */}
+            <div className="absolute inset-x-0 top-1 bottom-1 flex flex-col items-center justify-between pointer-events-none">
+              <div className="w-[1px] h-3 bg-rose-400/80" />
+              {/* Pink Glass Clapper Bead (琉璃粉珠) */}
+              <div className="w-2.5 h-2.5 rounded-full bg-gradient-to-tr from-rose-500 via-pink-300 to-white shadow-[0_0_6px_rgba(244,63,94,0.7)] ring-1 ring-white/90 animate-pulse" />
+              <div className="w-[1px] h-1.5 bg-rose-400/80" />
+            </div>
           </div>
 
-          {/* Bell Rim */}
-          <div className="w-7 h-1 bg-amber-100/90 rounded-full shadow-sm" />
+          {/* Crimson Silk Cord & Top Knot Connecting to Tanzaku */}
+          <div className="w-[1.5px] h-2.5 bg-rose-400/90" />
+          <div className="w-1.5 h-1.5 rounded-full bg-rose-600 shadow-xs ring-1 ring-rose-200" />
+          <div className="w-[1.5px] h-1.5 bg-rose-400/90" />
 
-          {/* Central Suspended Clapper & Glass Bead */}
-          <div className="w-[1.5px] h-3.5 bg-amber-300/80" />
-          <div className="w-3 h-3 rounded-full bg-gradient-to-tr from-amber-400 via-yellow-100 to-white border border-white/80 shadow-[0_0_8px_rgba(255,255,255,0.8)] animate-pulse" />
-
-          {/* Silk Cord Connecting to Paper Slip */}
-          <div className="w-[1.5px] h-2.5 bg-amber-300/80" />
-
-          {/* Paper Wind Catcher / Poetry Slip (短册 / 纸笺) */}
-          <div className="w-4 h-9 bg-gradient-to-b from-amber-50 via-amber-100 to-amber-200/90 rounded-b-sm border border-amber-300/70 shadow-lg flex flex-col items-center justify-between p-1 transform -rotate-3 group-hover:rotate-6 transition-transform duration-200 cursor-pointer">
-            <div className="w-1.5 h-1.5 rounded-full bg-red-500/80 shadow-xs" />
-            <span className="text-[8px] text-amber-950 font-serif font-bold tracking-tighter leading-none scale-90 select-none">
+          {/* Japanese Sakura Poetry Tanzaku Paper Slip (短册 / 樱花笺) */}
+          <div className="w-4 h-9 bg-gradient-to-b from-[#fffafb] via-[#ffeef2] to-[#ffdce5] rounded-b-xs border border-[#f7b6c8] shadow-[0_4px_12px_rgba(224,122,147,0.25)] flex flex-col items-center justify-between py-1 px-0.5 animate-tanzaku-sway group-hover:rotate-6 transition-transform duration-200 cursor-pointer">
+            {/* Top Red Hole & Sakura Petal Icon */}
+            <div className="w-1 h-1 rounded-full bg-rose-500 shadow-xs" />
+            
+            {/* Vertical Calligraphy Seal */}
+            <span className="text-[7.5px] text-[#732641] font-serif font-bold tracking-tighter leading-none scale-90 select-none">
               灵犀
             </span>
-            <div className="w-2 h-[1px] bg-amber-400/40" />
+
+            {/* Bottom Sakura Blossom Accent on Slip */}
+            <div className="flex flex-col items-center gap-0.5">
+              <div className="w-2 h-[1px] bg-rose-300/60" />
+              <div className="size-1.5 rounded-full bg-rose-400/80" />
+            </div>
           </div>
 
           {/* Real-time Stretch Drag Hint */}
           {isDragging && (
-            <div className="absolute top-full mt-2.5 whitespace-nowrap bg-black/90 text-[10px] text-amber-300 font-medium px-2.5 py-1 rounded-full border border-amber-400/40 backdrop-blur-md shadow-2xl animate-fade-in pointer-events-none">
-              {cordLength > 80 ? '松开拉开灵犀手机 📱' : '继续向下拉动绳索...'}
+            <div className="absolute top-full mt-2.5 whitespace-nowrap bg-black/90 text-[10px] text-pink-200 font-medium px-2.5 py-1 rounded-full border border-pink-400/40 backdrop-blur-md shadow-2xl animate-fade-in pointer-events-none">
+              {cordLength > 80 ? '松开拉开灵犀手机 📱' : '继续向下拉动风铃绳索...'}
             </div>
           )}
         </div>

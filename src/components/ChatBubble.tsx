@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import type { MessageSegment, ChatMessage, StickerMeta } from '../data/types';
-import { History, Clock, Edit2, CornerDownLeft, AlertCircle, RefreshCw, Star, Sparkles, Check, Smile, Info, Heart, Zap } from 'lucide-react';
+import { Edit2, CornerDownLeft, AlertCircle, RefreshCw, Sparkles, Check, Smile, Info, Heart } from 'lucide-react';
 import { loadUserAvatar, loadCharAvatar } from '../lib/customStore';
 import { userStealAiSticker, isStickerStolenByUser, subscribeStickers } from '../lib/stickerStore';
 import { FrenchCornerLace, LinePuppyMascot, StardewPixelFlower, ClockRollbackIcon } from './FrenchLacePuppyElements';
@@ -9,6 +9,8 @@ interface Props {
   message: ChatMessage;
   characterName?: string;
   characterId?: string;
+  isControlsVisible?: boolean;
+  onToggleLock?: (id: string, e: React.MouseEvent) => void;
   onRollback?: (id: string) => void;
   onEdit?: (id: string, newContent: string) => void;
   onTriggerReply?: (id: string) => void;
@@ -31,7 +33,7 @@ function SpeechSegment({ text, isUser }: { text: string; isUser?: boolean }) {
 function ActionSegment({ text }: { text: string }) {
   const clean = text.replace(/^[（(]|[\n）)]$/g, '').replace(/^[(（]|[\n)）]$/g, '').trim();
   return (
-    <p className="whitespace-pre-wrap not-italic font-medium font-sans leading-relaxed text-[#d78b9b] text-[13.5px] my-0.5 select-text">
+    <p className="whitespace-pre-wrap not-italic font-medium font-sans leading-relaxed text-[#a3495f] text-[13.5px] my-0.5 select-text">
       {clean}
     </p>
   );
@@ -63,6 +65,8 @@ export default function ChatBubble({
   message,
   characterName,
   characterId = 'char_001',
+  isControlsVisible = false,
+  onToggleLock,
   onRollback,
   onEdit,
   onTriggerReply,
@@ -73,11 +77,7 @@ export default function ChatBubble({
 
   const [isEditing, setIsEditing] = useState(false);
   const [editVal, setEditVal] = useState(message.content);
-  const [isRerolling, setIsRerolling] = useState(false);
-  const [rerollScore, setRerollScore] = useState<number>(3);
-  const [rerollReason, setRerollReason] = useState<string>('');
   const [showErrorDetail, setShowErrorDetail] = useState(false);
-  const [showSnapshotModal, setShowSnapshotModal] = useState(false);
 
   const [isStolenAlready, setIsStolenAlready] = useState(() => {
     if (!message.sticker) return false;
@@ -95,21 +95,10 @@ export default function ChatBubble({
   const charAvatar = loadCharAvatar(characterId);
   const userAvatar = loadUserAvatar();
 
-  const lastRerollClickRef = useRef<number>(0);
-
   const handleRerollClick = (e: React.MouseEvent) => {
     e.stopPropagation();
-    const now = Date.now();
-    if (now - lastRerollClickRef.current < 450) {
-      // 连续点两次刷新：自动不评分直接roll
-      lastRerollClickRef.current = 0;
-      setIsRerolling(false);
-      if (onReroll) {
-        onReroll(message.id);
-      }
-    } else {
-      lastRerollClickRef.current = now;
-      setIsRerolling((v) => !v);
+    if (onReroll) {
+      onReroll(message.id);
     }
   };
 
@@ -128,7 +117,10 @@ export default function ChatBubble({
   };
 
   return (
-    <div className={`flex flex-col gap-1 px-1 sm:px-2 w-full group ${isUser ? 'items-end' : 'items-start'}`}>
+    <div
+      data-msg-id={message.id}
+      className={`flex flex-col gap-1 px-1 sm:px-2 w-full group ${isUser ? 'items-end' : 'items-start'}`}
+    >
       <div className={`flex gap-2.5 w-full ${isUser ? 'justify-end' : 'justify-start'}`}>
         {/* Avatar for character */}
         {!isUser && (
@@ -158,7 +150,12 @@ export default function ChatBubble({
 
           {/* Main Chat Bubble (French Vintage Lace & Stardew Light Theme) */}
           <div
-            className={`relative rounded-2xl px-4 py-3 border shadow-sm transition-all duration-200 ${
+            onClick={(e) => {
+              if (!isEditing && onToggleLock) {
+                onToggleLock(message.id, e);
+              }
+            }}
+            className={`relative rounded-2xl px-4 py-3 border shadow-sm transition-all duration-200 cursor-pointer ${
               isUser
                 ? 'rounded-tr-none bg-gradient-to-br from-[#fef2f4] to-[#fce4eb] border-[#f2c6d2] text-[#4a3e3d] shadow-[0_2px_12px_rgba(224,122,147,0.1)]'
                 : isWarning
@@ -172,7 +169,10 @@ export default function ChatBubble({
             )}
 
             {isEditing ? (
-              <div className="space-y-2 py-1 min-w-[200px] md:min-w-[320px]">
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="space-y-2 py-1 min-w-[200px] md:min-w-[320px]"
+              >
                 <textarea
                   value={editVal}
                   onChange={(e) => setEditVal(e.target.value)}
@@ -246,135 +246,111 @@ export default function ChatBubble({
           </div>
 
           {/* Timestamp & Interactive Utilities Toolbar (Rollback, Edit, Reroll) */}
-          <div className="flex items-center gap-1.5 text-[10.5px] text-[#4a3431] font-semibold px-1 select-none font-serif">
-            <span className="text-[#4a3431]">{formatTime(message.timestamp)}</span>
+          {/* Visible ONLY when in viewport center focus or pinned by manual click */}
+          {isControlsVisible && (
+            <div className={`transition-all duration-200 select-none font-serif mt-0.5 animate-in fade-in-0 duration-150 ${
+              !isUser
+                ? 'flex items-center gap-2 px-1 text-[10.5px] text-[#4a3431] font-semibold'
+                : 'flex items-center justify-end gap-2 px-1 text-[10.5px] text-[#4a3431] font-semibold'
+            }`}>
+              {!isUser ? (
+                <>
+                  {/* Character Quick Action Tools (Rollback, Edit, Reroll) */}
+                  <div className="flex items-center gap-1">
+                    {/* Rollback */}
+                    {onRollback && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRollback(message.id);
+                        }}
+                        title="回档至此轮对话"
+                        className="p-1 rounded-md bg-[#fae1e8]/70 hover:bg-[#f2cad4] text-[#4a3431] hover:text-[#732641] transition cursor-pointer border border-[#f2cad4]/60 shadow-2xs"
+                      >
+                        <ClockRollbackIcon size={14} className="text-[#4a3431] group-hover/btn:text-[#732641]" />
+                      </button>
+                    )}
 
-            {/* Quick Action Tools visible on hover or always accessible */}
-            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 ml-1.5">
-              {/* Rollback */}
-              {onRollback && (
-                <button
-                  onClick={() => onRollback(message.id)}
-                  title="回档至此轮对话"
-                  className="p-1 rounded-md bg-[#fae1e8]/70 hover:bg-[#f2cad4] text-[#4a3431] hover:text-[#732641] transition cursor-pointer border border-[#f2cad4]/60 shadow-2xs"
-                >
-                  <ClockRollbackIcon size={14} className="text-[#4a3431] group-hover/btn:text-[#732641]" />
-                </button>
+                    {/* Edit */}
+                    {onEdit && !isEditing && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsEditing(true);
+                        }}
+                        title="编辑此条消息"
+                        className="p-1 rounded-md bg-[#fae1e8]/70 hover:bg-[#f2cad4] text-[#4a3431] hover:text-[#732641] transition cursor-pointer border border-[#f2cad4]/60 shadow-2xs"
+                      >
+                        <Edit2 className="size-3.5 stroke-[2.2]" />
+                      </button>
+                    )}
+
+                    {/* Reroll for AI response */}
+                    {onReroll && (
+                      <button
+                        onClick={handleRerollClick}
+                        title="重roll重新生成此条回复"
+                        className="p-1 rounded-md bg-[#fae1e8]/70 hover:bg-[#f2cad4] text-[#4a3431] hover:text-[#732641] transition cursor-pointer border border-[#f2cad4]/60 shadow-2xs"
+                      >
+                        <RefreshCw className="size-3.5 stroke-[2.2]" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Timestamp closely follows right behind the 3 buttons */}
+                  <span className="text-[#4a3431] text-[10px]">{formatTime(message.timestamp)}</span>
+                </>
+              ) : (
+                <>
+                  {/* Timestamp closely precedes user buttons */}
+                  <span className="text-[#4a3431] text-[10px]">{formatTime(message.timestamp)}</span>
+
+                  {/* User Action Tools (Rollback, Edit, Reply) */}
+                  <div className="flex items-center gap-1">
+                    {/* Rollback */}
+                    {onRollback && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRollback(message.id);
+                        }}
+                        title="回档至此条消息"
+                        className="p-1 rounded-md bg-[#fae1e8]/70 hover:bg-[#f2cad4] text-[#4a3431] hover:text-[#732641] transition cursor-pointer border border-[#f2cad4]/60 shadow-2xs"
+                      >
+                        <ClockRollbackIcon size={14} className="text-[#4a3431] group-hover/btn:text-[#732641]" />
+                      </button>
+                    )}
+
+                    {/* Edit */}
+                    {onEdit && !isEditing && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setIsEditing(true);
+                        }}
+                        title="编辑此条消息"
+                        className="p-1 rounded-md bg-[#fae1e8]/70 hover:bg-[#f2cad4] text-[#4a3431] hover:text-[#732641] transition cursor-pointer border border-[#f2cad4]/60 shadow-2xs"
+                      >
+                        <Edit2 className="size-3.5 stroke-[2.2]" />
+                      </button>
+                    )}
+
+                    {/* Manual Trigger Reply */}
+                    {onTriggerReply && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onTriggerReply(message.id);
+                        }}
+                        title="以此条消息重新请求回复"
+                        className="p-1 rounded-md bg-[#fae1e8]/70 hover:bg-[#f2cad4] text-[#4a3431] hover:text-[#732641] transition cursor-pointer border border-[#f2cad4]/60 shadow-2xs"
+                      >
+                        <CornerDownLeft className="size-3.5 stroke-[2.2]" />
+                      </button>
+                    )}
+                  </div>
+                </>
               )}
-
-              {/* Edit */}
-              {onEdit && !isEditing && (
-                <button
-                  onClick={() => setIsEditing(true)}
-                  title="编辑此条消息"
-                  className="p-1 rounded-md bg-[#fae1e8]/70 hover:bg-[#f2cad4] text-[#4a3431] hover:text-[#732641] transition cursor-pointer border border-[#f2cad4]/60 shadow-2xs"
-                >
-                  <Edit2 className="size-3.5 stroke-[2.2]" />
-                </button>
-              )}
-
-              {/* Reroll for AI response */}
-              {!isUser && onReroll && (
-                <button
-                  onClick={handleRerollClick}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    setIsRerolling(false);
-                    onReroll(message.id);
-                  }}
-                  title="连续点击两次刷新可直接重roll，或单击打开评分面板"
-                  className="p-1 rounded-md bg-[#fae1e8]/70 hover:bg-[#f2cad4] text-[#4a3431] hover:text-[#732641] transition cursor-pointer border border-[#f2cad4]/60 shadow-2xs"
-                >
-                  <RefreshCw className="size-3.5 stroke-[2.2]" />
-                </button>
-              )}
-
-              {/* Manual Trigger Reply */}
-              {isUser && onTriggerReply && (
-                <button
-                  onClick={() => onTriggerReply(message.id)}
-                  title="以此条消息重新请求回复"
-                  className="p-1 rounded-md bg-[#fae1e8]/70 hover:bg-[#f2cad4] text-[#4a3431] hover:text-[#732641] transition cursor-pointer border border-[#f2cad4]/60 shadow-2xs"
-                >
-                  <CornerDownLeft className="size-3.5 stroke-[2.2]" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Reroll Feedback Drawer */}
-          {isRerolling && !isUser && onReroll && (
-            <div className="w-full mt-1.5 p-3 rounded-2xl border border-[#f2cad4] bg-[#fffafb] shadow-md space-y-2.5 text-xs text-[#4a3431] font-serif animate-in fade-in-0 duration-150">
-              <div className="flex items-center justify-between font-bold text-[#4a3431] border-b border-[#fce4eb] pb-1.5">
-                <span className="flex items-center gap-1.5 text-[#4a3431]">
-                  <RefreshCw className="size-3 text-[#b83d5a]" />
-                  重新推演生成 (连续双击刷新可直接roll)
-                </span>
-                <button
-                  onClick={() => setIsRerolling(false)}
-                  className="text-[#998380] hover:text-[#4a3431] font-sans text-xs px-1"
-                >
-                  ✕
-                </button>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <span className="text-[11px] font-semibold text-[#4a3431]">满意度评分:</span>
-                <div className="flex gap-1">
-                  {[1, 2, 3, 4, 5].map((score) => (
-                    <button
-                      key={score}
-                      onClick={() => setRerollScore(score)}
-                      className={`p-1 rounded-md transition ${
-                        rerollScore >= score ? 'text-[#e67e22]' : 'text-[#e5d5d8]'
-                      }`}
-                    >
-                      <Star className="size-3.5 fill-current" />
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <input
-                type="text"
-                value={rerollReason}
-                onChange={(e) => setRerollReason(e.target.value)}
-                placeholder="可选指导（例如：多一些细腻动作描写/更温柔一点）"
-                className="w-full px-2.5 py-1.5 rounded-xl border border-[#f2cad4] bg-[#fff5f7] text-xs text-[#4a3431] placeholder:text-[#b3a19e] focus:outline-none focus:border-[#b83d5a]"
-              />
-
-              <div className="flex items-center justify-between gap-1.5 pt-1">
-                <button
-                  onClick={() => {
-                    onReroll(message.id);
-                    setIsRerolling(false);
-                  }}
-                  className="px-2.5 py-1 rounded-xl bg-[#fae1e8] hover:bg-[#f7d0dc] text-[#732641] font-semibold text-[11px] flex items-center gap-1 transition cursor-pointer border border-[#f2cad4]"
-                  title="跳过评分与指导，直接重新roll一条"
-                >
-                  <Zap className="size-3 text-[#b83d5a]" />
-                  <span>不评分直接roll</span>
-                </button>
-
-                <div className="flex gap-1.5">
-                  <button
-                    onClick={() => setIsRerolling(false)}
-                    className="px-2.5 py-1 rounded-xl bg-[#fcedf1] text-[#785b56] hover:text-[#4a3431] text-[11px] transition cursor-pointer"
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={() => {
-                      onReroll(message.id, { score: rerollScore, reason: rerollReason });
-                      setIsRerolling(false);
-                    }}
-                    className="px-3 py-1 rounded-xl bg-[#b83d5a] hover:bg-[#a0314c] text-white text-[11px] font-bold flex items-center gap-1 shadow-sm transition cursor-pointer"
-                  >
-                    <RefreshCw className="size-3" />
-                    <span>带评分刷新</span>
-                  </button>
-                </div>
-              </div>
             </div>
           )}
         </div>

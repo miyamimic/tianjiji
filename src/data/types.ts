@@ -28,7 +28,7 @@ export type MemoryAnchor = {
 
 export type DynamicMemory = {
   id: string;
-  character_id: string;
+  character_id?: string;
   topic_keywords: string[];
   emotion_type: EmotionKey;
   intensity: number; // 1-5
@@ -36,7 +36,8 @@ export type DynamicMemory = {
   character_reaction_summary: string;
   created_at: number;
   last_recalled_at?: number;
-  recall_count: number;
+  recall_count?: number;
+  importance?: number;
 };
 
 export type TriggeredAnchor = {

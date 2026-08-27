@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import SceneCanvas, { type Scene } from '@/components/SceneCanvas';
 import HotspotLayer from '@/components/HotspotLayer';
 import TopBar from '@/components/TopBar';
@@ -110,12 +110,152 @@ export default function App() {
 
   const messages = engine.getMessages();
 
-  // Auto scroll chat
+  // Centralized message focus states: activate 1 bubble
+  const [activeMessageId, setActiveMessageId] = useState<string | null>(null);
+  const [lockedMessageId, setLockedMessageId] = useState<string | null>(null);
+
+  const activeLockedRef = useRef<{ active: string | null; locked: string | null }>({
+    active: null,
+    locked: null,
+  });
+  activeLockedRef.current = { active: activeMessageId, locked: lockedMessageId };
+
+  // Calculate the single message closest to the visual vertical center of the chat viewport
+  const calculateActiveMessages = useCallback(() => {
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const currentLocked = activeLockedRef.current.locked;
+
+    // In locked mode: check if the locked message is still inside the viewport
+    if (currentLocked) {
+      const lockedElem = container.querySelector<HTMLElement>(`[data-msg-id="${currentLocked}"]`);
+      if (lockedElem) {
+        const containerRect = container.getBoundingClientRect();
+        const elemRect = lockedElem.getBoundingClientRect();
+        // Exit lock if the locked bubble completely scrolls out of the visible viewport
+        const isCompletelyOutOfView =
+          elemRect.bottom <= containerRect.top || elemRect.top >= containerRect.bottom;
+        if (!isCompletelyOutOfView) {
+          // Locked bubble remains in viewport, preserve locked focus
+          return;
+        }
+      }
+      // If locked message left the viewport or was deleted, release lock and restore auto center selection
+      setLockedMessageId(null);
+      activeLockedRef.current.locked = null;
+    }
+
+    // Auto-selection: find the single bubble closest to viewport vertical center
+    const containerRect = container.getBoundingClientRect();
+    if (containerRect.height === 0) return;
+    const viewportCenterY = containerRect.top + containerRect.height / 2;
+
+    const msgElements = container.querySelectorAll<HTMLElement>('[data-msg-id]');
+    if (msgElements.length === 0) {
+      setActiveMessageId(null);
+      return;
+    }
+
+    const visibleList: { id: string; offset: number; ratio: number }[] = [];
+
+    msgElements.forEach((el) => {
+      const id = el.getAttribute('data-msg-id');
+      if (!id) return;
+      const rect = el.getBoundingClientRect();
+
+      // Check if intersecting visible viewport
+      const visibleTop = Math.max(rect.top, containerRect.top);
+      const visibleBottom = Math.min(rect.bottom, containerRect.bottom);
+      const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+
+      if (visibleHeight <= 0) return; // not in viewport
+
+      const ratio = rect.height > 0 ? visibleHeight / rect.height : 0;
+      const bubbleCenterY = rect.top + rect.height / 2;
+      const offset = Math.abs(bubbleCenterY - viewportCenterY);
+
+      visibleList.push({ id, offset, ratio });
+    });
+
+    if (visibleList.length === 0) {
+      setActiveMessageId(null);
+      return;
+    }
+
+    // Sort by distance to center ascending, then by ratio descending
+    visibleList.sort((a, b) => {
+      const diff = Math.abs(a.offset - b.offset);
+      if (diff < 8) {
+        return b.ratio - a.ratio;
+      }
+      return a.offset - b.offset;
+    });
+
+    const bestId = visibleList[0]?.id || null;
+    setActiveMessageId((prev) => (prev !== bestId ? bestId : prev));
+  }, []);
+
+  // Throttled scroll, resize, and message change listener using requestAnimationFrame
   useEffect(() => {
-    if (scrollRef.current) {
+    const container = scrollRef.current;
+    if (!container || scene !== 'chat') return;
+
+    let rafId: number | null = null;
+    const handleScroll = () => {
+      if (rafId !== null) return;
+      rafId = requestAnimationFrame(() => {
+        calculateActiveMessages();
+        rafId = null;
+      });
+    };
+
+    container.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener('resize', handleScroll, { passive: true });
+
+    // Initial check
+    const timer = setTimeout(handleScroll, 80);
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleScroll);
+      clearTimeout(timer);
+      if (rafId !== null) cancelAnimationFrame(rafId);
+    };
+  }, [scene, calculateActiveMessages, messages.length]);
+
+  const handleToggleLockMessage = useCallback((id: string, e?: React.MouseEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    setLockedMessageId((prev) => (prev === id ? null : id));
+  }, []);
+
+  const handleChatContainerClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    // If clicked empty background area outside any message bubble, exit lock mode
+    const target = e.target as HTMLElement;
+    if (!target.closest('[data-msg-id]')) {
+      setLockedMessageId(null);
+    }
+  };
+
+  // Safe auto scroll: only scroll when new messages arrive (messages.length increases) or on send
+  const prevMsgCountRef = useRef(messages.length);
+  useEffect(() => {
+    if (messages.length > prevMsgCountRef.current) {
+      if (scrollRef.current) {
+        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      }
+    }
+    prevMsgCountRef.current = messages.length;
+  }, [messages.length]);
+
+  // Initial scroll to bottom on mount/enter chat scene
+  useEffect(() => {
+    if (scene === 'chat' && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, isLoading]);
+  }, [scene]);
 
   const character = engine.getCharacter();
   const llmReady = isLlmConfigured(llmConfig);
@@ -261,20 +401,31 @@ export default function App() {
           <div
             className={`pointer-events-none absolute inset-0 z-20 flex flex-col pt-14 transition-[padding] duration-300 ${(!portrait && sidebarOpen) ? 'pr-80' : 'pr-0'}`}
           >
-            <div ref={scrollRef} className="pointer-events-auto flex-1 overflow-y-auto chat-scroll">
-              <div className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-3">
-                {messages.map((msg) => (
-                  <ChatBubble
-                    key={msg.id}
-                    message={msg}
-                    characterName={character.name}
-                    characterId={character.character_id}
-                    onRollback={(id) => engine.rollbackToMessage(id)}
-                    onEdit={(id, newContent) => engine.editMessage(id, newContent)}
-                    onTriggerReply={handleTriggerReply}
-                    onReroll={handleReroll}
-                  />
-                ))}
+            <div
+              ref={scrollRef}
+              onClick={handleChatContainerClick}
+              className="pointer-events-auto flex-1 overflow-y-auto chat-scroll"
+            >
+              <div className="max-w-3xl mx-auto px-3 sm:px-4 py-4 sm:py-6 space-y-3 min-h-full">
+                {messages.map((msg) => {
+                  const shouldRenderControls = lockedMessageId
+                    ? msg.id === lockedMessageId
+                    : msg.id === activeMessageId;
+                  return (
+                    <ChatBubble
+                      key={msg.id}
+                      message={msg}
+                      characterName={character.name}
+                      characterId={character.character_id}
+                      isControlsVisible={shouldRenderControls}
+                      onToggleLock={handleToggleLockMessage}
+                      onRollback={(id) => engine.rollbackToMessage(id)}
+                      onEdit={(id, newContent) => engine.editMessage(id, newContent)}
+                      onTriggerReply={handleTriggerReply}
+                      onReroll={handleReroll}
+                    />
+                  );
+                })}
 
                 {isLoading && (
                   <div className="flex items-start gap-2.5 px-2">

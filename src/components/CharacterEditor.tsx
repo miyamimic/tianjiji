@@ -259,19 +259,19 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
   };
 
   return (
-    <div className="space-y-6 text-white/90">
+    <div className="space-y-6 text-[#4a3431] font-serif">
       <div>
         <div className="flex items-center justify-between mb-3">
           <div className="space-y-0.5">
-            <h3 className="text-sm font-semibold text-white flex items-center gap-1.5">
-              <Sparkles className="size-4 text-[hsl(28_85%_62%)]" />
+            <h3 className="text-sm font-bold text-[#732641] flex items-center gap-1.5">
+              <Sparkles className="size-4 text-[#e07a93]" />
               角色卡档案深度编辑 (Character Profile Studio)
             </h3>
-            <p className="text-[11px] text-white/40">支持自定义核心人设、言辞口癖与思维动作，并可无缝导入导出 Word DOCX 和 JSON 档案！</p>
+            <p className="text-xs text-[#998380]">支持自定义核心人设、言辞口癖与思维动作，并可无缝导入导出 Word DOCX 和 JSON 档案！</p>
           </div>
           <button
             onClick={handleResetDefaults}
-            className="flex items-center gap-1 text-[10px] text-red-400 hover:text-red-300 transition-colors bg-red-400/5 hover:bg-red-400/10 px-2.5 py-1 rounded border border-red-500/10"
+            className="flex items-center gap-1 text-[11px] text-[#b83d5a] hover:text-[#912440] transition-colors bg-[#fae1e8]/60 hover:bg-[#fbdde4] px-3 py-1.5 rounded-xl border border-[#f2cad4] cursor-pointer"
           >
             <RotateCcw className="size-3" /> 重置默认角色卡
           </button>
@@ -279,32 +279,32 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
 
         {/* IO Notice Feedback */}
         {ioNotice && (
-          <div className="p-3 mb-3 rounded-xl bg-amber-500/20 border border-amber-500/40 text-amber-200 text-[11px] flex items-center justify-between shadow-lg">
-            <span>{ioNotice}</span>
-            <button onClick={() => setIoNotice(null)} className="text-amber-300 hover:text-white text-xs font-bold">
+          <div className="p-3 mb-3 rounded-2xl bg-[#fff0f3] border border-[#f2cad4] text-[#732641] text-xs flex items-center justify-between shadow-sm">
+            <span className="font-semibold">{ioNotice}</span>
+            <button onClick={() => setIoNotice(null)} className="text-[#b83d5a] hover:text-[#732641] text-xs font-bold px-1.5 cursor-pointer">
               ✕
             </button>
           </div>
         )}
 
         {/* Character Import / Export Action Bar */}
-        <div className="p-3 mb-4 rounded-xl border border-amber-400/30 bg-gradient-to-br from-amber-950/30 via-stone-900/40 to-black/50 space-y-2">
+        <div className="p-3.5 mb-4 rounded-2xl border border-[#f2cad4] bg-[#fff5f7] space-y-2.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="font-bold text-amber-300 flex items-center gap-1.5 text-xs">
-              <FileText className="size-3.5 text-amber-400" />
+            <span className="font-bold text-[#732641] flex items-center gap-1.5 text-xs">
+              <FileText className="size-3.5 text-[#e07a93]" />
               角色档案导入 / 导出 (Word DOCX & JSON)
             </span>
-            <span className="text-[10px] text-amber-300/70 font-mono">Archive Portable</span>
+            <span className="text-[10px] text-[#998380] font-mono">Archive Portable</span>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
             <button
               type="button"
               onClick={handleExportDocx}
               disabled={isExportingDocx || !editingChar}
-              className="p-1.5 rounded-lg border border-amber-400/40 bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-semibold text-[11px] transition-all flex items-center justify-center gap-1 active:scale-95 disabled:opacity-50 cursor-pointer shadow-xs"
+              className="p-2 rounded-xl border border-[#f2cad4] bg-white hover:bg-[#fae1e8]/60 text-[#732641] font-semibold text-[11px] transition-all flex items-center justify-center gap-1 active:scale-95 disabled:opacity-50 cursor-pointer shadow-xs"
               title="生成并下载角色 Word 档案卡"
             >
-              <FileText className="size-3 text-amber-300" />
+              <FileText className="size-3 text-[#e07a93]" />
               <span>{isExportingDocx ? '生成 Word 中...' : '导出 Word 档案 (.docx)'}</span>
             </button>
 
@@ -312,30 +312,30 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
               type="button"
               onClick={handleExportJson}
               disabled={!editingChar}
-              className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white/80 font-medium text-[11px] transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+              className="p-2 rounded-xl border border-[#f2cad4] bg-white hover:bg-[#fae1e8]/60 text-[#732641] font-semibold text-[11px] transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer shadow-xs"
               title="导出当前角色为 JSON 档案"
             >
-              <FileJson className="size-3 text-emerald-400" />
+              <FileJson className="size-3 text-[#3a8462]" />
               <span>导出 JSON 档案</span>
             </button>
 
             <button
               type="button"
               onClick={handleExportAll}
-              className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white/80 font-medium text-[11px] transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+              className="p-2 rounded-xl border border-[#f2cad4] bg-white hover:bg-[#fae1e8]/60 text-[#732641] font-semibold text-[11px] transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer shadow-xs"
               title="导出全部已保存角色合集"
             >
-              <Download className="size-3 text-cyan-300" />
+              <Download className="size-3 text-[#2d7d9a]" />
               <span>打包导出全部</span>
             </button>
 
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="p-1.5 rounded-lg border border-white/10 bg-white/5 hover:bg-white/10 text-white/80 font-medium text-[11px] transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer"
+              className="p-2 rounded-xl border border-[#f2cad4] bg-white hover:bg-[#fae1e8]/60 text-[#732641] font-semibold text-[11px] transition-all flex items-center justify-center gap-1 active:scale-95 cursor-pointer shadow-xs"
               title="上传 .docx / .json 角色档案"
             >
-              <Upload className="size-3 text-purple-300" />
+              <Upload className="size-3 text-[#874ca5]" />
               <span>导入角色档案</span>
             </button>
 
@@ -350,15 +350,15 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
         </div>
 
         {/* Character Selector tabs */}
-        <div className="flex gap-2 p-1 bg-black/20 rounded-lg border border-white/5 mb-4">
+        <div className="flex gap-1.5 p-1 bg-[#fff5f7] rounded-xl border border-[#f2d0d9] mb-4">
           {characters.map((c) => (
             <button
               key={c.character_id}
               onClick={() => handleSwitchEditingCharacter(c.character_id)}
-              className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${
+              className={`flex-1 py-2 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
                 selectedId === c.character_id
-                  ? 'bg-white/10 text-white shadow-sm'
-                  : 'text-white/40 hover:text-white/70'
+                  ? 'bg-white text-[#732641] shadow-xs border border-[#f2cad4]'
+                  : 'text-[#998380] hover:text-[#4a3431]'
               }`}
             >
               {c.name} 的档案编辑
@@ -371,23 +371,23 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
             {/* Character Base Profile Form */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-[11px] text-white/40 mb-1">角色名字 (Name)</label>
+                <label className="block text-xs font-semibold text-[#785b56] mb-1">角色名字 (Name)</label>
                 <input
                   type="text"
                   value={charName}
                   onChange={(e) => setCharName(e.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-xs text-white focus:outline-none"
+                  className="w-full rounded-xl border border-[#f2cad4] bg-white px-3 py-2 text-xs text-[#4a3431] placeholder:text-[#bda49f] focus:outline-none focus:border-[#e07a93] focus:ring-1 focus:ring-[#e07a93]/30"
                   placeholder="角色名字"
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] text-white/40 mb-1">核心价值特质 (Core Values / 逗号隔开)</label>
+                <label className="block text-xs font-semibold text-[#785b56] mb-1">核心价值特质 (Core Values / 逗号隔开)</label>
                 <input
                   type="text"
                   value={coreValues}
                   onChange={(e) => setCoreValues(e.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-xs text-white focus:outline-none"
+                  className="w-full rounded-xl border border-[#f2cad4] bg-white px-3 py-2 text-xs text-[#4a3431] placeholder:text-[#bda49f] focus:outline-none focus:border-[#e07a93] focus:ring-1 focus:ring-[#e07a93]/30"
                   placeholder="掌控感、分寸感、占有欲..."
                 />
               </div>
@@ -395,11 +395,11 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-[11px] text-white/40 mb-1">直觉行为机制 (Instinct Base)</label>
+                <label className="block text-xs font-semibold text-[#785b56] mb-1">直觉行为机制 (Instinct Base)</label>
                 <select
                   value={instinct}
                   onChange={(e: any) => setInstinct(e.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-1.5 text-xs text-white focus:outline-none"
+                  className="w-full rounded-xl border border-[#f2cad4] bg-white px-3 py-2 text-xs text-[#4a3431] focus:outline-none focus:border-[#e07a93] focus:ring-1 focus:ring-[#e07a93]/30 cursor-pointer"
                 >
                   {Object.entries(INSTINCT_DESCRIPTIONS).map(([k, desc]) => (
                     <option key={k} value={k}>
@@ -410,11 +410,11 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
               </div>
 
               <div>
-                <label className="block text-[11px] text-white/40 mb-1">口癖/言辞特征 (Speech Filter)</label>
+                <label className="block text-xs font-semibold text-[#785b56] mb-1">口癖/言辞特征 (Speech Filter)</label>
                 <select
                   value={speechFilter}
                   onChange={(e: any) => setSpeechFilter(e.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-black/60 px-3 py-1.5 text-xs text-white focus:outline-none"
+                  className="w-full rounded-xl border border-[#f2cad4] bg-white px-3 py-2 text-xs text-[#4a3431] focus:outline-none focus:border-[#e07a93] focus:ring-1 focus:ring-[#e07a93]/30 cursor-pointer"
                 >
                   {Object.entries(SPEECH_FILTER_DESCRIPTIONS).map(([k, desc]) => (
                     <option key={k} value={k}>
@@ -426,17 +426,17 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
             </div>
 
             {/* Min Reply Bubbles Configuration (单次最少回复气泡数) */}
-            <div className="p-3.5 rounded-xl border border-white/10 bg-white/[0.02] space-y-2.5">
+            <div className="p-3.5 rounded-2xl border border-[#f2cad4] bg-white/80 space-y-2.5 shadow-xs">
               <div className="flex items-center justify-between">
-                <label className="text-[11px] font-semibold text-white/90 flex items-center gap-1.5">
-                  <Layers className="size-3.5 text-[hsl(28_85%_62%)]" />
+                <label className="text-xs font-bold text-[#732641] flex items-center gap-1.5">
+                  <Layers className="size-3.5 text-[#e07a93]" />
                   单次最少回复气泡数 (分句 JSON 条数)
                 </label>
-                <span className="text-xs font-mono font-bold text-[hsl(28_85%_62%)] bg-[hsl(28_85%_62%/0.15)] border border-[hsl(28_85%_62%/0.3)] px-2 py-0.5 rounded-md">
+                <span className="text-xs font-mono font-bold text-[#732641] bg-[#fae1e8] border border-[#f2cad4] px-2.5 py-0.5 rounded-lg">
                   至少 {minBubbles} 条连续气泡
                 </span>
               </div>
-              <p className="text-[10px] text-white/40 leading-relaxed">
+              <p className="text-[11px] text-[#998380] leading-relaxed">
                 要求该角色在回复时，必须将台词、心理活动、肢体描写拆分并连发至少 N 个独立的气泡，打造极具沉浸感的分句对话体验。
               </p>
               <div className="grid grid-cols-5 gap-1.5 pt-1">
@@ -445,10 +445,10 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
                     key={count}
                     type="button"
                     onClick={() => setMinBubbles(count)}
-                    className={`py-2 px-1 text-xs font-semibold rounded-lg border transition-all flex flex-col items-center gap-0.5 ${
+                    className={`py-2 px-1 text-xs font-semibold rounded-xl border transition-all flex flex-col items-center gap-0.5 cursor-pointer ${
                       minBubbles === count
-                        ? 'border-[hsl(28_85%_62%)] bg-[hsl(28_85%_62%/0.2)] text-[hsl(28_85%_62%)] ring-1 ring-[hsl(28_85%_62%/0.5)] shadow-sm'
-                        : 'border-white/10 bg-black/40 hover:bg-white/5 text-white/50 hover:text-white/80'
+                        ? 'border-[#e07a93] bg-[#fff0f3] text-[#732641] ring-1 ring-[#e07a93]/40 shadow-xs font-bold'
+                        : 'border-[#f2cad4] bg-white hover:bg-[#fff5f7] text-[#785b56]'
                     }`}
                   >
                     <span>{count} 条</span>
@@ -461,17 +461,17 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
             </div>
 
             {/* Gomoku Skill Level / Rank Configuration (五子棋对局棋力等级) */}
-            <div className="p-3.5 rounded-xl border border-white/10 bg-white/[0.02] space-y-2.5">
+            <div className="p-3.5 rounded-2xl border border-[#f2cad4] bg-white/80 space-y-2.5 shadow-xs">
               <div className="flex items-center justify-between">
-                <label className="text-[11px] font-semibold text-white/90 flex items-center gap-1.5">
-                  <Swords className="size-3.5 text-amber-400" />
+                <label className="text-xs font-bold text-[#732641] flex items-center gap-1.5">
+                  <Swords className="size-3.5 text-[#e07a93]" />
                   五子棋角色实力等级 (实力天花板)
                 </label>
-                <span className="text-xs font-bold text-amber-300 bg-amber-500/15 border border-amber-400/30 px-2 py-0.5 rounded-md">
+                <span className="text-xs font-bold text-[#732641] bg-[#fae1e8] border border-[#f2cad4] px-2.5 py-0.5 rounded-lg">
                   {gomokuRank === 'bronze' ? '青铜段位' : gomokuRank === 'silver' ? '白银段位' : gomokuRank === 'gold' ? '黄金段位' : '王者段位'}
                 </span>
               </div>
-              <p className="text-[10px] text-white/40 leading-relaxed">
+              <p className="text-[11px] text-[#998380] leading-relaxed">
                 作为角色进攻杀伤力的上限天花板（仅约束 aggressive 原始算力分数，不限制 LLM 自主选择保守/进攻策略）。
               </p>
               <div className="grid grid-cols-4 gap-1.5 pt-1">
@@ -485,10 +485,10 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
                     key={item.key}
                     type="button"
                     onClick={() => setGomokuRank(item.key as GomokuRank)}
-                    className={`py-2 px-1 text-xs font-semibold rounded-lg border transition-all flex flex-col items-center gap-0.5 ${
+                    className={`py-2 px-1 text-xs font-semibold rounded-xl border transition-all flex flex-col items-center gap-0.5 cursor-pointer ${
                       gomokuRank === item.key
-                        ? 'border-amber-400 bg-amber-500/20 text-amber-300 ring-1 ring-amber-400/50 shadow-sm'
-                        : 'border-white/10 bg-black/40 hover:bg-white/5 text-white/50 hover:text-white/80'
+                        ? 'border-[#e07a93] bg-[#fff0f3] text-[#732641] ring-1 ring-[#e07a93]/40 shadow-xs font-bold'
+                        : 'border-[#f2cad4] bg-white hover:bg-[#fff5f7] text-[#785b56]'
                     }`}
                   >
                     <span>{item.label}</span>
@@ -499,52 +499,52 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
             </div>
 
             {/* Custom Extra LLM System Prompt instructions */}
-            <div className="p-3 rounded-xl border border-white/10 bg-white/[0.01] space-y-2">
-              <label className="text-[11px] font-semibold text-white/80 block flex items-center gap-1">
-                <Clipboard className="size-3.5 text-[hsl(28_85%_62%)]" />
+            <div className="p-3.5 rounded-2xl border border-[#f2cad4] bg-white/80 space-y-2 shadow-xs">
+              <label className="text-xs font-bold text-[#732641] block flex items-center gap-1.5">
+                <Clipboard className="size-3.5 text-[#e07a93]" />
                 大模型专属系统提示词 (Extra System Prompt override)
               </label>
-              <p className="text-[10px] text-white/40 leading-relaxed">
+              <p className="text-[11px] text-[#998380] leading-relaxed">
                 这些文本将直接添加进 LLM 的 System Prompt 首部，极其强力地约束大模型的表现方式、背景、口吻或剧情：
               </p>
               <textarea
                 value={customPrompt}
                 onChange={(e) => setCustomPrompt(e.target.value)}
                 placeholder="例如：你其实是一位隐藏身份的帝国皇子，对主控充满了警惕却又忍不住想靠近。说话时经常夹带占有欲极强的动作..."
-                className="w-full h-16 p-2 text-xs rounded-lg border border-white/10 bg-black/40 text-emerald-400 placeholder:text-white/20 focus:outline-none font-mono resize-none leading-normal"
+                className="w-full h-18 p-2.5 text-xs rounded-xl border border-[#f2cad4] bg-[#fffafb] text-[#4a3431] placeholder:text-[#bda49f] focus:outline-none focus:border-[#e07a93] focus:ring-1 focus:ring-[#e07a93]/30 font-sans resize-none leading-normal"
               />
             </div>
 
             {/* Background threads / Thoughts */}
             <div>
-              <label className="block text-[11px] text-white/40 mb-1">
+              <label className="block text-xs font-semibold text-[#785b56] mb-1">
                 背景思绪/所处场景 (Background Thoughts / 每行一个)
               </label>
               <textarea
                 value={threadContents}
                 onChange={(e) => setThreadContents(e.target.value)}
                 placeholder="昨晚没睡好，头有点沉&#10;杯子里的威士忌快见底了"
-                className="w-full h-16 p-2 text-xs rounded-lg border border-white/10 bg-black/40 text-white placeholder:text-white/20 focus:outline-none font-mono resize-none"
+                className="w-full h-18 p-2.5 text-xs rounded-xl border border-[#f2cad4] bg-white text-[#4a3431] placeholder:text-[#bda49f] focus:outline-none focus:border-[#e07a93] focus:ring-1 focus:ring-[#e07a93]/30 font-sans resize-none"
               />
             </div>
 
             {/* Control & Touch Action Tendencies */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="block text-[11px] text-white/40">允许的控制行为 (逗号或、隔开)</label>
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-[#785b56]">允许的控制行为 (逗号或、隔开)</label>
                 <textarea
                   value={controlActions}
                   onChange={(e) => setControlActions(e.target.value)}
-                  className="w-full h-14 p-2 text-xs rounded-lg border border-white/10 bg-black/40 text-white focus:outline-none resize-none leading-relaxed"
+                  className="w-full h-16 p-2.5 text-xs rounded-xl border border-[#f2cad4] bg-white text-[#4a3431] placeholder:text-[#bda49f] focus:outline-none focus:border-[#e07a93] focus:ring-1 focus:ring-[#e07a93]/30 resize-none leading-relaxed"
                   placeholder="按住肩膀、扣住手腕、拉过来..."
                 />
               </div>
-              <div className="space-y-1.5">
-                <label className="block text-[11px] text-white/40">允许的亲密接触行为 (逗号或、隔开)</label>
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-[#785b56]">允许的亲密接触行为 (逗号或、隔开)</label>
                 <textarea
                   value={touchActions}
                   onChange={(e) => setTouchActions(e.target.value)}
-                  className="w-full h-14 p-2 text-xs rounded-lg border border-white/10 bg-black/40 text-white focus:outline-none resize-none leading-relaxed"
+                  className="w-full h-16 p-2.5 text-xs rounded-xl border border-[#f2cad4] bg-white text-[#4a3431] placeholder:text-[#bda49f] focus:outline-none focus:border-[#e07a93] focus:ring-1 focus:ring-[#e07a93]/30 resize-none leading-relaxed"
                   placeholder="轻抚头发、额头相抵、拥入怀里..."
                 />
               </div>
@@ -552,23 +552,23 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
 
             {/* Catchphrases and Forbidden */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="block text-[11px] text-white/40">特定口头禅 / 常用词 (逗号或、隔开)</label>
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-[#785b56]">特定口头禅 / 常用词 (逗号或、隔开)</label>
                 <input
                   type="text"
                   value={catchphrases}
                   onChange={(e) => setCatchphrases(e.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-xs text-white focus:outline-none"
+                  className="w-full rounded-xl border border-[#f2cad4] bg-white px-3 py-2 text-xs text-[#4a3431] placeholder:text-[#bda49f] focus:outline-none focus:border-[#e07a93] focus:ring-1 focus:ring-[#e07a93]/30"
                   placeholder="啧、哼、嗯？、行了、过来"
                 />
               </div>
-              <div className="space-y-1.5">
-                <label className="block text-[11px] text-white/40">禁止说的话 / 禁忌词 (逗号或、隔开)</label>
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-[#785b56]">禁止说的话 / 禁忌词 (逗号或、隔开)</label>
                 <input
                   type="text"
                   value={forbiddenPhrases}
                   onChange={(e) => setForbiddenPhrases(e.target.value)}
-                  className="w-full rounded-lg border border-white/10 bg-black/40 px-3 py-1.5 text-xs text-white focus:outline-none"
+                  className="w-full rounded-xl border border-[#f2cad4] bg-white px-3 py-2 text-xs text-[#4a3431] placeholder:text-[#bda49f] focus:outline-none focus:border-[#e07a93] focus:ring-1 focus:ring-[#e07a93]/30"
                   placeholder="对不起、请原谅、我错了"
                 />
               </div>
@@ -577,7 +577,7 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
             {/* Action buttons */}
             <button
               onClick={handleSaveCharacter}
-              className="w-full flex items-center justify-center gap-1.5 rounded-lg bg-[hsl(28_85%_62%)] hover:bg-[hsl(28_85%_62%/0.9)] py-2.5 text-sm font-semibold text-[hsl(28_30%_10%)] transition-colors shadow-lg shadow-[hsl(28_85%_62%/0.15)] mt-3"
+              className="w-full flex items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-[#d95b77] to-[#b83d5a] hover:from-[#c94d6a] hover:to-[#a73550] py-2.5 text-sm font-bold text-white transition-all shadow-md shadow-[#b83d5a]/20 mt-3 cursor-pointer"
             >
               {charSaved ? <Check className="size-4 animate-scale-in" /> : <MessageSquare className="size-4" />}
               {charSaved ? '角色卡与提示词保存并同步成功' : `保存 ${editingChar.name} 角色设定与系统提示词`}
@@ -587,12 +587,12 @@ export default function CharacterEditor({ currentCharacterId, onCharacterUpdated
       </div>
 
       {/* Info warning */}
-      <div className="rounded-lg border border-white/10 bg-[hsl(222_28%_9%/0.4)] p-3 text-xs leading-relaxed space-y-2 text-white/50">
-        <div className="flex items-center gap-1.5 font-semibold text-white/80">
-          <HelpCircle className="size-3.5 text-[hsl(28_85%_62%)]" />
+      <div className="rounded-2xl border border-[#f2d0d9] bg-[#fffafb] p-4 text-xs leading-relaxed space-y-2 text-[#785b56] shadow-xs">
+        <div className="flex items-center gap-1.5 font-bold text-[#732641]">
+          <HelpCircle className="size-3.5 text-[#e07a93]" />
           <span>角色编辑如何持久生效？</span>
         </div>
-        <p className="text-[11px]">
+        <p className="text-[11px] text-[#998380]">
           1. 修改后，当大模型连接已激活时，您的修改会被转化为<b>定制系统 Prompt 模板</b>实时发给 LLM。<br />
           2. 当使用本地 Mock 演示模式时，修改会重构本地句法引擎（行为倾向和口癖将自动生成）。<br />
           3. 所有修改保存在您的浏览器 localStorage 中，绝不泄露。

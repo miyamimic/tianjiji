@@ -1,8 +1,16 @@
-import { ChevronLeft, ChevronRight, Brain, Sparkles, BookMarked, ScanSearch, History, Swords, ChevronDown, ChevronUp, Heart, CheckCircle2, Bookmark } from 'lucide-react';
-import React, { useState } from 'react';
+import { ChevronLeft, ChevronRight, Brain, Sparkles, BookMarked, ScanSearch, History, Swords, ChevronDown, ChevronUp, Heart, CheckCircle2, Bookmark, Layers, Trash2, Edit2, Plus, Check, X, RefreshCw } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
 import EmotionRadar from './EmotionRadar';
-import type { EmotionVector, BackgroundThread, TriggeredAnchor, IntentAnalysis, DynamicMemory } from '../data/types';
-import { loadDynamicMemories } from '../lib/customStore';
+import type { EmotionVector, BackgroundThread, TriggeredAnchor, IntentAnalysis, DynamicMemory, EmotionKey } from '../data/types';
+import { 
+  loadDynamicMemories, 
+  loadMemoryDedupEnabled, 
+  saveMemoryDedupEnabled, 
+  deleteDynamicMemory, 
+  updateDynamicMemory, 
+  deduplicateDynamicMemories,
+  saveDynamicMemory
+} from '../lib/customStore';
 import { loadGameEmotionImpacts } from '../lib/gameStore';
 import { LinePuppyDoodle, PuppyHeartsDoodle, StardewPixelFlower, FrenchCornerLace } from './FrenchLacePuppyElements';
 
@@ -95,8 +103,104 @@ export default function Sidebar({
   const [isGameEmotionOpen, setIsGameEmotionOpen] = useState(true);
   const [isMemoryOpen, setIsMemoryOpen] = useState(true);
   const [memoryTierFilter, setMemoryTierFilter] = useState<'ALL' | 'SSR' | 'SR' | 'R'>('ALL');
+  
+  const [dynamicMemories, setDynamicMemories] = useState<DynamicMemory[]>(() =>
+    characterId ? loadDynamicMemories(characterId) : []
+  );
+  const [dedupEnabled, setDedupEnabled] = useState<boolean>(() =>
+    characterId ? loadMemoryDedupEnabled(characterId) : true
+  );
+
+  // Edit / Add memory states
+  const [editingDmId, setEditingDmId] = useState<string | null>(null);
+  const [editKw, setEditKw] = useState('');
+  const [editEmotion, setEditEmotion] = useState<EmotionKey>('warmth');
+  const [editIntensity, setEditIntensity] = useState<number>(3);
+  const [editSummary, setEditSummary] = useState('');
+
+  const [isCreatingMemory, setIsCreatingMemory] = useState(false);
+  const [newKw, setNewKw] = useState('');
+  const [newEmotion, setNewEmotion] = useState<EmotionKey>('warmth');
+  const [newIntensity, setNewIntensity] = useState<number>(3);
+  const [newSummary, setNewSummary] = useState('');
+
+  useEffect(() => {
+    if (!characterId) return;
+    setDynamicMemories(loadDynamicMemories(characterId));
+    setDedupEnabled(loadMemoryDedupEnabled(characterId));
+  }, [characterId]);
+
+  const handleToggleDedup = () => {
+    if (!characterId) return;
+    const nextVal = !dedupEnabled;
+    saveMemoryDedupEnabled(characterId, nextVal);
+    setDedupEnabled(nextVal);
+  };
+
+  const handleCleanDuplicates = () => {
+    if (!characterId) return;
+    const cleaned = deduplicateDynamicMemories(characterId);
+    setDynamicMemories(cleaned);
+  };
+
+  const handleDeleteDm = (id: string) => {
+    if (!characterId) return;
+    deleteDynamicMemory(characterId, id);
+    setDynamicMemories(loadDynamicMemories(characterId));
+  };
+
+  const handleStartEdit = (dm: DynamicMemory) => {
+    setEditingDmId(dm.id);
+    setEditKw(dm.topic_keywords?.join(', ') || '');
+    setEditEmotion(dm.emotion_type || 'warmth');
+    setEditIntensity(dm.intensity || 3);
+    setEditSummary(dm.character_reaction_summary || dm.user_trigger_summary || '');
+  };
+
+  const handleSaveEdit = (dm: DynamicMemory) => {
+    if (!characterId) return;
+    const keywords = editKw
+      .split(/[,，/、\s]+/)
+      .map((k) => k.trim())
+      .filter(Boolean);
+    const updated: DynamicMemory = {
+      ...dm,
+      topic_keywords: keywords.length > 0 ? keywords : ['沉淀记忆'],
+      emotion_type: editEmotion,
+      intensity: editIntensity,
+      character_reaction_summary: editSummary.trim() || dm.character_reaction_summary,
+      importance: editIntensity >= 3 ? 0.9 : editIntensity === 2 ? 0.6 : 0.3,
+    };
+    updateDynamicMemory(characterId, updated);
+    setDynamicMemories(loadDynamicMemories(characterId));
+    setEditingDmId(null);
+  };
+
+  const handleCreateMemory = () => {
+    if (!characterId || !newSummary.trim()) return;
+    const keywords = newKw
+      .split(/[,，/、\s]+/)
+      .map((k) => k.trim())
+      .filter(Boolean);
+    const created: DynamicMemory = {
+      id: `dm_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      user_trigger_summary: keywords.join(' / ') || '羁绊话题',
+      character_reaction_summary: newSummary.trim(),
+      emotion_type: newEmotion,
+      intensity: newIntensity,
+      topic_keywords: keywords.length > 0 ? keywords : ['羁绊沉淀'],
+      created_at: Date.now(),
+      importance: newIntensity >= 3 ? 0.9 : newIntensity === 2 ? 0.6 : 0.3,
+    };
+    saveDynamicMemory(characterId, created);
+    setDynamicMemories(loadDynamicMemories(characterId));
+    setIsCreatingMemory(false);
+    setNewKw('');
+    setNewSummary('');
+    setNewIntensity(3);
+  };
+
   const gameEmotionImpacts = characterId ? loadGameEmotionImpacts(characterId) : [];
-  const dynamicMemories: DynamicMemory[] = characterId ? loadDynamicMemories(characterId) : [];
 
   const classifiedAnchors = anchors.map((a) => ({
     ...a,
@@ -122,40 +226,27 @@ export default function Sidebar({
 
   return (
     <>
-      {!isOpen && (
-        <button
-          onClick={onToggle}
-          className={`${
-            overlayMode ? 'absolute' : 'fixed'
-          } right-0 top-1/2 z-[60] -translate-y-1/2 bg-white/85 backdrop-blur-md border border-[#f2d0d9] border-r-0 rounded-l-2xl p-2 text-[#998380] hover:text-[#b83d5a] transition-all hover:bg-white shadow-md cursor-pointer`}
-          aria-label="展开内部状态面板"
-        >
-          <ChevronLeft className="size-4" />
-        </button>
-      )}
-
       {/* Sidebar Chassis */}
       <aside
         className={`${
           overlayMode ? 'absolute' : 'fixed'
-        } right-0 top-0 z-[70] h-full w-80 max-w-[88vw] bg-[#fffafb]/95 backdrop-blur-2xl border-l-2 border-[#f2cad4] shadow-2xl transition-transform duration-300 ease-out flex flex-col ${
+        } right-0 top-0 z-[70] h-full w-84 max-w-[92vw] bg-[#fffafb]/95 backdrop-blur-2xl border-l-2 border-[#f2cad4] shadow-2xl transition-transform duration-300 ease-out flex flex-col ${
           isOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
-        {/* Header */}
-        <div className="flex items-center justify-between border-b border-[#f2cad4] px-4 py-3.5 bg-white/70">
-          <div className="flex items-center gap-2">
-            <PuppyHeartsDoodle size={23} className="drop-shadow-2xs" />
+        {/* Header with Sub-centered/Left-leaning Retract Button (< + Puppy Heart Pattern + Six-dimension Title) */}
+        <div className="flex items-center justify-start pl-7 pr-4 py-3 border-b border-[#f2cad4] bg-white/75 select-none relative">
+          <button
+            onClick={onToggle}
+            className="flex items-center gap-2 px-2 py-1 rounded-xl text-[#732641] hover:bg-[#fae1e8] transition-all cursor-pointer group"
+            title="收起六维情绪栏"
+            aria-label="收起六维情绪栏"
+          >
+            <ChevronLeft className="size-4 text-[#b83d5a] group-hover:-translate-x-0.5 transition-transform stroke-[2.5]" />
+            <PuppyHeartsDoodle size={22} className="drop-shadow-2xs" />
             <h2 className="text-[14.5px] font-serif font-bold tracking-wider text-[#732641] [text-shadow:0_1px_2px_rgba(224,122,147,0.3),0_2px_4px_rgba(115,38,65,0.12)]">
               六维情绪
             </h2>
-          </div>
-          <button
-            onClick={onToggle}
-            className="rounded-full p-1 text-[#998380] hover:bg-[#fae1e8] hover:text-[#b83d5a] transition-colors cursor-pointer"
-            aria-label="收起面板"
-          >
-            <ChevronRight className="size-4" />
           </button>
         </div>
 
@@ -167,39 +258,19 @@ export default function Sidebar({
                 <Sparkles className="size-3.5 text-[#b83d5a]" />
                 情感六维雷达
               </span>
-              {!emotionConfirmed && previousEmotion ? (
-                <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full font-bold animate-pulse">
-                  待确认
-                </span>
-              ) : previousEmotion ? (
-                <span className="text-[10px] text-[#b83d5a] font-serif">动态演化中</span>
-              ) : null}
+              <span className="text-[10px] text-[#b83d5a] font-serif bg-[#fae1e8]/70 border border-[#f2cad4]/60 px-2 py-0.5 rounded-full">
+                实时自动演化
+              </span>
             </div>
 
             <div className="rounded-xl border border-[#fae1e8] bg-[#fffbfb] p-1.5">
               <EmotionRadar
                 emotion={emotion}
                 previousEmotion={previousEmotion ?? undefined}
-                confirmed={emotionConfirmed}
+                confirmed={true}
                 className="h-[210px] w-full"
               />
             </div>
-
-            {/* 未确认时的确认变化提示与按钮 */}
-            {!emotionConfirmed && previousEmotion && (
-              <div className="p-2.5 rounded-xl border border-amber-200 bg-amber-50/80 space-y-1.5">
-                <p className="text-[11px] text-amber-900 font-medium font-serif leading-snug">
-                  检测到情感演化变化，是否确认同步？
-                </p>
-                <button
-                  onClick={onConfirmEmotion}
-                  className="w-full py-1 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-bold text-[11px] transition-colors flex items-center justify-center gap-1 shadow-2xs cursor-pointer"
-                >
-                  <CheckCircle2 className="size-3" />
-                  <span>确认情绪演化</span>
-                </button>
-              </div>
-            )}
 
             {/* 数值进度条 */}
             <div className="space-y-1 pt-1">
@@ -209,26 +280,26 @@ export default function Sidebar({
                 const hasChange = oldVal !== undefined && Math.abs(diff) >= 0.005;
                 return (
                   <div key={key} className="flex items-center gap-2 text-[11px] font-serif">
-                    <span className="w-9 text-[#785b56] font-medium">{EMOTION_CN[key]}</span>
+                    <span className="w-9 text-[#785b56] font-medium shrink-0">{EMOTION_CN[key]}</span>
                     <div className="flex-1 h-2 rounded-full bg-[#fae1e8] overflow-hidden border border-[#f2cad4]/50">
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-[#f48fa5] to-[#b83d5a] transition-all duration-500"
                         style={{ width: `${Math.round(emotion[key] * 100)}%` }}
                       />
                     </div>
-                    <span className="w-5 text-right text-[#4a3431] font-mono tabular-nums text-[10px]">
+                    <span className="w-6 text-right text-[#4a3431] font-mono tabular-nums text-[10px] shrink-0">
                       {Math.round(emotion[key] * 100)}
                     </span>
-                    {hasChange && (
-                      <span
-                        className={`w-9 text-[9px] tabular-nums font-mono ${
-                          diff > 0 ? 'text-rose-600 font-bold' : 'text-emerald-700 font-bold'
-                        }`}
-                      >
-                        {diff > 0 ? '+' : ''}
-                        {diff.toFixed(2)}
-                      </span>
-                    )}
+                    <span className="w-9 text-[9px] tabular-nums font-mono text-right shrink-0">
+                      {hasChange ? (
+                        <span
+                          className={diff > 0 ? 'text-rose-600 font-bold' : 'text-emerald-700 font-bold'}
+                        >
+                          {diff > 0 ? '+' : ''}
+                          {diff.toFixed(2)}
+                        </span>
+                      ) : null}
+                    </span>
                   </div>
                 );
               })}
@@ -366,6 +437,125 @@ export default function Sidebar({
                   </button>
                 </div>
 
+                {/* 记忆去重与新增控制条 */}
+                <div className="p-2 rounded-xl bg-[#fae1e8]/40 border border-[#f2cad4]/60 space-y-1.5">
+                  <div className="flex items-center justify-between text-[10.5px]">
+                    <div className="flex items-center gap-1 text-[#732641] font-semibold">
+                      <Layers className="size-3 text-[#b83d5a]" />
+                      <span>同内容不叠加</span>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={handleCleanDuplicates}
+                        className="px-1.5 py-0.5 rounded-md bg-white text-[#732641] hover:bg-[#fce4eb] border border-[#f2cad4] text-[9.5px] font-medium transition cursor-pointer flex items-center gap-0.5"
+                        title="立即清理已有重复羁绊记忆"
+                      >
+                        <RefreshCw className="size-2.5 text-[#b83d5a]" />
+                        <span>一键去重</span>
+                      </button>
+                      <button
+                        onClick={handleToggleDedup}
+                        className={`w-7 h-4 rounded-full p-0.5 transition-colors cursor-pointer flex items-center ${
+                          dedupEnabled ? 'bg-[#b83d5a] justify-end' : 'bg-stone-300 justify-start'
+                        }`}
+                        title={dedupEnabled ? '已开启不叠加去重' : '已关闭去重'}
+                      >
+                        <span className="w-3 h-3 rounded-full bg-white shadow-xs block" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-0.5">
+                    <span className="text-[9.5px] text-[#998380]">
+                      {dedupEnabled ? '自动合并相同话题/反应记忆' : '保留每次独立沉淀记录'}
+                    </span>
+                    <button
+                      onClick={() => setIsCreatingMemory(!isCreatingMemory)}
+                      className="px-2 py-0.5 rounded-md bg-[#b83d5a] text-white hover:bg-[#9e2f49] text-[10px] font-semibold transition cursor-pointer flex items-center gap-0.5 shadow-2xs"
+                    >
+                      <Plus className="size-3" />
+                      <span>{isCreatingMemory ? '收起新增' : '新增记忆'}</span>
+                    </button>
+                  </div>
+
+                  {/* 新增记忆表单 */}
+                  {isCreatingMemory && (
+                    <div className="p-2 rounded-xl bg-white border border-[#f2cad4] space-y-2 mt-1 shadow-xs">
+                      <div className="text-[11px] font-bold text-[#732641] flex items-center justify-between border-b border-[#fce4eb] pb-1">
+                        <span>手动沉淀羁绊记忆</span>
+                        <button
+                          onClick={() => setIsCreatingMemory(false)}
+                          className="text-[#998380] hover:text-[#732641]"
+                        >
+                          <X className="size-3" />
+                        </button>
+                      </div>
+
+                      <div className="space-y-1.5 text-[10.5px]">
+                        <div>
+                          <label className="text-[#8c7471] font-semibold block mb-0.5">话题关键词 (逗号分隔):</label>
+                          <input
+                            type="text"
+                            value={newKw}
+                            onChange={(e) => setNewKw(e.target.value)}
+                            placeholder="如：雨天, 承诺, 拥抱"
+                            className="w-full px-2 py-1 rounded-lg border border-[#f2cad4] bg-[#fff8fa] text-[11px] text-[#4a3431] focus:outline-none focus:border-[#b83d5a]"
+                          />
+                        </div>
+
+                        <div className="flex gap-2">
+                          <div className="flex-1">
+                            <label className="text-[#8c7471] font-semibold block mb-0.5">情感倾向:</label>
+                            <select
+                              value={newEmotion}
+                              onChange={(e) => setNewEmotion(e.target.value as EmotionKey)}
+                              className="w-full px-1.5 py-1 rounded-lg border border-[#f2cad4] bg-[#fff8fa] text-[10.5px] text-[#4a3431]"
+                            >
+                              <option value="warmth">温情 (Warmth)</option>
+                              <option value="joy">喜悦 (Joy)</option>
+                              <option value="desire">欲望 (Desire)</option>
+                              <option value="sadness">悲伤 (Sadness)</option>
+                              <option value="anger">愤怒 (Anger)</option>
+                              <option value="fear">恐惧 (Fear)</option>
+                            </select>
+                          </div>
+
+                          <div className="w-24">
+                            <label className="text-[#8c7471] font-semibold block mb-0.5">记忆级别:</label>
+                            <select
+                              value={newIntensity}
+                              onChange={(e) => setNewIntensity(Number(e.target.value))}
+                              className="w-full px-1.5 py-1 rounded-lg border border-[#f2cad4] bg-[#fff8fa] text-[10.5px] text-[#4a3431]"
+                            >
+                              <option value={3}>SSR ★★★</option>
+                              <option value={2}>SR ★★</option>
+                              <option value={1}>R ★</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[#8c7471] font-semibold block mb-0.5">角色羁绊反应描写:</label>
+                          <textarea
+                            value={newSummary}
+                            onChange={(e) => setNewSummary(e.target.value)}
+                            placeholder="描述角色对此段回忆的专属触动或反应..."
+                            className="w-full min-h-[50px] px-2 py-1 rounded-lg border border-[#f2cad4] bg-[#fff8fa] text-[11px] text-[#4a3431] focus:outline-none focus:border-[#b83d5a]"
+                          />
+                        </div>
+
+                        <button
+                          onClick={handleCreateMemory}
+                          className="w-full py-1 rounded-lg bg-[#b83d5a] hover:bg-[#9e2f49] text-white text-[11px] font-bold transition flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                        >
+                          <Check className="size-3" />
+                          保存沉淀记忆
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 {/* 触发的记忆锚点 */}
                 {filteredAnchors.length > 0 && (
                   <div className="space-y-1.5">
@@ -417,7 +607,7 @@ export default function Sidebar({
                   </div>
                 )}
 
-                {/* 角色动态沉淀记忆 */}
+                {/* 角色动态沉淀记忆 (支持自主编辑与删除) */}
                 {filteredDynamicMemories.length > 0 && (
                   <div className="space-y-1.5">
                     <span className="text-[10px] font-bold text-[#b83d5a] flex items-center gap-1">
@@ -427,10 +617,99 @@ export default function Sidebar({
                     {filteredDynamicMemories.map((dm) => {
                       const isSSR = dm.tier === 'SSR';
                       const isSR = dm.tier === 'SR';
+                      const isEditingThis = editingDmId === dm.id;
+
+                      if (isEditingThis) {
+                        return (
+                          <div
+                            key={dm.id}
+                            className="p-2.5 rounded-xl border border-[#b83d5a] bg-white text-[11px] space-y-2 shadow-sm"
+                          >
+                            <div className="flex items-center justify-between font-bold text-[#732641] text-[11px] border-b border-[#fce4eb] pb-1">
+                              <span>编辑羁绊记忆</span>
+                              <button
+                                onClick={() => setEditingDmId(null)}
+                                className="text-[#998380] hover:text-[#4a3431]"
+                              >
+                                <X className="size-3" />
+                              </button>
+                            </div>
+
+                            <div className="space-y-1.5 text-[10.5px]">
+                              <div>
+                                <label className="text-[#8c7471] font-semibold block mb-0.5">关键词:</label>
+                                <input
+                                  type="text"
+                                  value={editKw}
+                                  onChange={(e) => setEditKw(e.target.value)}
+                                  className="w-full px-2 py-1 rounded-lg border border-[#f2cad4] bg-[#fff8fa] text-[11px] text-[#4a3431] focus:outline-none focus:border-[#b83d5a]"
+                                />
+                              </div>
+
+                              <div className="flex gap-2">
+                                <div className="flex-1">
+                                  <label className="text-[#8c7471] font-semibold block mb-0.5">情绪类型:</label>
+                                  <select
+                                    value={editEmotion}
+                                    onChange={(e) => setEditEmotion(e.target.value as EmotionKey)}
+                                    className="w-full px-1.5 py-1 rounded-lg border border-[#f2cad4] bg-[#fff8fa] text-[10.5px] text-[#4a3431]"
+                                  >
+                                    <option value="warmth">温情</option>
+                                    <option value="joy">喜悦</option>
+                                    <option value="desire">欲望</option>
+                                    <option value="sadness">悲伤</option>
+                                    <option value="anger">愤怒</option>
+                                    <option value="fear">恐惧</option>
+                                  </select>
+                                </div>
+
+                                <div className="w-24">
+                                  <label className="text-[#8c7471] font-semibold block mb-0.5">级别:</label>
+                                  <select
+                                    value={editIntensity}
+                                    onChange={(e) => setEditIntensity(Number(e.target.value))}
+                                    className="w-full px-1.5 py-1 rounded-lg border border-[#f2cad4] bg-[#fff8fa] text-[10.5px] text-[#4a3431]"
+                                  >
+                                    <option value={3}>SSR ★★★</option>
+                                    <option value={2}>SR ★★</option>
+                                    <option value={1}>R ★</option>
+                                  </select>
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="text-[#8c7471] font-semibold block mb-0.5">反应描写:</label>
+                                <textarea
+                                  value={editSummary}
+                                  onChange={(e) => setEditSummary(e.target.value)}
+                                  className="w-full min-h-[50px] px-2 py-1 rounded-lg border border-[#f2cad4] bg-[#fff8fa] text-[11px] text-[#4a3431] focus:outline-none focus:border-[#b83d5a]"
+                                />
+                              </div>
+
+                              <div className="flex justify-end gap-1.5 pt-1">
+                                <button
+                                  onClick={() => setEditingDmId(null)}
+                                  className="px-2 py-0.5 rounded-lg bg-stone-100 text-[#665554] hover:bg-stone-200 text-[10.5px] transition cursor-pointer"
+                                >
+                                  取消
+                                </button>
+                                <button
+                                  onClick={() => handleSaveEdit(dm)}
+                                  className="px-3 py-0.5 rounded-lg bg-[#b83d5a] hover:bg-[#9e2f49] text-white text-[10.5px] font-bold transition flex items-center gap-1 shadow-2xs cursor-pointer"
+                                >
+                                  <Check className="size-3" />
+                                  保存
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      }
+
                       return (
                         <div
                           key={dm.id}
-                          className={`p-2 rounded-xl text-[11px] text-[#4a3431] space-y-1 transition-all ${
+                          className={`p-2 rounded-xl text-[11px] text-[#4a3431] space-y-1 transition-all group/item ${
                             isSSR
                               ? 'border border-amber-300/80 bg-gradient-to-br from-[#fffdf5] via-[#fffbf8] to-[#fff3f6] shadow-xs'
                               : isSR
@@ -455,9 +734,30 @@ export default function Sidebar({
                                 {dm.topic_keywords?.join(' / ') || '沉淀记忆'}
                               </span>
                             </div>
-                            <span className="text-amber-700 font-mono text-[9.5px]">
-                              {EMOTION_CN[dm.emotion_type] || dm.emotion_type} {'★'.repeat(dm.intensity || 1)}
-                            </span>
+                            
+                            {/* Actions (Edit & Delete) + Emotion Stars */}
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-amber-700 font-mono text-[9.5px]">
+                                {EMOTION_CN[dm.emotion_type] || dm.emotion_type} {'★'.repeat(dm.intensity || 1)}
+                              </span>
+
+                              <div className="opacity-0 group-hover/item:opacity-100 transition-opacity flex items-center gap-0.5">
+                                <button
+                                  onClick={() => handleStartEdit(dm)}
+                                  title="编辑此记忆"
+                                  className="p-0.5 rounded text-[#998380] hover:text-[#732641] hover:bg-[#fae1e8] transition cursor-pointer"
+                                >
+                                  <Edit2 className="size-3" />
+                                </button>
+                                <button
+                                  onClick={() => handleDeleteDm(dm.id)}
+                                  title="删除此记忆"
+                                  className="p-0.5 rounded text-[#998380] hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                                >
+                                  <Trash2 className="size-3" />
+                                </button>
+                              </div>
+                            </div>
                           </div>
                           <p className="text-[10.5px] text-[#785b56] leading-snug">
                             {dm.character_reaction_summary || dm.user_trigger_summary}

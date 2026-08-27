@@ -216,6 +216,16 @@ canvas {
   transform-origin: top center;
 }
 
+@keyframes tanzaku-breeze {
+  0%, 100% { transform: rotate(-2deg) skewX(-1deg); }
+  50% { transform: rotate(4deg) skewX(2deg); }
+}
+
+.animate-tanzaku-sway {
+  animation: tanzaku-breeze 3.5s ease-in-out infinite;
+  transform-origin: top center;
+}
+
 /* French Cursive & Handwritten Accents */
 .art-font {
   font-family: 'Caveat', 'Zeyada', cursive;

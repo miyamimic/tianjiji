@@ -883,6 +883,25 @@ export function saveCharMinBubbles(charId: string, count: number): void {
 // -------------------------------------------------------------
 
 const DYNAMIC_MEMORIES_PREFIX = '__rp_engine_dynamic_memories_';
+const MEMORY_DEDUP_PREFIX = '__rp_engine_memory_dedup_';
+
+export function loadMemoryDedupEnabled(charId: string): boolean {
+  try {
+    const raw = localStorage.getItem(`${MEMORY_DEDUP_PREFIX}${charId}`);
+    if (raw !== null) return raw === 'true';
+  } catch {
+    // ignore
+  }
+  return true; // Default enabled: do not stack duplicate content
+}
+
+export function saveMemoryDedupEnabled(charId: string, enabled: boolean): void {
+  try {
+    localStorage.setItem(`${MEMORY_DEDUP_PREFIX}${charId}`, String(enabled));
+  } catch {
+    // ignore
+  }
+}
 
 export function loadDynamicMemories(charId: string): DynamicMemory[] {
   try {
@@ -897,19 +916,108 @@ export function loadDynamicMemories(charId: string): DynamicMemory[] {
   return [];
 }
 
+export function saveAllDynamicMemories(charId: string, list: DynamicMemory[]): void {
+  try {
+    localStorage.setItem(`${DYNAMIC_MEMORIES_PREFIX}${charId}`, JSON.stringify(list));
+    window.dispatchEvent(new CustomEvent('dynamic_memories_updated', { detail: { charId } }));
+  } catch {
+    // ignore
+  }
+}
+
+export function deleteDynamicMemory(charId: string, memoryId: string): void {
+  try {
+    const list = loadDynamicMemories(charId);
+    const updated = list.filter((m) => m.id !== memoryId);
+    saveAllDynamicMemories(charId, updated);
+  } catch {
+    // ignore
+  }
+}
+
+export function updateDynamicMemory(charId: string, updatedMemory: DynamicMemory): void {
+  try {
+    const list = loadDynamicMemories(charId);
+    const idx = list.findIndex((m) => m.id === updatedMemory.id);
+    if (idx !== -1) {
+      list[idx] = updatedMemory;
+    } else {
+      list.unshift(updatedMemory);
+    }
+    saveAllDynamicMemories(charId, list);
+  } catch {
+    // ignore
+  }
+}
+
+export function deduplicateDynamicMemories(charId: string): DynamicMemory[] {
+  try {
+    const list = loadDynamicMemories(charId);
+    const seen = new Set<string>();
+    const result: DynamicMemory[] = [];
+
+    for (const m of list) {
+      const kwKey = (m.topic_keywords || []).slice().sort().join(',').toLowerCase();
+      const contentKey = (m.character_reaction_summary || m.user_trigger_summary || '').trim().toLowerCase();
+      const fingerprint = kwKey ? `${m.emotion_type}_${kwKey}` : `${m.emotion_type}_${contentKey}`;
+
+      if (!seen.has(fingerprint)) {
+        seen.add(fingerprint);
+        result.push(m);
+      }
+    }
+    saveAllDynamicMemories(charId, result);
+    return result;
+  } catch {
+    return loadDynamicMemories(charId);
+  }
+}
+
 export function saveDynamicMemory(charId: string, memory: DynamicMemory): void {
   try {
     const list = loadDynamicMemories(charId);
-    // deduplicate or update
+    const dedupEnabled = loadMemoryDedupEnabled(charId);
+
+    // 1. Direct ID match
     const existingIdx = list.findIndex((m) => m.id === memory.id);
     if (existingIdx !== -1) {
       list[existingIdx] = memory;
-    } else {
-      list.unshift(memory);
-      // Keep up to 30 most recent dynamic memories per character
-      if (list.length > 30) list.pop();
+      saveAllDynamicMemories(charId, list);
+      return;
     }
-    localStorage.setItem(`${DYNAMIC_MEMORIES_PREFIX}${charId}`, JSON.stringify(list));
+
+    // 2. If deduplication enabled, check for duplicate content/keywords
+    if (dedupEnabled) {
+      const newKw = (memory.topic_keywords || []).slice().sort().join(',').toLowerCase();
+      const newText = (memory.character_reaction_summary || memory.user_trigger_summary || '').trim().toLowerCase();
+
+      const dupIndex = list.findIndex((existing) => {
+        const existKw = (existing.topic_keywords || []).slice().sort().join(',').toLowerCase();
+        const existText = (existing.character_reaction_summary || existing.user_trigger_summary || '').trim().toLowerCase();
+        
+        // Exact keyword match on same emotion or identical reaction text
+        if (newKw && existKw && newKw === existKw) return true;
+        if (newText && existText && newText === existText) return true;
+        return false;
+      });
+
+      if (dupIndex !== -1) {
+        // Update existing memory intensity and timestamp instead of creating a duplicated entry
+        list[dupIndex] = {
+          ...list[dupIndex],
+          intensity: Math.max(list[dupIndex].intensity || 1, memory.intensity || 1),
+          created_at: Date.now(),
+          character_reaction_summary: memory.character_reaction_summary || list[dupIndex].character_reaction_summary,
+        };
+        saveAllDynamicMemories(charId, list);
+        return;
+      }
+    }
+
+    // 3. Insert new memory
+    list.unshift(memory);
+    if (list.length > 40) list.pop();
+    saveAllDynamicMemories(charId, list);
   } catch {
     // ignore
   }

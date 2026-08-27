@@ -207,7 +207,7 @@ export function useEngine() {
       const character = getCharacterById(s.characterId) ?? MOCK_CHARACTERS[0];
 
       previousEmotionRef.current = { ...s.emotion };
-      emotionConfirmedRef.current = false;
+      emotionConfirmedRef.current = true;
 
       // 1. Natural Emotional Calming / Decay Curve (随轮数与时间自然平复趋向基准线)
       const decayRate = loadEmotionDecayRate();
@@ -580,7 +580,7 @@ export function useEngine() {
     s.emotion = decayEmotionTowardsBaseline(s.emotion, character.emotion.baseline, decayRate);
 
     previousEmotionRef.current = { ...s.emotion };
-    emotionConfirmedRef.current = false;
+    emotionConfirmedRef.current = true;
     lastIntentRef.current = null;
 
     const lastUserMsg = [...s.messages].reverse().find((m) => m.role === 'user');
@@ -795,7 +795,7 @@ export function useEngine() {
       let triggerInput = '...';
 
       if (targetMsg.role === 'character') {
-        // Rollback AI turn: find preceding user message
+        // Find preceding user message as the trigger prompt without truncating conversation history
         let userMsgIndex = -1;
         for (let i = msgIndex - 1; i >= 0; i--) {
           if (s.messages[i].role === 'user') {
@@ -807,14 +807,12 @@ export function useEngine() {
         if (userMsgIndex !== -1) {
           const userMsg = s.messages[userMsgIndex];
           triggerInput = userMsg.content;
-          s.messages = s.messages.slice(0, userMsgIndex + 1);
           if (userMsg.snapshot) {
             s.emotion = { ...userMsg.snapshot.emotion };
             s.backgroundThreads = userMsg.snapshot.backgroundThreads.map((t) => ({ ...t }));
             s.triggeredAnchors = userMsg.snapshot.triggeredAnchors.map((a) => ({ ...a }));
           }
         } else {
-          s.messages = s.messages.slice(0, msgIndex);
           if (targetMsg.snapshot) {
             s.emotion = { ...targetMsg.snapshot.emotion };
             s.backgroundThreads = targetMsg.snapshot.backgroundThreads.map((t) => ({ ...t }));
@@ -823,7 +821,6 @@ export function useEngine() {
         }
       } else {
         triggerInput = targetMsg.content;
-        s.messages = s.messages.slice(0, msgIndex + 1);
         if (targetMsg.snapshot) {
           s.emotion = { ...targetMsg.snapshot.emotion };
           s.backgroundThreads = targetMsg.snapshot.backgroundThreads.map((t) => ({ ...t }));
@@ -836,7 +833,7 @@ export function useEngine() {
       s.emotion = decayEmotionTowardsBaseline(s.emotion, character.emotion.baseline, decayRate);
 
       previousEmotionRef.current = { ...s.emotion };
-      emotionConfirmedRef.current = false;
+      emotionConfirmedRef.current = true;
       lastIntentRef.current = null;
 
       const matchedDynamicMemories = findRelevantDynamicMemories(character.character_id, triggerInput);
@@ -972,7 +969,10 @@ export function useEngine() {
             }
           }
 
-          s.messages = [...s.messages, ...newReplies];
+          // In-place replacement: replace target message at msgIndex without truncating subsequent conversation
+          const updatedMessages = [...s.messages];
+          updatedMessages.splice(msgIndex, 1, ...newReplies);
+          s.messages = updatedMessages;
           persist(s);
           rerender();
 
@@ -1004,7 +1004,10 @@ export function useEngine() {
         lastFallbackRef.current = true;
       }
 
-      s.messages = [...s.messages, ...newReplies];
+      // In-place fallback replacement
+      const updatedMessages = [...s.messages];
+      updatedMessages.splice(msgIndex, 1, ...newReplies);
+      s.messages = updatedMessages;
       persist(s);
       rerender();
 

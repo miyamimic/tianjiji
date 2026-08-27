@@ -30,8 +30,8 @@ export default function EmotionRadar({ emotion, previousEmotion, confirmed = tru
     return [center + Math.cos(angle) * r, center + Math.sin(angle) * r];
   }
 
-  const hasPrevious = previousEmotion !== undefined;
-  const showDual = hasPrevious && !confirmed;
+  const hasPrevious = Boolean(previousEmotion);
+  const showDual = hasPrevious;
 
   // This round's current active emotion — pastel rose French style
   const currentPoints = EMOTION_LABELS.map((e, i) => {
@@ -40,7 +40,7 @@ export default function EmotionRadar({ emotion, previousEmotion, confirmed = tru
   });
   const currentPolygon = currentPoints.map((p) => p.join(',')).join(' ');
 
-  // The previous round's baseline emotion
+  // The previous round's emotion — transparent with matching label color stroke
   const prevPoints = showDual
     ? EMOTION_LABELS.map((e, i) => {
         const value = Math.max(0, Math.min(1, previousEmotion![e.key]));
@@ -48,6 +48,9 @@ export default function EmotionRadar({ emotion, previousEmotion, confirmed = tru
       })
     : [];
   const prevPolygon = prevPoints.map((p) => p.join(',')).join(' ');
+
+  const prevStrokeColor = '#ff8da9';
+  const labelColor = '#785b56';
 
   return (
     <svg
@@ -71,19 +74,19 @@ export default function EmotionRadar({ emotion, previousEmotion, confirmed = tru
         return <line key={i} x1={center} y1={center} x2={x} y2={y} stroke="#f2d0d9" strokeWidth="1" />;
       })}
 
-      {/* PREVIOUS emotion — transparent dashed */}
+      {/* PREVIOUS emotion — transparent polygon with #ff8da9 stroke */}
       {showDual && (
         <>
           <polygon
             points={prevPolygon}
-            fill="rgba(242, 208, 217, 0.2)"
-            stroke="#d494a8"
+            fill="rgba(255, 141, 169, 0.12)"
+            stroke={prevStrokeColor}
             strokeWidth="1.5"
             strokeDasharray="3 3"
             strokeLinejoin="round"
           />
           {prevPoints.map(([x, y], i) => (
-            <circle key={`prev-${i}`} cx={x} cy={y} r="2.5" fill="#d494a8" />
+            <circle key={`prev-${i}`} cx={x} cy={y} r="2.5" fill={prevStrokeColor} opacity="0.9" />
           ))}
         </>
       )}
@@ -102,7 +105,7 @@ export default function EmotionRadar({ emotion, previousEmotion, confirmed = tru
 
       {/* Axis labels */}
       {EMOTION_LABELS.map((e, i) => {
-        const labelR = radius + (showDual ? 36 : 28);
+        const labelR = radius + 28;
         const [x, y] = pointOnRadius(i, labelR);
         const angle = startAngle + anglePerAxis * i;
         let textAnchor: 'start' | 'middle' | 'end' = 'middle';
@@ -115,7 +118,7 @@ export default function EmotionRadar({ emotion, previousEmotion, confirmed = tru
             y={y}
             textAnchor={textAnchor}
             dominantBaseline="middle"
-            style={{ fontSize: '11px', fill: '#6e5653', fontFamily: 'serif', fontWeight: 600 }}
+            style={{ fontSize: '11px', fill: labelColor, fontFamily: 'serif', fontWeight: 600 }}
           >
             {e.label}
           </text>
