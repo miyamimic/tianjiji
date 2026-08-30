@@ -253,6 +253,7 @@ import {
   loadUserVisualDesc,
   loadUserPromptProfile,
   loadEmotionDecayRate,
+  checkAiInterception,
   type PromptLayer,
 } from './customStore';
 
@@ -430,23 +431,6 @@ function extractFromUnstructuredNarrative(raw: string): StructuredLlmResponse {
   };
 }
 
-function deduplicateStructuredResponses(list: StructuredLlmResponse[]): StructuredLlmResponse[] {
-  const result: StructuredLlmResponse[] = [];
-  const seenTexts = new Set<string>();
-
-  for (const item of list) {
-    if (!item || !item.reply) continue;
-    const normalized = item.reply.trim();
-    if (!normalized) continue;
-    if (!seenTexts.has(normalized)) {
-      seenTexts.add(normalized);
-      result.push(item);
-    }
-  }
-
-  return result.length > 0 ? result : (list.length > 0 ? [list[0]] : []);
-}
-
 export function parseStructuredLlmResponses(raw: string): StructuredLlmResponse[] {
   const cleaned = cleanRawLlmOutput(raw);
   if (!cleaned) return [];
@@ -482,7 +466,7 @@ export function parseStructuredLlmResponses(raw: string): StructuredLlmResponse[
       const parsed = JSON.parse(candidate);
       if (Array.isArray(parsed)) {
         const results = parsed.map(parseSingleStructuredItem).filter(Boolean) as StructuredLlmResponse[];
-        if (results.length > 0) return deduplicateStructuredResponses(results);
+        if (results.length > 0) return results;
       } else if (parsed && typeof parsed === 'object') {
         const res = parseSingleStructuredItem(parsed);
         if (res) return [res];
@@ -494,7 +478,7 @@ export function parseStructuredLlmResponses(raw: string): StructuredLlmResponse[
         const parsed = JSON.parse(repaired);
         if (Array.isArray(parsed)) {
           const results = parsed.map(parseSingleStructuredItem).filter(Boolean) as StructuredLlmResponse[];
-          if (results.length > 0) return deduplicateStructuredResponses(results);
+          if (results.length > 0) return results;
         } else if (parsed && typeof parsed === 'object') {
           const res = parseSingleStructuredItem(parsed);
           if (res) return [res];
@@ -527,7 +511,7 @@ export function parseStructuredLlmResponses(raw: string): StructuredLlmResponse[
         }
       }
     }
-    if (results.length > 0) return deduplicateStructuredResponses(results);
+    if (results.length > 0) return results;
   }
 
   // 3. Fallback to resilient narrative extractor (never breaks, ensures 100% stability)
@@ -604,9 +588,10 @@ export function sanitizePersonaViolations(character: Character, text: string): s
 }
 
 /**
- * Call LLM with Defensive Persona Guardrail & Auto-Regeneration:
- * If the generated text contains forbidden phrases (e.g. "对不起嘛", "求求你"),
- * it automatically triggers an immediate regeneration pass with targeted reprimand instructions.
+ * Call LLM with Defensive Persona Guardrail & Sensitive Interception Auto-Regeneration:
+ * 1. Checks persona violations (e.g. "对不起嘛", "求求你" violating core speech/instinct)
+ * 2. Checks sensitive interception dictionary (针对 AI 输出的敏感拦截与防御词)
+ * If either is violated, automatically triggers an immediate regeneration pass with targeted reprimand instructions.
  */
 export async function callLlmWithGuardrail(
   config: LlmConfig,
@@ -617,21 +602,39 @@ export async function callLlmWithGuardrail(
   const initialList = parseStructuredLlmResponses(initialRaw);
   const fullInitialText = initialList.map((item) => item.reply).join(' ');
 
-  const check = checkPersonaViolations(character, fullInitialText);
-  if (!check.violated) {
+  const personaCheck = checkPersonaViolations(character, fullInitialText);
+  const interceptCheck = checkAiInterception(fullInitialText);
+
+  if (!personaCheck.violated && !interceptCheck.violated) {
     return initialRaw;
   }
 
+  const reprimandReasons: string[] = [];
+  if (personaCheck.violated) {
+    reprimandReasons.push(
+      `检测到了该角色的绝对禁忌词语「${personaCheck.forbiddenPhrase}」，严重违反了「${character.name}」的核心人设（${character.core.speech_filter}，${character.core.instinct_base}，严禁任何道歉、讨好、求饶或软弱言行）`,
+    );
+  }
+  if (interceptCheck.violated) {
+    reprimandReasons.push(
+      `检测到了安全拦截词典中的禁止词「${interceptCheck.matchedWords.join('、')}」（分类：${interceptCheck.matchedCategories.join('、')}），已被系统前置安全防御拦截，严禁在回复中输出`,
+    );
+  }
+
   console.warn(
-    `[防御性人设拦截] 检测到禁忌词 "${check.forbiddenPhrase}"，触发自动纠偏重生成...`,
+    `[AI生成安全与人设拦截] 触发自动纠偏重生成:`,
+    reprimandReasons.join('；'),
   );
 
   // Construct immediate correction reprimand prompt
   const reprimandMessage: LlmMessage = {
     role: 'user',
-    content: `[系统校验拦截与人设纠偏指令]
-你刚刚生成的回复中检测到了该角色的绝对禁忌词语「${check.forbiddenPhrase}」，这严重违反了「${character.name}」的核心人设（${character.core.speech_filter} 语言风格，${character.core.instinct_base} 直觉本能，严禁任何道歉、讨好、求饶或软弱言行）。
-请立即重新生成本次回复！保持 ${character.name} 的独特腔调与人设魅力，绝不可包含任何道歉或讨好词汇！`,
+    content: `[系统安全拦截与人设纠偏重生成指令]
+你刚刚生成的回复未通过安全与人设防御校验：
+${reprimandReasons.map((r, i) => `${i + 1}. ${r}`).join('\n')}
+
+【强制纠偏要求】：
+请立即重新推演并生成本次回复！保持「${character.name}」的独特性格腔调与自然口语，彻底规避并换掉上述违规禁忌词汇与道歉软弱词！绝不可包含被拦截词语！`,
   };
 
   try {
@@ -643,17 +646,52 @@ export async function callLlmWithGuardrail(
 
     const correctedList = parseStructuredLlmResponses(correctedRaw);
     const fullCorrectedText = correctedList.map((item) => item.reply).join(' ');
-    const secondCheck = checkPersonaViolations(character, fullCorrectedText);
+    const secondPersonaCheck = checkPersonaViolations(character, fullCorrectedText);
+    const secondInterceptCheck = checkAiInterception(fullCorrectedText);
 
-    if (!secondCheck.violated) {
+    if (!secondPersonaCheck.violated && !secondInterceptCheck.violated) {
       return correctedRaw;
     }
 
-    // If still violated, apply deterministic text sanitization
-    return sanitizePersonaViolations(character, correctedRaw);
+    // If second generation still has interception violations, retry once more (max 2 retries)
+    if (secondInterceptCheck.violated) {
+      console.warn(
+        `[AI生成二次拦截] 第二次仍含有拦截词「${secondInterceptCheck.matchedWords.join('、')}」，执行第二次自动重生成...`,
+      );
+      try {
+        const thirdRaw = await callLlm(config, [
+          ...messages,
+          { role: 'assistant', content: correctedRaw },
+          {
+            role: 'user',
+            content: `[终极拦截纠偏] 你的回复依然包含了禁止词「${secondInterceptCheck.matchedWords.join('、')}」！请绝对不要出现这些字词，用其他更合乎角色心境的情感动作或神态描写替换表达，立刻重新生成全新回复！`,
+          },
+        ]);
+        const thirdList = parseStructuredLlmResponses(thirdRaw);
+        const fullThirdText = thirdList.map((item) => item.reply).join(' ');
+        const thirdInterceptCheck = checkAiInterception(fullThirdText);
+        if (!thirdInterceptCheck.violated) {
+          return sanitizePersonaViolations(character, thirdRaw);
+        }
+        return sanitizePersonaViolations(character, thirdInterceptCheck.censoredText);
+      } catch {
+        // proceed to sanitization fallback
+      }
+    }
+
+    // Fallback: apply deterministic text sanitization for both persona and interception
+    let finalSafeText = correctedRaw;
+    if (secondInterceptCheck.violated) {
+      finalSafeText = secondInterceptCheck.censoredText;
+    }
+    return sanitizePersonaViolations(character, finalSafeText);
   } catch (err) {
     console.warn('Auto-regeneration failed, applying sanitization fallback:', err);
-    return sanitizePersonaViolations(character, initialRaw);
+    let fallbackText = initialRaw;
+    if (interceptCheck.violated) {
+      fallbackText = interceptCheck.censoredText;
+    }
+    return sanitizePersonaViolations(character, fallbackText);
   }
 }
 

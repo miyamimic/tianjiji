@@ -465,214 +465,173 @@ export default function WindChime({
             </div>
           )}
 
-          {/* Full High-Fidelity Sakura Glass Wind Chime (樱花玻璃风铃) */}
-          <div className="relative w-12 h-32 flex flex-col items-center select-none cursor-pointer filter drop-shadow-[0_4px_12px_rgba(235,130,160,0.35)]">
-            <svg
-              viewBox="0 0 100 240"
-              className="w-full h-full overflow-visible"
+          {/* Transparent Round Glass Sakura Wind Chime (精美像素风圆玻璃樱花风铃与纯粉渐变手札) */}
+          <div className="relative w-9 flex flex-col items-center">
+            {/* Round Crystal Glass Bell Dome with Cherry Blossom Bouquet Inside */}
+            <svg 
+              viewBox="0 0 36 34" 
+              className="w-9 h-[34px] drop-shadow-[0_4px_12px_rgba(244,114,182,0.35)] overflow-visible select-none"
             >
               <defs>
-                {/* Transparent Crystal Glass Gradient */}
-                <linearGradient id="fururinGlass" x1="0%" y1="0%" x2="100%" y2="100%">
+                {/* Translucent Round Glass Dome Gradient */}
+                <radialGradient id="roundGlassDome" cx="40%" cy="35%" r="65%">
                   <stop offset="0%" stopColor="#ffffff" stopOpacity="0.75" />
-                  <stop offset="20%" stopColor="#fff0f5" stopOpacity="0.35" />
-                  <stop offset="60%" stopColor="#ffffff" stopOpacity="0.15" />
-                  <stop offset="90%" stopColor="#ffd9e4" stopOpacity="0.3" />
-                  <stop offset="100%" stopColor="#ffffff" stopOpacity="0.6" />
-                </linearGradient>
+                  <stop offset="30%" stopColor="#fff0f5" stopOpacity="0.35" />
+                  <stop offset="75%" stopColor="#ffe4ec" stopOpacity="0.2" />
+                  <stop offset="100%" stopColor="#ffd1dc" stopOpacity="0.55" />
+                </radialGradient>
 
-                {/* Glass Glare Highlights */}
-                <linearGradient id="glassGlareMain" x1="0%" y1="0%" x2="0%" y2="100%">
+                {/* Glass Highlight Shine */}
+                <linearGradient id="glassTopGlare" x1="0%" y1="0%" x2="0%" y2="100%">
                   <stop offset="0%" stopColor="#ffffff" stopOpacity="0.95" />
                   <stop offset="100%" stopColor="#ffffff" stopOpacity="0.1" />
                 </linearGradient>
 
-                <linearGradient id="glassRodGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                  <stop offset="0%" stopColor="#ffffff" stopOpacity="0.8" />
-                  <stop offset="50%" stopColor="#ffdce5" stopOpacity="0.4" />
-                  <stop offset="100%" stopColor="#ffffff" stopOpacity="0.9" />
-                </linearGradient>
-
-                {/* Sakura Petal Gradients */}
-                <radialGradient id="sakuraCenterPink" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stopColor="#e11d48" />
-                  <stop offset="35%" stopColor="#ff5983" />
-                  <stop offset="75%" stopColor="#ffaac0" />
-                  <stop offset="100%" stopColor="#ffdbe4" />
+                {/* Sakura Petal Soft Radial Gradient */}
+                <radialGradient id="sakuraPetalGrad" cx="50%" cy="40%" r="60%">
+                  <stop offset="0%" stopColor="#ff5277" />
+                  <stop offset="45%" stopColor="#ff758f" />
+                  <stop offset="85%" stopColor="#ffa6b9" />
+                  <stop offset="100%" stopColor="#ffd8e2" />
                 </radialGradient>
-
-                <radialGradient id="sakuraPetalLight" cx="40%" cy="40%" r="60%">
-                  <stop offset="0%" stopColor="#ffffff" />
-                  <stop offset="40%" stopColor="#ffb3c6" />
-                  <stop offset="90%" stopColor="#ff7597" />
-                </radialGradient>
-
-                {/* Tanzaku Paper Gradient */}
-                <linearGradient id="tanzakuPaper" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stopColor="#fdf0f4" />
-                  <stop offset="40%" stopColor="#fcdbe5" />
-                  <stop offset="75%" stopColor="#f8c6d4" />
-                  <stop offset="100%" stopColor="#f2abbd" />
-                </linearGradient>
               </defs>
 
-              {/* 1. TOP SUSPENSION CORD & GLASS BEAD MOUNT */}
-              <line x1="50" y1="0" x2="50" y2="24" stroke="#c0a9b0" strokeWidth="1.5" />
-              <circle cx="50" cy="18" r="2.5" fill="#f8bbd0" stroke="#fff" strokeWidth="1" />
-              <circle cx="50" cy="23" r="3.2" fill="#fff" stroke="#d49ba8" strokeWidth="1" />
+              {/* Top Metal Cap Loop / Bead Connector */}
+              <rect x="16.5" y="0.5" width="3" height="2.5" rx="1" fill="#d8b4c0" stroke="#f0d5df" strokeWidth="0.5" />
 
-              {/* 2. TRANSPARENT GLASS DOME */}
-              {/* Outer Glow & Background Tone */}
-              <circle cx="50" cy="54" r="32" fill="url(#fururinGlass)" stroke="#fff" strokeWidth="1.2" />
+              {/* Round Glass Outer Shell */}
+              <circle
+                cx="18"
+                cy="17"
+                r="14"
+                fill="url(#roundGlassDome)"
+                stroke="#fce7ee"
+                strokeWidth="0.9"
+              />
+
+              {/* Bottom Opening Rim Double-Ring Lip */}
+              <ellipse 
+                cx="18" 
+                cy="28.5" 
+                rx="10.5" 
+                ry="2" 
+                fill="rgba(255, 235, 242, 0.45)" 
+                stroke="#ffffff" 
+                strokeWidth="0.8" 
+              />
+              <ellipse 
+                cx="18" 
+                cy="28.5" 
+                rx="8" 
+                ry="1.2" 
+                fill="none" 
+                stroke="rgba(255, 192, 203, 0.5)" 
+                strokeWidth="0.5" 
+              />
+
+              {/* Top-Left Crisp Specular Crescent Highlight on Glass */}
               <path
-                d="M 18 54 C 18 36, 32 22, 50 22 C 68 22, 82 36, 82 54 C 82 72, 70 82, 50 82 C 30 82, 18 72, 18 54 Z"
+                d="M9 10 C12 6, 17 5, 22 6 C17 6.5, 12 9, 9 14 C8 11.5, 8.5 10.5, 9 10 Z"
+                fill="url(#glassTopGlare)"
+              />
+
+              {/* Inside Glass: Green Branch & Stems */}
+              <path
+                d="M13 19 Q16 16 23 14 M17 17 Q20 19 25 18"
                 fill="none"
-                stroke="rgba(240, 180, 195, 0.4)"
-                strokeWidth="1.5"
+                stroke="#6b8e23"
+                strokeWidth="0.9"
+                strokeLinecap="round"
+                opacity="0.85"
               />
 
-              {/* Bottom Bell Opening Flare */}
-              <path
-                d="M 23 75 C 32 82, 68 82, 77 75 C 75 79, 65 85, 50 85 C 35 85, 25 79, 23 75 Z"
-                fill="rgba(255, 255, 255, 0.85)"
-                stroke="#e29cae"
-                strokeWidth="0.8"
-              />
-
-              {/* 3. PAINTED CHERRY BLOSSOMS INSIDE THE GLASS */}
-              {/* Blooming Center Flower */}
-              <g transform="translate(48, 52) scale(1.1)">
-                {/* 5 Distinct Petals with Sakura Clefts */}
-                <path d="M 0 0 C -4 -7, -8 -13, -2 -17 C 2 -15, 0 -13, 0 -13 C 0 -13, -2 -15, 2 -17 C 8 -13, 4 -7, 0 0 Z" fill="url(#sakuraCenterPink)" />
-                <path d="M 0 0 C 7 -4, 13 -8, 17 -2 C 15 2, 13 0, 13 0 C 13 0, 15 -2, 17 2 C 13 8, 7 4, 0 0 Z" fill="url(#sakuraCenterPink)" />
-                <path d="M 0 0 C 4 7, 8 13, 2 17 C -2 15, 0 13, 0 13 C 0 13, 2 15, -2 17 C -8 13, -4 7, 0 0 Z" fill="url(#sakuraCenterPink)" />
-                <path d="M 0 0 C -7 4, -13 8, -17 2 C -15 -2, -13 0, -13 0 C -13 0, -15 2, -17 -2 C -13 -8, -7 -4, 0 0 Z" fill="url(#sakuraCenterPink)" />
-                <path d="M 0 0 C -5 -5, -12 -9, -7 -14 C -4 -13, -5 -11, -5 -11 C -5 -11, -4 -13, -7 -14 C -1 -12, 1 -7, 0 0 Z" fill="url(#sakuraCenterPink)" opacity="0.9" />
-                
-                {/* Flower Pistils & Stamen Dots */}
-                <circle cx="0" cy="0" r="3.2" fill="#9f1239" />
-                <circle cx="-1.5" cy="-1.5" r="0.9" fill="#fff" />
-                <circle cx="1.5" cy="-1.5" r="0.9" fill="#fff" />
-                <circle cx="0" cy="1.8" r="0.9" fill="#fff" />
-                <circle cx="0" cy="0" r="1.1" fill="#ffe4e6" />
-              </g>
-
-              {/* Upper-Right Secondary Flower */}
-              <g transform="translate(64, 42) scale(0.75) rotate(25)">
-                <path d="M 0 0 C -3 -6, -6 -11, 0 -14 C 6 -11, 3 -6, 0 0 Z" fill="url(#sakuraPetalLight)" />
-                <path d="M 0 0 C 6 -3, 11 -6, 14 0 C 11 6, 6 3, 0 0 Z" fill="url(#sakuraPetalLight)" />
-                <path d="M 0 0 C 3 6, 6 11, 0 14 C -6 11, -3 6, 0 0 Z" fill="url(#sakuraPetalLight)" />
-                <path d="M 0 0 C -6 3, -11 6, -14 0 C -11 -6, -6 -3, 0 0 Z" fill="url(#sakuraPetalLight)" />
-                <circle cx="0" cy="0" r="2.2" fill="#be123c" />
+              {/* Inside Glass: Blooming Sakura Flower 1 (Large Center Bloom) */}
+              <g transform="translate(19, 15) scale(0.68)">
+                {/* 5 Petals */}
+                <path d="M0 0 C-3 -6, -5 -8, 0 -11 C5 -8, 3 -6, 0 0 Z" fill="url(#sakuraPetalGrad)" />
+                <path d="M0 0 C6 -3, 8 -5, 11 0 C8 5, 6 3, 0 0 Z" fill="url(#sakuraPetalGrad)" />
+                <path d="M0 0 C3 6, 5 8, 0 11 C-5 8, -3 6, 0 0 Z" fill="url(#sakuraPetalGrad)" />
+                <path d="M0 0 C-6 3, -8 5, -11 0 C-8 -5, -6 -3, 0 0 Z" fill="url(#sakuraPetalGrad)" />
+                <path d="M0 0 C-5 -5, -7 -7, -2 -10 C2 -8, 1 -5, 0 0 Z" fill="url(#sakuraPetalGrad)" />
+                {/* Core Pistil */}
+                <circle cx="0" cy="0" r="1.8" fill="#d90429" />
                 <circle cx="0" cy="0" r="0.8" fill="#fff" />
               </g>
 
-              {/* Left Floating Sakura Buds & Petals */}
-              <g transform="translate(30, 56) scale(0.6) rotate(-20)">
-                <path d="M 0 0 C -3 -5, -4 -8, 0 -11 C 4 -8, 3 -5, 0 0 Z" fill="url(#sakuraPetalLight)" />
-                <circle cx="0" cy="0" r="1.5" fill="#e11d48" />
-              </g>
-              <g transform="translate(34, 40) scale(0.45) rotate(45)">
-                <path d="M 0 0 C -3 -5, -4 -8, 0 -10 C 4 -8, 3 -5, 0 0 Z" fill="#ff7597" />
-              </g>
-              <g transform="translate(68, 62) scale(0.4) rotate(70)">
-                <path d="M 0 0 C -3 -5, -4 -8, 0 -10 C 4 -8, 3 -5, 0 0 Z" fill="#ffaac0" />
+              {/* Inside Glass: Sakura Flower 2 (Upper Right Bloom) */}
+              <g transform="translate(23, 11) scale(0.48) rotate(22)">
+                <path d="M0 0 C-3 -5, -4 -7, 0 -9 C4 -7, 3 -5, 0 0 Z" fill="url(#sakuraPetalGrad)" />
+                <path d="M0 0 C5 -3, 7 -4, 9 0 C7 4, 5 3, 0 0 Z" fill="url(#sakuraPetalGrad)" />
+                <path d="M0 0 C3 5, 4 7, 0 9 C-4 7, -3 5, 0 0 Z" fill="url(#sakuraPetalGrad)" />
+                <path d="M0 0 C-5 3, -7 4, -9 0 C-7 -4, -5 -3, 0 0 Z" fill="url(#sakuraPetalGrad)" />
+                <circle cx="0" cy="0" r="1.5" fill="#d90429" />
               </g>
 
-              {/* 4. GLASS SPECULAR GLARE CURVES (Left Edge Reflection Arc) */}
-              <path
-                d="M 24 38 C 22 45, 22 58, 26 68 C 24 62, 24 48, 27 40 C 30 32, 38 26, 46 24 C 38 26, 28 31, 24 38 Z"
-                fill="url(#glassGlareMain)"
-              />
-              <path
-                d="M 28 32 C 34 26, 42 24, 48 24 C 42 25, 34 28, 30 33 Z"
-                fill="#ffffff"
-                opacity="0.8"
-              />
-              {/* Right Rim Highlight */}
-              <path
-                d="M 74 38 C 77 46, 77 58, 73 66 C 75 58, 75 48, 72 40 Z"
-                fill="#ffffff"
-                opacity="0.5"
-              />
-
-              {/* 5. SUSPENDED GLASS CLAPPER ROD & BEAD */}
-              <rect x="48.5" y="44" width="3" height="42" rx="1.5" fill="url(#glassRodGrad)" stroke="rgba(255,255,255,0.9)" strokeWidth="0.6" />
-              <circle cx="50" cy="88" r="4.5" fill="#fff" stroke="#f472b6" strokeWidth="1" />
-              <circle cx="48.5" cy="86.5" r="1.5" fill="#fff" />
-
-              {/* 6. SUSPENSION CORD CONNECTING TO TANZAKU */}
-              <line x1="50" y1="92" x2="50" y2="108" stroke="#c0a9b0" strokeWidth="1.2" />
-              <circle cx="50" cy="108" r="2.2" fill="#fff" stroke="#be123c" strokeWidth="1" />
-
-              {/* 7. TANZAKU PAPER STRIP (和风樱花诗笺) */}
-              <g transform="translate(32, 110)">
-                {/* Paper Strip Rectangle */}
-                <rect
-                  x="0"
-                  y="0"
-                  width="36"
-                  height="115"
-                  rx="1"
-                  fill="url(#tanzakuPaper)"
-                  stroke="#e29cae"
-                  strokeWidth="0.8"
-                  className="animate-tanzaku-sway origin-top"
-                />
-
-                {/* Top Hanging Eyelet Hole */}
-                <circle cx="18" cy="6" r="1.8" fill="#9f1239" />
-                <circle cx="18" cy="6" r="0.9" fill="#fff" />
-
-                {/* Top Sakura Blossom Print on Tanzaku */}
-                <g transform="translate(14, 18) scale(0.55)">
-                  <path d="M0 0 C-3 -6, -6 -10, 0 -13 C6 -10, 3 -6, 0 0 Z" fill="#ff7597" opacity="0.65" />
-                  <path d="M0 0 C6 -3, 10 -6, 13 0 C10 6, 6 3, 0 0 Z" fill="#ff7597" opacity="0.65" />
-                  <path d="M0 0 C3 6, 6 10, 0 13 C-6 10, -3 6, 0 0 Z" fill="#ff7597" opacity="0.65" />
-                  <path d="M0 0 C-6 3, -10 6, -13 0 C-10 -6, -6 -3, 0 0 Z" fill="#ff7597" opacity="0.65" />
-                  <circle cx="0" cy="0" r="2" fill="#be123c" opacity="0.8" />
-                </g>
-
-                <g transform="translate(24, 26) scale(0.4) rotate(30)">
-                  <path d="M0 0 C-3 -6, -6 -10, 0 -13 C6 -10, 3 -6, 0 0 Z" fill="#ff7597" opacity="0.6" />
-                  <circle cx="0" cy="0" r="1.8" fill="#be123c" opacity="0.7" />
-                </g>
-
-                {/* Middle Calligraphy Accent */}
-                <text
-                  x="18"
-                  y="62"
-                  textAnchor="middle"
-                  fill="#732641"
-                  fontSize="7.5"
-                  fontFamily="serif"
-                  fontWeight="bold"
-                  letterSpacing="-0.5"
-                >
-                  灵犀
-                </text>
-
-                {/* Bottom Sakura Blossom Print on Tanzaku */}
-                <g transform="translate(25, 82) scale(0.65)">
-                  <path d="M0 0 C-3 -6, -6 -10, 0 -13 C6 -10, 3 -6, 0 0 Z" fill="#ff7597" opacity="0.7" />
-                  <path d="M0 0 C6 -3, 10 -6, 13 0 C10 6, 6 3, 0 0 Z" fill="#ff7597" opacity="0.7" />
-                  <path d="M0 0 C3 6, 6 10, 0 13 C-6 10, -3 6, 0 0 Z" fill="#ff7597" opacity="0.7" />
-                  <path d="M0 0 C-6 3, -10 6, -13 0 C-10 -6, -6 -3, 0 0 Z" fill="#ff7597" opacity="0.7" />
-                  <circle cx="0" cy="0" r="2.2" fill="#be123c" opacity="0.85" />
-                </g>
-
-                <g transform="translate(15, 96) scale(0.55) rotate(-20)">
-                  <path d="M0 0 C-3 -6, -6 -10, 0 -13 C6 -10, 3 -6, 0 0 Z" fill="#ff7597" opacity="0.65" />
-                  <path d="M0 0 C6 -3, 10 -6, 13 0 C10 6, 6 3, 0 0 Z" fill="#ff7597" opacity="0.65" />
-                  <path d="M0 0 C3 6, 6 10, 0 13 C-6 10, -3 6, 0 0 Z" fill="#ff7597" opacity="0.65" />
-                  <circle cx="0" cy="0" r="1.8" fill="#be123c" opacity="0.8" />
-                </g>
-
-                <g transform="translate(26, 105) scale(0.4) rotate(40)">
-                  <path d="M0 0 C-3 -6, -6 -10, 0 -13 C6 -10, 3 -6, 0 0 Z" fill="#ff7597" opacity="0.6" />
-                </g>
+              {/* Inside Glass: Left Blossom Cluster & Drifting Petals */}
+              <g transform="translate(12, 16) scale(0.42) rotate(-35)">
+                <path d="M0 0 C-3 -5, -4 -7, 0 -9 C4 -7, 3 -5, 0 0 Z" fill="url(#sakuraPetalGrad)" opacity="0.9" />
+                <path d="M0 0 C5 -3, 7 -4, 9 0 C7 4, 5 3, 0 0 Z" fill="url(#sakuraPetalGrad)" opacity="0.9" />
+                <circle cx="0" cy="0" r="1.2" fill="#d90429" />
               </g>
+              <circle cx="10" cy="20" r="1.1" fill="#ffa8ba" opacity="0.8" />
+              <circle cx="26" cy="18" r="1.2" fill="#ff758f" opacity="0.85" />
+              <circle cx="21" cy="22" r="1" fill="#ffccd8" opacity="0.85" />
+
+              {/* Central Glass Clapper Rod (垂直中心琉璃棒) */}
+              <line x1="18" y1="4" x2="18" y2="30" stroke="rgba(255,255,255,0.9)" strokeWidth="1.2" />
+              <line x1="17.7" y1="4" x2="17.7" y2="30" stroke="rgba(255,182,193,0.7)" strokeWidth="0.6" />
+
+              {/* Clapper Glass Bead Clapper (琉璃粉色击响珠) */}
+              <circle cx="18" cy="24" r="2.2" fill="#ff758f" stroke="#ffffff" strokeWidth="0.7" />
+              <circle cx="17.3" cy="23.3" r="0.7" fill="#ffffff" />
+
+              {/* Bottom Metal Hook Ring */}
+              <circle cx="18" cy="31.5" r="1.2" fill="none" stroke="#c099a8" strokeWidth="0.8" />
             </svg>
+
+            {/* Connecting Cord to Tanzaku */}
+            <div className="w-[1.2px] h-2.5 bg-rose-300 shadow-xs -mt-0.5" />
+
+            {/* Pure Pink Gradient Tanzaku (纯粉色渐变和风手札 / 短册) */}
+            <div className="relative w-5 h-16 rounded-xs border border-[#f0a8bc] shadow-[0_4px_14px_rgba(244,114,182,0.3)] bg-gradient-to-b from-[#ffe5ed] via-[#fba5bb] to-[#e8819a] flex flex-col items-center justify-between p-0.5 animate-tanzaku-sway group-hover:rotate-4 transition-transform duration-200 cursor-pointer overflow-hidden">
+              {/* Top Center Hanging Metal Eyelet & Knot */}
+              <div className="w-1.5 h-1.5 rounded-full border border-rose-400 bg-white/70 shadow-2xs flex items-center justify-center mt-0.5">
+                <div className="w-0.5 h-0.5 rounded-full bg-rose-600" />
+              </div>
+
+              {/* Painted Pixel Sakura Motifs on the Pure Pink Gradient Slip */}
+              <div className="w-full flex-1 relative pointer-events-none">
+                {/* Upper Subtle Sakura Blossom Watermark */}
+                <div className="absolute top-1.5 left-0.5 opacity-60">
+                  <div className="relative size-3">
+                    <div className="absolute inset-0 m-auto size-1.5 rounded-full bg-white/80" />
+                    <div className="absolute -top-0.5 left-1 size-1 rounded-full bg-white/70" />
+                    <div className="absolute -bottom-0.5 left-1 size-1 rounded-full bg-white/70" />
+                    <div className="absolute top-1 -left-0.5 size-1 rounded-full bg-white/70" />
+                    <div className="absolute top-1 -right-0.5 size-1 rounded-full bg-white/70" />
+                  </div>
+                </div>
+
+                {/* Middle Drifting Petals */}
+                <div className="absolute top-6 right-1 size-1 rounded-full bg-white/65 rotate-12" />
+                <div className="absolute top-8 left-1 size-0.5 rounded-full bg-rose-200/80" />
+
+                {/* Lower Sakura Cluster Watermark */}
+                <div className="absolute bottom-1 right-0.5 opacity-70">
+                  <div className="relative size-3">
+                    <div className="absolute inset-0 m-auto size-1.5 rounded-full bg-white/80" />
+                    <div className="absolute -top-0.5 left-1 size-1 rounded-full bg-white/75" />
+                    <div className="absolute -bottom-0.5 left-1 size-1 rounded-full bg-white/75" />
+                    <div className="absolute top-1 -left-0.5 size-1 rounded-full bg-white/75" />
+                    <div className="absolute top-1 -right-0.5 size-1 rounded-full bg-white/75" />
+                    <div className="absolute inset-0 m-auto size-0.5 rounded-full bg-rose-700/60" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Edge Delicate Accent */}
+              <div className="w-3 h-[1px] bg-rose-200/50 mb-0.5" />
+            </div>
           </div>
 
           {/* Real-time Stretch Drag Hint */}

@@ -8,7 +8,7 @@ interface Props {
 }
 
 const PRESET_BGS = [
-  { id: 'default', name: '浪漫樱花穹顶 (默认)', url: '/default_sakura_bg.jpg' },
+  { id: 'default', name: '原版壁炉吧台', url: '/chat_bg.png' },
   { id: 'rain', name: '夜雨微澜', url: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1200&auto=format&fit=crop' },
   { id: 'lounge', name: '暮色沉醉酒馆', url: 'https://images.unsplash.com/photo-1572116469696-31de0f17cc34?q=80&w=1200&auto=format&fit=crop' },
   { id: 'cyber', name: '赛博霓虹窗景', url: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=1200&auto=format&fit=crop' },

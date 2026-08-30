@@ -196,11 +196,11 @@ export default function DictionaryApp() {
       <div className="px-3 py-2 rounded-xl bg-stone-900/60 border border-stone-800/80 text-[11px] text-stone-400 leading-relaxed">
         {activeTab === 'intent_analysis' ? (
           <p className="flex items-center gap-1 text-amber-300/90 font-medium">
-            <span>💡 <b>面对主控输入</b>：实时感知并捕获玩家的调情、撒娇、施压、窥探等心理意图，激化角色对应情绪波动与微反应。</span>
+            <span>💡 <b>面对主控输入（NLP 意图分析）</b>：深度感知玩家的撒娇、调情、施压、倾诉等心理意图，激化角色对应情绪共鸣与肢体微反应（<b>绝不拦截主控发送的消息</b>）。</span>
           </p>
         ) : (
           <p className="flex items-center gap-1 text-rose-300/90 font-medium">
-            <span>🛡️ <b>针对 AI 防御</b>：在 LLM 大模型生成前实施前置高精度安全过滤，杜绝粗俗秽语、人身攻击与破防越狱指令。</span>
+            <span>🛡️ <b>针对 AI 输出（敏感拦截与纠偏）</b>：严格审查 AI 生成的回复。若检测到敏感拦截词，系统将<b>自动拦截并强制触发 AI 纠偏重生成</b>，确保角色输出自然合规。</span>
           </p>
         )}
       </div>
@@ -307,13 +307,13 @@ export default function DictionaryApp() {
           <label className="text-[10px] text-stone-400 font-medium block mb-1">
             {activeTab === 'intent_analysis' ? '感知触发反应机制' : '安全拦截执行动作'}
           </label>
-          <div className="grid grid-cols-3 gap-1.5">
+          <div className="grid grid-cols-2 gap-1.5">
             {activeTab === 'intent_analysis' ? (
               <>
                 <button
                   type="button"
                   onClick={() => setNewAction('emotion')}
-                  className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
+                  className={`py-2 px-2 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
                     newAction === 'emotion'
                       ? 'border-amber-400 bg-amber-500/20 text-amber-300 shadow'
                       : 'border-stone-800 bg-stone-950 text-stone-400'
@@ -325,63 +325,40 @@ export default function DictionaryApp() {
                 <button
                   type="button"
                   onClick={() => setNewAction('censor')}
-                  className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
+                  className={`py-2 px-2 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
                     newAction === 'censor'
                       ? 'border-stone-400 bg-stone-700/40 text-stone-200 shadow'
                       : 'border-stone-800 bg-stone-950 text-stone-400'
                   }`}
                 >
-                  <span>*** 字符脱敏</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setNewAction('block')}
-                  className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
-                    newAction === 'block'
-                      ? 'border-rose-500 bg-rose-500/20 text-rose-300 shadow'
-                      : 'border-stone-800 bg-stone-950 text-stone-400'
-                  }`}
-                >
-                  <Ban className="w-3 h-3 text-rose-400" />
-                  <span>拒发警示</span>
+                  <Sparkles className="w-3 h-3 text-amber-400" />
+                  <span>意图标记与心境感知</span>
                 </button>
               </>
             ) : (
               <>
                 <button
                   type="button"
-                  onClick={() => setNewAction('censor')}
-                  className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
-                    newAction === 'censor'
-                      ? 'border-amber-400 bg-amber-500/20 text-amber-300 shadow'
-                      : 'border-stone-800 bg-stone-950 text-stone-400'
-                  }`}
-                >
-                  <span>*** 字符打码</span>
-                </button>
-                <button
-                  type="button"
                   onClick={() => setNewAction('block')}
-                  className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
+                  className={`py-2 px-2 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
                     newAction === 'block'
                       ? 'border-rose-500 bg-rose-500/20 text-rose-300 shadow'
                       : 'border-stone-800 bg-stone-950 text-stone-400'
                   }`}
                 >
-                  <Ban className="w-3 h-3 text-rose-400" />
-                  <span>🚫 强力拦截拒发</span>
+                  <RotateCcw className="w-3 h-3 text-rose-400" />
+                  <span>🔄 拦截并让AI重生成</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setNewAction('emotion')}
-                  className={`py-2 px-1 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
-                    newAction === 'emotion'
-                      ? 'border-purple-400 bg-purple-500/20 text-purple-300 shadow'
+                  onClick={() => setNewAction('censor')}
+                  className={`py-2 px-2 rounded-xl text-[11px] font-bold border transition-all flex items-center justify-center gap-1 ${
+                    newAction === 'censor'
+                      ? 'border-amber-400 bg-amber-500/20 text-amber-300 shadow'
                       : 'border-stone-800 bg-stone-950 text-stone-400'
                   }`}
                 >
-                  <Flame className="w-3 h-3 text-purple-400" />
-                  <span>触怒惩罚</span>
+                  <span>*** 敏感打码脱敏</span>
                 </button>
               </>
             )}
@@ -507,7 +484,7 @@ export default function DictionaryApp() {
 
                     {rule.action === 'block' && (
                       <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30 font-semibold">
-                        🚫 拦截拒发
+                        🔄 拦截AI重生成
                       </span>
                     )}
                     {rule.action === 'censor' && (

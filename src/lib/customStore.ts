@@ -137,6 +137,116 @@ export function saveSensitiveWords(words: SensitiveWordRule[]): void {
   }
 }
 
+export type UserIntentResult = {
+  matched: boolean;
+  triggeredEmotion?: {
+    key: EmotionKey;
+    delta: number;
+  };
+  matchedIntents: {
+    word: string;
+    category: string;
+    action: string;
+    emotionKey?: EmotionKey;
+    emotionDelta?: number;
+    intentTag?: string;
+  }[];
+};
+
+/**
+ * Pure NLP Intent Analysis for user input.
+ * Strictly analyzes user's psychological intent and triggers emotional vector deltas.
+ * NEVER blocks, censors, or rejects user messages!
+ */
+export function analyzeUserIntent(text: string): UserIntentResult {
+  const rules = loadSensitiveWords().filter(
+    (r) => r.enabled !== false && getRuleScope(r) === 'intent_analysis',
+  );
+  let matched = false;
+  let triggeredEmotion: { key: EmotionKey; delta: number } | undefined = undefined;
+  const matchedIntents: UserIntentResult['matchedIntents'] = [];
+
+  const sortedRules = [...rules].sort((a, b) => b.word.length - a.word.length);
+
+  for (const rule of sortedRules) {
+    if (!rule.word.trim()) continue;
+    if (text.includes(rule.word)) {
+      matched = true;
+      matchedIntents.push({
+        word: rule.word,
+        category: rule.category,
+        action: rule.action,
+        emotionKey: rule.emotionKey,
+        emotionDelta: rule.emotionDelta,
+        intentTag: rule.intentTag,
+      });
+      if (rule.action === 'emotion' && rule.emotionKey && rule.emotionDelta) {
+        triggeredEmotion = {
+          key: rule.emotionKey,
+          delta: rule.emotionDelta,
+        };
+      }
+    }
+  }
+
+  return {
+    matched,
+    triggeredEmotion,
+    matchedIntents,
+  };
+}
+
+export type AiInterceptionResult = {
+  violated: boolean;
+  matchedWords: string[];
+  matchedCategories: string[];
+  matchedRules: SensitiveWordRule[];
+  censoredText: string;
+};
+
+/**
+ * Checks AI generated response against the Sensitive Interception dictionary.
+ * If AI generated output contains sensitive/forbidden words, violated is true,
+ * triggering automatic regeneration in the LLM pipeline.
+ */
+export function checkAiInterception(text: string): AiInterceptionResult {
+  const rules = loadSensitiveWords().filter(
+    (r) => r.enabled !== false && getRuleScope(r) === 'sensitive_interception',
+  );
+  let censoredText = text;
+  let violated = false;
+  const matchedWords: string[] = [];
+  const matchedCategories: string[] = [];
+  const matchedRules: SensitiveWordRule[] = [];
+
+  const sortedRules = [...rules].sort((a, b) => b.word.length - a.word.length);
+
+  for (const rule of sortedRules) {
+    if (!rule.word.trim()) continue;
+    if (text.includes(rule.word)) {
+      violated = true;
+      if (!matchedWords.includes(rule.word)) {
+        matchedWords.push(rule.word);
+      }
+      if (!matchedCategories.includes(rule.category)) {
+        matchedCategories.push(rule.category);
+      }
+      matchedRules.push(rule);
+
+      const stars = '*'.repeat(rule.word.length);
+      censoredText = censoredText.replaceAll(rule.word, stars);
+    }
+  }
+
+  return {
+    violated,
+    matchedWords,
+    matchedCategories,
+    matchedRules,
+    censoredText,
+  };
+}
+
 export type MatchResult = {
   matched: boolean;
   blocked: boolean;
@@ -162,72 +272,25 @@ export type MatchResult = {
 };
 
 /**
- * Checks a user message against the dictionary before it is processed
+ * Checks a message against the dictionary.
+ * Note: User input is NEVER blocked. Interception is applied to AI outputs.
  */
 export function checkSensitiveWords(text: string): MatchResult {
-  const rules = loadSensitiveWords().filter((r) => r.enabled !== false);
-  let censoredText = text;
-  let blocked = false;
-  let matched = false;
-  let triggeredEmotion: { key: EmotionKey; delta: number } | undefined = undefined;
-  const matchedWords: string[] = [];
-  const matchedIntents: MatchResult['matchedIntents'] = [];
-  const matchedInterceptions: MatchResult['matchedInterceptions'] = [];
-
-  // Sort rules by word length descending so we match longer phrases first
-  const sortedRules = [...rules].sort((a, b) => b.word.length - a.word.length);
-
-  for (const rule of sortedRules) {
-    if (!rule.word.trim()) continue;
-    if (text.includes(rule.word)) {
-      matched = true;
-      matchedWords.push(rule.word);
-      const scope = getRuleScope(rule);
-
-      if (scope === 'intent_analysis') {
-        matchedIntents.push({
-          word: rule.word,
-          category: rule.category,
-          action: rule.action,
-          emotionKey: rule.emotionKey,
-          emotionDelta: rule.emotionDelta,
-          intentTag: rule.intentTag,
-        });
-        if (rule.action === 'emotion' && rule.emotionKey && rule.emotionDelta) {
-          triggeredEmotion = {
-            key: rule.emotionKey,
-            delta: rule.emotionDelta,
-          };
-        }
-      } else {
-        matchedInterceptions.push({
-          word: rule.word,
-          category: rule.category,
-          action: rule.action,
-        });
-        if (rule.action === 'block') {
-          blocked = true;
-        } else if (rule.action === 'censor') {
-          const stars = '*'.repeat(rule.word.length);
-          censoredText = censoredText.replaceAll(rule.word, stars);
-        } else if (rule.action === 'emotion' && rule.emotionKey && rule.emotionDelta) {
-          triggeredEmotion = {
-            key: rule.emotionKey,
-            delta: rule.emotionDelta,
-          };
-        }
-      }
-    }
-  }
+  const intentRes = analyzeUserIntent(text);
+  const aiRes = checkAiInterception(text);
 
   return {
-    matched,
-    blocked,
-    censoredText,
-    triggeredEmotion,
-    matchedWords,
-    matchedIntents,
-    matchedInterceptions,
+    matched: intentRes.matched || aiRes.violated,
+    blocked: false, // Never block user messages from sending!
+    censoredText: text,
+    triggeredEmotion: intentRes.triggeredEmotion,
+    matchedWords: [...intentRes.matchedIntents.map((i) => i.word), ...aiRes.matchedWords],
+    matchedIntents: intentRes.matchedIntents,
+    matchedInterceptions: aiRes.matchedRules.map((r) => ({
+      word: r.word,
+      category: r.category,
+      action: r.action,
+    })),
   };
 }
 

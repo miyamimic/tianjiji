@@ -19,7 +19,6 @@ export default function ChatInput({
 }: Props) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const isSubmittingRef = useRef(false);
 
   useEffect(() => {
     const ta = textareaRef.current;
@@ -29,33 +28,20 @@ export default function ChatInput({
   }, [value]);
 
   const handleSend = () => {
-    if (isSubmittingRef.current || disabled) return;
     const trimmed = value.trim();
-    if (!trimmed) return;
-
-    isSubmittingRef.current = true;
-    setValue('');
+    if (!trimmed || disabled) return;
     onSend(trimmed);
-
-    setTimeout(() => {
-      isSubmittingRef.current = false;
-    }, 350);
+    setValue('');
   };
 
   const handleTriggerReply = () => {
-    if (isSubmittingRef.current || disabled) return;
-    isSubmittingRef.current = true;
-
+    if (disabled) return;
     const trimmed = value.trim();
     if (trimmed) {
-      setValue('');
       onSend(trimmed);
+      setValue('');
     }
     onRequestReply();
-
-    setTimeout(() => {
-      isSubmittingRef.current = false;
-    }, 450);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {

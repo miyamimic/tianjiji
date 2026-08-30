@@ -259,11 +259,8 @@ export default function App() {
 
   const character = engine.getCharacter();
   const llmReady = isLlmConfigured(llmConfig);
-  const isSubmittingRef = useRef(false);
 
   const handleSend = async (text: string) => {
-    if (isSubmittingRef.current) return;
-    isSubmittingRef.current = true;
     setIsLoading(true);
     try {
       await engine.sendMessage(text, llmReady ? llmConfig : undefined);
@@ -271,15 +268,10 @@ export default function App() {
       console.error('发送消息推演失败', e);
     } finally {
       setIsLoading(false);
-      setTimeout(() => {
-        isSubmittingRef.current = false;
-      }, 300);
     }
   };
 
   const handleTriggerReply = async (messageId?: string) => {
-    if (isSubmittingRef.current) return;
-    isSubmittingRef.current = true;
     setIsLoading(true);
     try {
       await engine.triggerCharacterReply(messageId, llmReady ? llmConfig : undefined);
@@ -287,15 +279,10 @@ export default function App() {
       console.error('主动触发回复推演失败', e);
     } finally {
       setIsLoading(false);
-      setTimeout(() => {
-        isSubmittingRef.current = false;
-      }, 300);
     }
   };
 
   const handleReroll = async (messageId: string, feedback?: { score?: number; reason?: string }) => {
-    if (isSubmittingRef.current) return;
-    isSubmittingRef.current = true;
     setIsLoading(true);
     try {
       await engine.rerollMessage(messageId, feedback, llmReady ? llmConfig : undefined);
@@ -303,9 +290,6 @@ export default function App() {
       console.error('重roll生成失败', e);
     } finally {
       setIsLoading(false);
-      setTimeout(() => {
-        isSubmittingRef.current = false;
-      }, 300);
     }
   };
 
