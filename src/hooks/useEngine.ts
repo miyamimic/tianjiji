@@ -5,6 +5,7 @@ import type {
   BackgroundThread,
   TriggeredAnchor,
   ChatMessage,
+  MessageVersion,
   IntentAnalysis,
   Character,
   DynamicMemory,
@@ -53,6 +54,9 @@ import {
   clearDynamicMemories,
   loadHistoryInjectionCount,
   loadPromptLayers,
+  loadPromptPresets,
+  getPromptPresetById,
+  getActivePromptPresetId,
 } from '../lib/customStore';
 import { 
   setPendingGameInvite, 
@@ -1019,6 +1023,254 @@ export function useEngine() {
   );
 
   // -------------------------------------------------------------
+  // Regenerate with Prompt Preset (Preserves original message version & branches)
+  // -------------------------------------------------------------
+  const regenerateWithPromptPreset = useCallback(
+    async (
+      messageId: string,
+      presetId: string,
+      llmConfig?: LlmConfig
+    ) => {
+      const s = stateRef.current;
+      const msgIndex = s.messages.findIndex((m) => m.id === messageId);
+      if (msgIndex === -1) return;
+
+      const targetMsg = s.messages[msgIndex];
+      let triggerInput = '...';
+
+      if (targetMsg.role === 'character') {
+        let userMsgIndex = -1;
+        for (let i = msgIndex - 1; i >= 0; i--) {
+          if (s.messages[i].role === 'user') {
+            userMsgIndex = i;
+            break;
+          }
+        }
+        if (userMsgIndex !== -1) {
+          const userMsg = s.messages[userMsgIndex];
+          triggerInput = userMsg.content;
+          if (userMsg.snapshot) {
+            s.emotion = { ...userMsg.snapshot.emotion };
+            s.backgroundThreads = userMsg.snapshot.backgroundThreads.map((t) => ({ ...t }));
+            s.triggeredAnchors = userMsg.snapshot.triggeredAnchors.map((a) => ({ ...a }));
+          }
+        } else if (targetMsg.snapshot) {
+          s.emotion = { ...targetMsg.snapshot.emotion };
+          s.backgroundThreads = targetMsg.snapshot.backgroundThreads.map((t) => ({ ...t }));
+          s.triggeredAnchors = targetMsg.snapshot.triggeredAnchors.map((a) => ({ ...a }));
+        }
+      } else {
+        triggerInput = targetMsg.content;
+        if (targetMsg.snapshot) {
+          s.emotion = { ...targetMsg.snapshot.emotion };
+          s.backgroundThreads = targetMsg.snapshot.backgroundThreads.map((t) => ({ ...t }));
+          s.triggeredAnchors = targetMsg.snapshot.triggeredAnchors.map((a) => ({ ...a }));
+        }
+      }
+
+      const character = getCharacterById(s.characterId) ?? MOCK_CHARACTERS[0];
+      const decayRate = loadEmotionDecayRate();
+      s.emotion = decayEmotionTowardsBaseline(s.emotion, character.emotion.baseline, decayRate);
+
+      previousEmotionRef.current = { ...s.emotion };
+      emotionConfirmedRef.current = true;
+      lastIntentRef.current = null;
+
+      // Find the specified prompt preset
+      const preset = getPromptPresetById(presetId);
+      const presetName = preset ? preset.name : '新提示词预设方案';
+      const pipelineLayers = preset ? preset.layers : loadPromptLayers();
+
+      const matchedDynamicMemories = findRelevantDynamicMemories(character.character_id, triggerInput);
+      let dynamicMemoriesContext = '';
+      if (matchedDynamicMemories.length > 0) {
+        const topMem = matchedDynamicMemories[0];
+        const kwStr = topMem.topic_keywords.join('、');
+        dynamicMemoriesContext = `主控在当前对话中触及了与「${kwStr}」相关的过往事件与话题。\n【过往高情绪回忆】：${topMem.user_trigger_summary}，你当时内心对这件事产生了强烈的${EMOTION_NAMES[topMem.emotion_type]}反应。\n请务必在你的内心独白（thought）或细微动作中展现出你一直清楚地记着这件事！`;
+      }
+
+      const result = processChat(
+        { ...s, emotion: { ...s.emotion }, backgroundThreads: s.backgroundThreads.map((t) => ({ ...t })) },
+        character,
+        triggerInput
+      );
+
+      s.backgroundThreads = result.backgroundThreads;
+      s.triggeredAnchors = result.triggeredAnchors;
+      lastIntentRef.current = result.intent;
+
+      // Ensure existing versions array is prepared so original message NEVER disappears
+      const existingVersions: MessageVersion[] = targetMsg.versions && targetMsg.versions.length > 0
+        ? [...targetMsg.versions]
+        : [
+            {
+              id: targetMsg.id,
+              content: targetMsg.content,
+              segments: targetMsg.segments || parseSegments(targetMsg.content),
+              timestamp: targetMsg.timestamp,
+              presetId: targetMsg.presetId || 'initial',
+              presetName: targetMsg.presetName || '初始版本',
+              snapshot: targetMsg.snapshot,
+              llmError: targetMsg.llmError,
+              sticker: targetMsg.sticker,
+            },
+          ];
+
+      const targetMsgInstruction = `（【换提示词预设重新生成】：当前主控切换并启用了提示词编排方案【${presetName}】。请严格遵循该预设要求的语言语气、心理独白深度与肢体动作描写规范，重新输出更高质感、特色鲜明的全新回复！）`;
+
+      if (llmConfig && isLlmConfigured(llmConfig)) {
+        try {
+          const emotionSummary = Object.entries(s.emotion)
+            .map(([k, v]) => `${k}: ${Math.round(v * 100)}%`)
+            .join(', ');
+
+          const llmMessages = assemblePipelineLlmMessages(pipelineLayers, {
+            character,
+            emotionSummary,
+            backgroundThreads: s.backgroundThreads.map((t) => t.content),
+            dynamicMemoriesContext,
+            chatHistory: s.messages.slice(0, msgIndex),
+            targetMsgInstruction,
+          });
+
+          const rawText = await callLlmWithGuardrail(llmConfig, llmMessages, character);
+          const structuredList = parseStructuredLlmResponses(rawText);
+
+          const structured = structuredList[0];
+          const newSegments = parseSegments(structured.reply);
+
+          // Apply emotional dynamics
+          const intensity = structured.emotion_intensity ?? 3;
+          if (structured.emotion_delta && Object.keys(structured.emotion_delta).length > 0) {
+            const calibratedDelta = applyIntensityCalibration(structured.emotion_delta, intensity);
+            const { finalDelta } = processMultiTurnInertia(
+              s.emotion,
+              calibratedDelta,
+              emotionHistoryRef.current
+            );
+            s.emotion = addEmotion(s.emotion, finalDelta);
+          }
+
+          const now = Date.now();
+          const newVersion: MessageVersion = {
+            id: `ver-${now}`,
+            content: structured.reply,
+            segments: newSegments,
+            timestamp: now,
+            presetId,
+            presetName,
+            snapshot: captureSnapshot(s),
+          };
+
+          existingVersions.push(newVersion);
+
+          // Update message in place with versions intact
+          targetMsg.versions = existingVersions;
+          targetMsg.currentVersionIndex = existingVersions.length - 1;
+          targetMsg.content = newVersion.content;
+          targetMsg.segments = newVersion.segments;
+          targetMsg.presetId = newVersion.presetId;
+          targetMsg.presetName = newVersion.presetName;
+          targetMsg.snapshot = newVersion.snapshot;
+
+          persist(s);
+          rerender();
+
+          return {
+            success: true,
+            versionIndex: existingVersions.length - 1,
+            newVersion,
+            previousVersion: existingVersions[existingVersions.length - 2],
+          };
+        } catch (err: any) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          console.warn('Preset regeneration LLM error, using local simulation:', errMsg);
+          s.emotion = result.emotion;
+          const fallbackVer: MessageVersion = {
+            id: `ver-fallback-${Date.now()}`,
+            content: result.reply.content,
+            segments: result.reply.segments,
+            timestamp: Date.now(),
+            presetId,
+            presetName: `${presetName} (本地推演)`,
+            snapshot: captureSnapshot(s),
+            llmError: errMsg,
+          };
+          existingVersions.push(fallbackVer);
+          targetMsg.versions = existingVersions;
+          targetMsg.currentVersionIndex = existingVersions.length - 1;
+          targetMsg.content = fallbackVer.content;
+          targetMsg.segments = fallbackVer.segments;
+          targetMsg.presetId = fallbackVer.presetId;
+          targetMsg.presetName = fallbackVer.presetName;
+          targetMsg.snapshot = fallbackVer.snapshot;
+
+          persist(s);
+          rerender();
+          return {
+            success: true,
+            versionIndex: existingVersions.length - 1,
+            newVersion: fallbackVer,
+          };
+        }
+      } else {
+        // Local engine simulation
+        s.emotion = result.emotion;
+        const newVersion: MessageVersion = {
+          id: `ver-local-${Date.now()}`,
+          content: result.reply.content,
+          segments: result.reply.segments,
+          timestamp: Date.now(),
+          presetId,
+          presetName: `${presetName} (本地推演)`,
+          snapshot: captureSnapshot(s),
+        };
+        existingVersions.push(newVersion);
+        targetMsg.versions = existingVersions;
+        targetMsg.currentVersionIndex = existingVersions.length - 1;
+        targetMsg.content = newVersion.content;
+        targetMsg.segments = newVersion.segments;
+        targetMsg.presetId = newVersion.presetId;
+        targetMsg.presetName = newVersion.presetName;
+        targetMsg.snapshot = newVersion.snapshot;
+
+        persist(s);
+        rerender();
+        return {
+          success: true,
+          versionIndex: existingVersions.length - 1,
+          newVersion,
+        };
+      }
+    },
+    [persist, rerender]
+  );
+
+  // -------------------------------------------------------------
+  // Switch Message Version
+  // -------------------------------------------------------------
+  const switchMessageVersion = useCallback(
+    (messageId: string, versionIndex: number) => {
+      const s = stateRef.current;
+      const msg = s.messages.find((m) => m.id === messageId);
+      if (!msg || !msg.versions || !msg.versions[versionIndex]) return;
+
+      const ver = msg.versions[versionIndex];
+      msg.currentVersionIndex = versionIndex;
+      msg.content = ver.content;
+      msg.segments = ver.segments;
+      msg.presetId = ver.presetId;
+      msg.presetName = ver.presetName;
+      if (ver.snapshot) msg.snapshot = ver.snapshot;
+      if (ver.sticker) msg.sticker = ver.sticker;
+
+      persist(s);
+      rerender();
+    },
+    [persist, rerender]
+  );
+
+  // -------------------------------------------------------------
   // Handle User Rejection of Game Invitation (Pipeline Integration)
   // -------------------------------------------------------------
   const handleUserRejectGameInvite = useCallback((characterId: string, characterName: string) => {
@@ -1264,6 +1516,8 @@ export function useEngine() {
     editMessage,
     addUserMessageOnly,
     rerollMessage,
+    regenerateWithPromptPreset,
+    switchMessageVersion,
     triggerCharacterReply,
     handleUserRejectGameInvite,
     handleGameFinished,

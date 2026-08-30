@@ -118,6 +118,18 @@ export type StickerMeta = {
   };
 };
 
+export type MessageVersion = {
+  id: string;
+  content: string;
+  segments: MessageSegment[];
+  timestamp: number;
+  presetId?: string;
+  presetName?: string;
+  snapshot?: EngineSnapshot;
+  llmError?: string;
+  sticker?: StickerMeta;
+};
+
 export type ChatMessage = {
   id: string;
   role: 'user' | 'character';
@@ -128,6 +140,10 @@ export type ChatMessage = {
   snapshot?: EngineSnapshot;
   llmError?: string;
   sticker?: StickerMeta;
+  presetId?: string;
+  presetName?: string;
+  versions?: MessageVersion[];
+  currentVersionIndex?: number;
 };
 
 export type IntentAnalysis = {

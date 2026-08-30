@@ -1,9 +1,28 @@
-import { useState, useEffect } from 'react';
-import type { MessageSegment, ChatMessage, StickerMeta } from '../data/types';
-import { Edit2, CornerDownLeft, AlertCircle, RefreshCw, Sparkles, Check, Smile, Info, Heart } from 'lucide-react';
-import { loadUserAvatar, loadCharAvatar } from '../lib/customStore';
+import { useState, useEffect, useMemo, useRef } from 'react';
+import type { MessageSegment, ChatMessage, StickerMeta, MessageVersion } from '../data/types';
+import { 
+  Edit2, 
+  CornerDownLeft, 
+  AlertCircle, 
+  RefreshCw, 
+  Sparkles, 
+  Check, 
+  Smile, 
+  Info, 
+  Heart,
+  GitCompare,
+  SlidersHorizontal,
+  ChevronLeft,
+  ChevronRight,
+  X,
+  FileCode,
+  Layers,
+  Trash2
+} from 'lucide-react';
+import { loadUserAvatar, loadCharAvatar, loadPromptPresets, deletePromptPreset, type PromptPreset } from '../lib/customStore';
 import { userStealAiSticker, isStickerStolenByUser, subscribeStickers } from '../lib/stickerStore';
 import { FrenchCornerLace, LinePuppyMascot, StardewPixelFlower, ClockRollbackIcon } from './FrenchLacePuppyElements';
+import { computeLineDiff, computeTextDiff, getDiffStats } from '../lib/diff';
 
 interface Props {
   message: ChatMessage;
@@ -15,6 +34,8 @@ interface Props {
   onEdit?: (id: string, newContent: string) => void;
   onTriggerReply?: (id: string) => void;
   onReroll?: (id: string, feedback?: { score?: number; reason?: string }) => void;
+  onRegenerateWithPreset?: (messageId: string, presetId: string) => void;
+  onSwitchVersion?: (messageId: string, versionIndex: number) => void;
 }
 
 function formatTime(ts: number) {
@@ -71,6 +92,8 @@ export default function ChatBubble({
   onEdit,
   onTriggerReply,
   onReroll,
+  onRegenerateWithPreset,
+  onSwitchVersion,
 }: Props) {
   const isUser = message.role === 'user';
   const isWarning = message.content.includes('⚠️') || message.content.includes('拦截');
@@ -78,6 +101,81 @@ export default function ChatBubble({
   const [isEditing, setIsEditing] = useState(false);
   const [editVal, setEditVal] = useState(message.content);
   const [showErrorDetail, setShowErrorDetail] = useState(false);
+  const [showPresetPicker, setShowPresetPicker] = useState(false);
+  const [showDiffView, setShowDiffView] = useState(false);
+  const [diffMode, setDiffMode] = useState<'line' | 'inline'>('line');
+  const [compareBaseIdx, setCompareBaseIdx] = useState<number | null>(null);
+  const [isRegenerating, setIsRegenerating] = useState(false);
+
+  const hasVersions = Boolean(message.versions && message.versions.length > 1);
+  const versions = message.versions || [];
+  const currentVerIndex = message.currentVersionIndex ?? (versions.length > 0 ? versions.length - 1 : 0);
+  const actualBaseIdx = compareBaseIdx !== null && compareBaseIdx < versions.length
+    ? compareBaseIdx
+    : Math.max(0, currentVerIndex - 1);
+  const baseVer = versions[actualBaseIdx];
+  const currentVer = versions[currentVerIndex] || {
+    id: message.id,
+    content: message.content,
+    presetName: message.presetName || '当前版本',
+  };
+
+  // If a new version is added, automatically open the red/green code-like diff view!
+  const prevVersionsCountRef = useRef(message.versions?.length || 1);
+  useEffect(() => {
+    const currentCount = message.versions?.length || 1;
+    if (currentCount > prevVersionsCountRef.current) {
+      setShowDiffView(true);
+      setCompareBaseIdx(Math.max(0, currentCount - 2));
+    }
+    prevVersionsCountRef.current = currentCount;
+  }, [message.versions?.length]);
+
+  const [presetRefreshKey, setPresetRefreshKey] = useState(0);
+
+  const availablePresets = useMemo(() => {
+    if (!showPresetPicker) return [];
+    return loadPromptPresets();
+  }, [showPresetPicker, presetRefreshKey]);
+
+  const handleDeletePresetFromPicker = (presetId: string, presetName: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (availablePresets.length <= 1) {
+      alert('至少需要保留一个提示词预设方案！');
+      return;
+    }
+    if (window.confirm(`确定要删除提示词预设【${presetName}】吗？`)) {
+      deletePromptPreset(presetId);
+      setPresetRefreshKey((k) => k + 1);
+    }
+  };
+
+  const lineDiffs = useMemo(() => {
+    if (!showDiffView || !baseVer) return [];
+    return computeLineDiff(baseVer.content, message.content);
+  }, [showDiffView, baseVer?.content, message.content]);
+
+  const textDiffs = useMemo(() => {
+    if (!showDiffView || !baseVer) return [];
+    return computeTextDiff(baseVer.content, message.content);
+  }, [showDiffView, baseVer?.content, message.content]);
+
+  const stats = useMemo(() => {
+    if (!textDiffs.length) return null;
+    return getDiffStats(textDiffs);
+  }, [textDiffs]);
+
+  const handlePickPresetAndRegenerate = async (presetId: string) => {
+    if (!onRegenerateWithPreset) return;
+    setShowPresetPicker(false);
+    setIsRegenerating(true);
+    try {
+      await onRegenerateWithPreset(message.id, presetId);
+      setShowDiffView(true);
+    } finally {
+      setIsRegenerating(false);
+    }
+  };
 
   const [isStolenAlready, setIsStolenAlready] = useState(() => {
     if (!message.sticker) return false;
@@ -168,79 +266,349 @@ export default function ChatBubble({
               <FrenchCornerLace position="top-right" className="absolute top-0 right-0 text-[#e07a93] opacity-35" />
             )}
 
-            {isEditing ? (
+            {/* Version Switcher Bar (when multiple versions exist) */}
+            {!isUser && hasVersions && (
               <div
                 onClick={(e) => e.stopPropagation()}
-                className="space-y-2 py-1 min-w-[200px] md:min-w-[320px]"
+                className="mb-2.5 p-1.5 rounded-xl bg-[#fae1e8]/90 border border-[#f2cad4] flex items-center justify-between gap-2 text-xs select-none shadow-2xs"
               >
-                <textarea
-                  value={editVal}
-                  onChange={(e) => setEditVal(e.target.value)}
-                  className="w-full min-h-[80px] bg-white text-[#4a3e3d] text-[13px] rounded-xl p-2.5 border-2 border-[#e07a93] focus:outline-none shadow-inner"
-                  placeholder="编辑此气泡对话内容..."
-                />
-                <div className="flex gap-1.5 justify-end">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <div className="flex items-center bg-white rounded-lg border border-[#f2cad4] overflow-hidden shadow-2xs shrink-0">
+                    <button
+                      type="button"
+                      disabled={currentVerIndex === 0}
+                      onClick={() => onSwitchVersion && onSwitchVersion(message.id, currentVerIndex - 1)}
+                      className="p-1 hover:bg-[#fae1e8] disabled:opacity-25 disabled:hover:bg-transparent text-[#732641] transition-colors cursor-pointer"
+                      title="切换至上一版本"
+                    >
+                      <ChevronLeft size={13} />
+                    </button>
+                    <span className="px-1.5 text-[11px] font-bold text-[#732641] font-mono whitespace-nowrap">
+                      v{currentVerIndex + 1}/{versions.length}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={currentVerIndex === versions.length - 1}
+                      onClick={() => onSwitchVersion && onSwitchVersion(message.id, currentVerIndex + 1)}
+                      className="p-1 hover:bg-[#fae1e8] disabled:opacity-25 disabled:hover:bg-transparent text-[#732641] transition-colors cursor-pointer"
+                      title="切换至下一版本"
+                    >
+                      <ChevronRight size={13} />
+                    </button>
+                  </div>
+
+                  <span className="text-[11px] font-bold text-[#4a3431] truncate max-w-[120px] sm:max-w-[190px]" title={currentVer.presetName || '预设版本'}>
+                    {currentVer.presetName || `版本 ${currentVerIndex + 1}`}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1 shrink-0">
                   <button
-                    onClick={() => setIsEditing(false)}
-                    className="px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-xs text-[#665554] transition cursor-pointer"
+                    type="button"
+                    onClick={() => setShowDiffView((v) => !v)}
+                    className={`px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-2xs ${
+                      showDiffView
+                        ? 'bg-[#b83d5a] text-white shadow-sm ring-1 ring-[#b83d5a]'
+                        : 'bg-white hover:bg-[#fae1e8] text-[#732641] border border-[#f2cad4]'
+                    }`}
+                    title="切换代码级红绿对比视图"
                   >
-                    取消
-                  </button>
-                  <button
-                    onClick={handleSaveEdit}
-                    className="px-3 py-1 rounded-lg bg-[#e07a93] hover:bg-[#d46580] text-xs font-semibold text-white transition flex items-center gap-1 shadow-sm cursor-pointer"
-                  >
-                    <Check className="size-3" />
-                    保存修改
+                    <GitCompare size={12} />
+                    <span>{showDiffView ? '看原格式' : '红绿对比'}</span>
                   </button>
                 </div>
               </div>
-            ) : (
-              <div className="space-y-1">
-                {/* Segments Rendering */}
-                {message.segments && message.segments.length > 0 ? (
-                  message.segments.map((seg, i) => renderSegment(seg, i, isUser))
-                ) : (
-                  <p className="whitespace-pre-wrap leading-relaxed text-[14px]">
-                    {message.content}
-                  </p>
-                )}
+            )}
 
-                {/* Sticker Attachment */}
-                {message.sticker && (
-                  <div className="pt-2 pb-1 flex flex-col items-start gap-1">
-                    <div className="relative group/stk inline-block rounded-2xl overflow-hidden border border-[#f2d0d9] bg-white p-1.5 shadow-sm">
-                      <img
-                        src={message.sticker.url}
-                        alt={message.sticker.name || 'sticker'}
-                        className="max-h-36 max-w-[200px] object-contain rounded-xl"
-                      />
-                      {!isUser && (
-                        <button
-                          onClick={handleStealSticker}
-                          disabled={isStolenAlready}
-                          className={`absolute bottom-2 right-2 px-2 py-1 rounded-full text-[10px] font-semibold flex items-center gap-1 backdrop-blur-md shadow transition-all ${
-                            isStolenAlready
-                              ? 'bg-emerald-500/80 text-white'
-                              : 'bg-black/60 text-white hover:bg-[#e07a93]'
+            {/* Code Diff Panel (like a code editor / Git PR with red & green distinctions) */}
+            {!isUser && showDiffView && hasVersions && baseVer && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="my-2 rounded-xl border-2 border-[#f2cad4] bg-white shadow-md overflow-hidden animate-in fade-in-0 duration-200"
+              >
+                {/* Diff Header Bar */}
+                <div className="p-2 sm:p-2.5 bg-[#fae1e8] border-b border-[#f2cad4] flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className="p-1 rounded-md bg-white text-[#b83d5a] shadow-2xs">
+                      <GitCompare size={13} />
+                    </span>
+                    <span className="text-[11px] sm:text-xs font-bold text-[#4a3431] font-mono">
+                      对比: v{actualBaseIdx + 1} ({baseVer.presetName || '基准'}) → v{currentVerIndex + 1} ({currentVer.presetName || '当前'})
+                    </span>
+
+                    {/* Quick baseline selector if more than 2 versions */}
+                    {versions.length > 2 && (
+                      <select
+                        value={actualBaseIdx}
+                        onChange={(e) => setCompareBaseIdx(Number(e.target.value))}
+                        className="text-[10px] bg-white border border-[#f2cad4] text-[#4a3431] rounded-md px-1 py-0.5 outline-none font-sans"
+                        title="选择基准对比版本"
+                      >
+                        {versions.map((v, idx) => (
+                          <option key={v.id || idx} value={idx} disabled={idx === currentVerIndex}>
+                            对比基准: v{idx + 1} {v.presetName ? `(${v.presetName})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    {/* Additions & Deletions Stats */}
+                    {stats && (
+                      <div className="flex items-center gap-1 font-mono text-[10px] font-bold">
+                        <span className="px-1.5 py-0.5 rounded bg-[#e6ffec] text-[#1a7f37] border border-[#2da44e]/30" title="绿色新增字符数">
+                          +{stats.additions}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded bg-[#ffebe9] text-[#cf222e] border border-[#cf222e]/30" title="红色被替换/删除字符数">
+                          -{stats.deletions}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Mode Toggle: Line vs Inline */}
+                    <div className="flex items-center bg-white rounded-lg border border-[#f2cad4] p-0.5 text-[10px]">
+                      <button
+                        type="button"
+                        onClick={() => setDiffMode('line')}
+                        className={`px-1.5 py-0.5 rounded font-bold transition-colors cursor-pointer ${
+                          diffMode === 'line' ? 'bg-[#b83d5a] text-white' : 'text-[#785b56] hover:text-[#4a3431]'
+                        }`}
+                        title="像代码编辑器一样逐行比对"
+                      >
+                        逐行代码
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDiffMode('inline')}
+                        className={`px-1.5 py-0.5 rounded font-bold transition-colors cursor-pointer ${
+                          diffMode === 'inline' ? 'bg-[#b83d5a] text-white' : 'text-[#785b56] hover:text-[#4a3431]'
+                        }`}
+                        title="在文本段落中内联红绿高亮"
+                      >
+                        内联高亮
+                      </button>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowDiffView(false)}
+                      className="p-1 rounded-md hover:bg-[#fbd3de] text-[#732641] transition-colors cursor-pointer"
+                      title="关闭对比视图"
+                    >
+                      <X size={13} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Diff Content */}
+                {diffMode === 'line' ? (
+                  <div className="p-2 font-mono text-[11px] sm:text-[12px] bg-[#fcfcfd] overflow-x-auto max-h-[360px] overflow-y-auto divide-y divide-stone-100/70">
+                    {lineDiffs.map((ld, lIdx) => {
+                      const isAdd = ld.type === 'added';
+                      const isDel = ld.type === 'removed';
+                      return (
+                        <div
+                          key={lIdx}
+                          className={`flex items-start py-0.5 px-2 border-l-3 transition-colors ${
+                            isAdd
+                              ? 'bg-[#e6ffec] text-[#1a7f37] border-[#2da44e]'
+                              : isDel
+                              ? 'bg-[#ffebe9] text-[#cf222e] border-[#cf222e]'
+                              : 'bg-transparent text-[#24292e] border-transparent'
                           }`}
                         >
-                          {isStolenAlready ? (
-                            <>
-                              <Check className="size-2.5" />
-                              已收藏
-                            </>
-                          ) : (
-                            <>
-                              <Smile className="size-2.5" />
-                              存为表情
-                            </>
-                          )}
-                        </button>
-                      )}
-                    </div>
+                          <span className="w-6 shrink-0 select-none text-[10px] text-stone-400 font-mono text-right pr-2">
+                            {isAdd ? ld.modifiedLineNumber : isDel ? ld.originalLineNumber : ld.modifiedLineNumber}
+                          </span>
+                          <span className={`w-4 shrink-0 select-none font-bold text-center ${isAdd ? 'text-[#1a7f37]' : isDel ? 'text-[#cf222e]' : 'text-stone-300'}`}>
+                            {ld.prefix}
+                          </span>
+                          <span className="whitespace-pre-wrap break-all flex-1 select-text">
+                            {ld.text || ' '}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="p-3 text-[13px] sm:text-[14px] leading-relaxed bg-[#fff9fa] max-h-[360px] overflow-y-auto select-text font-serif">
+                    {textDiffs.map((chunk, cIdx) => {
+                      if (chunk.type === 'added') {
+                        return (
+                          <span
+                            key={cIdx}
+                            className="bg-[#e6ffec] text-[#1a7f37] border-b-2 border-[#2da44e] font-medium px-1 py-0.2 rounded-xs mx-0.5 inline-block shadow-2xs"
+                            title="新增内容"
+                          >
+                            +{chunk.value}
+                          </span>
+                        );
+                      } else if (chunk.type === 'removed') {
+                        return (
+                          <span
+                            key={cIdx}
+                            className="bg-[#ffebe9] text-[#cf222e] line-through decoration-[#cf222e] px-1 py-0.2 rounded-xs opacity-75 mx-0.5 inline-block"
+                            title="已替换/删除内容"
+                          >
+                            -{chunk.value}
+                          </span>
+                        );
+                      }
+                      return <span key={cIdx}>{chunk.value}</span>;
+                    })}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Normal content view when not in diff mode */}
+            {(!showDiffView || !hasVersions) && (
+              isEditing ? (
+                <div
+                  onClick={(e) => e.stopPropagation()}
+                  className="space-y-2 py-1 min-w-[200px] md:min-w-[320px]"
+                >
+                  <textarea
+                    value={editVal}
+                    onChange={(e) => setEditVal(e.target.value)}
+                    className="w-full min-h-[80px] bg-white text-[#4a3e3d] text-[13px] rounded-xl p-2.5 border-2 border-[#e07a93] focus:outline-none shadow-inner"
+                    placeholder="编辑此气泡对话内容..."
+                  />
+                  <div className="flex gap-1.5 justify-end">
+                    <button
+                      onClick={() => setIsEditing(false)}
+                      className="px-2.5 py-1 rounded-lg bg-stone-100 hover:bg-stone-200 text-xs text-[#665554] transition cursor-pointer"
+                    >
+                      取消
+                    </button>
+                    <button
+                      onClick={handleSaveEdit}
+                      className="px-3 py-1 rounded-lg bg-[#e07a93] hover:bg-[#d46580] text-xs font-semibold text-white transition flex items-center gap-1 shadow-sm cursor-pointer"
+                    >
+                      <Check className="size-3" />
+                      保存修改
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-1">
+                  {/* Segments Rendering */}
+                  {message.segments && message.segments.length > 0 ? (
+                    message.segments.map((seg, i) => renderSegment(seg, i, isUser))
+                  ) : (
+                    <p className="whitespace-pre-wrap leading-relaxed text-[14px]">
+                      {message.content}
+                    </p>
+                  )}
+
+                  {/* Sticker Attachment */}
+                  {message.sticker && (
+                    <div className="pt-2 pb-1 flex flex-col items-start gap-1">
+                      <div className="relative group/stk inline-block rounded-2xl overflow-hidden border border-[#f2d0d9] bg-white p-1.5 shadow-sm">
+                        <img
+                          src={message.sticker.url}
+                          alt={message.sticker.name || 'sticker'}
+                          className="max-h-36 max-w-[200px] object-contain rounded-xl"
+                        />
+                        {!isUser && (
+                          <button
+                            onClick={handleStealSticker}
+                            disabled={isStolenAlready}
+                            className={`absolute bottom-2 right-2 px-2 py-1 rounded-full text-[10px] font-semibold flex items-center gap-1 backdrop-blur-md shadow transition-all ${
+                              isStolenAlready
+                                ? 'bg-emerald-500/80 text-white'
+                                : 'bg-black/60 text-white hover:bg-[#e07a93]'
+                            }`}
+                          >
+                            {isStolenAlready ? (
+                              <>
+                                <Check className="size-2.5" />
+                                已收藏
+                              </>
+                            ) : (
+                              <>
+                                <Smile className="size-2.5" />
+                                存为表情
+                              </>
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )
+            )}
+
+            {/* Preset Picker Dropdown (Triggered by '换预设' button) */}
+            {showPresetPicker && (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="mt-2.5 p-3 rounded-2xl bg-[#fffafb] border-2 border-[#f2cad4] shadow-xl space-y-2.5 animate-in fade-in-0 zoom-in-95 duration-150"
+              >
+                <div className="flex items-center justify-between border-b border-[#f2cad4] pb-2">
+                  <div className="flex items-center gap-1.5">
+                    <SlidersHorizontal size={14} className="text-[#b83d5a]" />
+                    <span className="text-xs font-bold text-[#4a3431]">
+                      换编排预设再生成一次 (原回复不消失)
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowPresetPicker(false)}
+                    className="text-[#785b56] hover:text-[#4a3431] p-0.5 rounded-md cursor-pointer"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+
+                <p className="text-[10.5px] text-[#785b56]">
+                  选择一个提示词预设方案，引擎将保留当前回复并生成新版本，自动生成红绿色代码级 Diff 对比。
+                </p>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[220px] overflow-y-auto">
+                  {availablePresets.length === 0 ? (
+                    <div className="col-span-2 text-center py-4 text-xs text-[#998380]">
+                      暂无提示词预设，请先在编排面板中保存预设
+                    </div>
+                  ) : (
+                    availablePresets.map((preset) => (
+                      <div
+                        key={preset.id}
+                        className="relative group/item flex items-stretch border border-[#f2cad4] rounded-xl bg-white hover:bg-[#fae1e8] hover:border-[#b83d5a] transition-all shadow-2xs overflow-hidden"
+                      >
+                        <button
+                          type="button"
+                          disabled={isRegenerating}
+                          onClick={() => handlePickPresetAndRegenerate(preset.id)}
+                          className="flex-1 p-2 text-left cursor-pointer flex flex-col gap-0.5 pr-8 disabled:opacity-50"
+                        >
+                          <div className="flex items-center justify-between w-full">
+                            <span className="text-xs font-bold text-[#4a3431] group-hover/item:text-[#732641]">
+                              {preset.name}
+                            </span>
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-[#fae1e8] text-[#8c243e] font-mono">
+                              {preset.layers.length}层
+                            </span>
+                          </div>
+                          <span className="text-[10px] text-[#785b56] line-clamp-1">
+                            {preset.description || '点击以此预设推演新版本'}
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => handleDeletePresetFromPicker(preset.id, preset.name, e)}
+                          title={`删除预设【${preset.name}】`}
+                          className="absolute right-1 top-1 p-1 rounded-md text-stone-400 hover:text-rose-600 hover:bg-rose-100/80 transition-colors cursor-pointer"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -293,6 +661,40 @@ export default function ChatBubble({
                         className="p-1 rounded-md bg-[#fae1e8]/70 hover:bg-[#f2cad4] text-[#4a3431] hover:text-[#732641] transition cursor-pointer border border-[#f2cad4]/60 shadow-2xs"
                       >
                         <RefreshCw className="size-3.5 stroke-[2.2]" />
+                      </button>
+                    )}
+
+                    {/* Regenerate with Preset (Non-destructive + Code Diff) */}
+                    {onRegenerateWithPreset && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowPresetPicker((v) => !v);
+                        }}
+                        title="换预设再生成一次 (保留原回复，自动红绿对比)"
+                        className="px-1.5 py-1 rounded-md bg-[#fae1e8]/70 hover:bg-[#f2cad4] text-[#4a3431] hover:text-[#732641] transition cursor-pointer border border-[#f2cad4]/60 shadow-2xs flex items-center gap-1 font-sans text-[10px] font-bold"
+                      >
+                        <SlidersHorizontal className="size-3 stroke-[2.2] text-[#b83d5a]" />
+                        <span>换预设</span>
+                      </button>
+                    )}
+
+                    {/* Diff button shortcut if multiple versions exist */}
+                    {hasVersions && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowDiffView((v) => !v);
+                        }}
+                        title="代码级红绿 Diff 对比"
+                        className={`px-1.5 py-1 rounded-md transition cursor-pointer border shadow-2xs flex items-center gap-1 font-sans text-[10px] font-bold ${
+                          showDiffView
+                            ? 'bg-[#b83d5a] text-white border-[#b83d5a]'
+                            : 'bg-[#fae1e8]/70 hover:bg-[#f2cad4] text-[#4a3431] hover:text-[#732641] border-[#f2cad4]/60'
+                        }`}
+                      >
+                        <GitCompare className="size-3 stroke-[2.2]" />
+                        <span>Diff</span>
                       </button>
                     )}
                   </div>

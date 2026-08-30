@@ -720,6 +720,303 @@ export const DEFAULT_PROMPT_LAYERS: PromptLayer[] = [
   }
 ];
 
+export interface PromptPreset {
+  id: string;
+  name: string;
+  description: string;
+  isBuiltin?: boolean;
+  layers: PromptLayer[];
+}
+
+export const BUILTIN_PROMPT_PRESETS: PromptPreset[] = [
+  {
+    id: 'preset-standard',
+    name: '标准沉浸叙事 (均衡)',
+    description: '核心人设、双向视觉、情绪中枢与结构化规范全开，言语与肢体动作自然平衡。',
+    isBuiltin: true,
+    layers: DEFAULT_PROMPT_LAYERS,
+  },
+  {
+    id: 'preset-action-focus',
+    name: '深度动作与触觉描摹',
+    description: '极大强化身体接触、指尖温度、呼吸节奏、视线交织与微表情等临场细节描写。',
+    isBuiltin: true,
+    layers: DEFAULT_PROMPT_LAYERS.map((l) => {
+      if (l.id === 'layer-custom-override') {
+        return {
+          ...l,
+          enabled: true,
+          content: `【Layer: 深度触觉与肢体动作强化规则】\n请在回复中大幅强化动作细节（全角括号包裹）：细致描摹呼吸的起伏温差、指尖无意识的收紧轻颤、视线由退避到定格的微表情过渡，以及贴近时衣料摩擦与空间压迫感，呈现电影特写般的动作张力。`,
+        };
+      }
+      return l;
+    }),
+  },
+  {
+    id: 'preset-monologue-focus',
+    name: '心声暗涌与反差独白',
+    description: '大幅提升 thought (*...*) 脑内独白比重，深刻揭示角色口是心非的隐忍心事与真实欲望。',
+    isBuiltin: true,
+    layers: DEFAULT_PROMPT_LAYERS.map((l) => {
+      if (l.id === 'layer-custom-override') {
+        return {
+          ...l,
+          enabled: true,
+          content: `【Layer: 心声独白与情感反差极化】\n请在 JSON 中的 thought 字段中输出更长、更具张力的一人称心理独白（单星号包裹）：写出角色嘴上极力掩饰、内心却已翻江倒海的强烈反差（如隐忍暗恋、独占欲、愧疚或患得患失的真实心声），潜台词层层递进。`,
+        };
+      }
+      return l;
+    }),
+  },
+  {
+    id: 'preset-restrained-laconic',
+    name: '冷冽克制与高压拉扯',
+    description: '言语冷淡精悍、字数克制，但眼神和微小肢体动作潜藏巨大的情感压抑与拉扯感。',
+    isBuiltin: true,
+    layers: DEFAULT_PROMPT_LAYERS.map((l) => {
+      if (l.id === 'layer-custom-override') {
+        return {
+          ...l,
+          enabled: true,
+          content: `【Layer: 克制疏离与拉扯张力】\n角色的台词应更为简短、冷冽甚至略带疏离刺探，绝不轻易宣泄直白情绪。但动作中要流露出无法完全自抑的细微破绽，每一次停顿与沉默都饱含张力。`,
+        };
+      }
+      return l;
+    }),
+  },
+];
+
+const PROMPT_PRESETS_STORAGE_KEY = '__rp_engine_prompt_pipeline_presets';
+const ACTIVE_PROMPT_PRESET_ID_KEY = '__rp_engine_active_prompt_preset_id';
+const DELETED_PROMPT_PRESETS_KEY = '__rp_engine_deleted_prompt_presets_ids';
+
+export function loadDeletedPromptPresetIds(): string[] {
+  try {
+    const raw = localStorage.getItem(DELETED_PROMPT_PRESETS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+export function saveDeletedPromptPresetIds(ids: string[]): void {
+  try {
+    localStorage.setItem(DELETED_PROMPT_PRESETS_KEY, JSON.stringify(ids));
+  } catch {
+    // ignore
+  }
+}
+
+export function hasDeletedBuiltinPromptPresets(): boolean {
+  const deletedIds = loadDeletedPromptPresetIds();
+  return BUILTIN_PROMPT_PRESETS.some((b) => deletedIds.includes(b.id));
+}
+
+export function restoreBuiltinPromptPresets(): PromptPreset[] {
+  try {
+    localStorage.removeItem(DELETED_PROMPT_PRESETS_KEY);
+  } catch {
+    // ignore
+  }
+  return loadPromptPresets();
+}
+
+export function loadPromptPresets(): PromptPreset[] {
+  try {
+    const deletedBuiltinIds = loadDeletedPromptPresetIds();
+    const activeBuiltins = BUILTIN_PROMPT_PRESETS.filter((p) => !deletedBuiltinIds.includes(p.id));
+
+    const raw = localStorage.getItem(PROMPT_PRESETS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        const customPresets: PromptPreset[] = parsed.filter((p) => p && !p.isBuiltin);
+        return [...activeBuiltins, ...customPresets];
+      }
+    }
+    return [...activeBuiltins];
+  } catch (err) {
+    console.warn('Failed to load prompt presets:', err);
+  }
+  return [...BUILTIN_PROMPT_PRESETS];
+}
+
+export function savePromptPresets(presets: PromptPreset[]): void {
+  try {
+    const customOnly = presets.filter((p) => !p.isBuiltin);
+    localStorage.setItem(PROMPT_PRESETS_STORAGE_KEY, JSON.stringify(customOnly));
+  } catch (err) {
+    console.warn('Failed to save prompt presets:', err);
+  }
+}
+
+export function getActivePromptPresetId(): string {
+  try {
+    const savedId = localStorage.getItem(ACTIVE_PROMPT_PRESET_ID_KEY) || 'preset-standard';
+    const presets = loadPromptPresets();
+    if (presets.some((p) => p.id === savedId)) {
+      return savedId;
+    }
+    return presets[0]?.id || 'preset-standard';
+  } catch {
+    return 'preset-standard';
+  }
+}
+
+export function setActivePromptPresetId(id: string): void {
+  try {
+    localStorage.setItem(ACTIVE_PROMPT_PRESET_ID_KEY, id);
+  } catch {
+    // ignore
+  }
+}
+
+export function getPromptPresetById(id: string): PromptPreset | undefined {
+  const all = loadPromptPresets();
+  return all.find((p) => p.id === id);
+}
+
+export function applyPromptPreset(preset: PromptPreset): PromptLayer[] {
+  setActivePromptPresetId(preset.id);
+  const clonedLayers = JSON.parse(JSON.stringify(preset.layers));
+  savePromptLayers(clonedLayers);
+  window.dispatchEvent(new CustomEvent('rp_engine_prompt_layers_changed', { detail: clonedLayers }));
+  return clonedLayers;
+}
+
+export function saveCurrentLayersAsPreset(name: string, description?: string): PromptPreset {
+  const currentLayers = loadPromptLayers();
+  const newPreset: PromptPreset = {
+    id: `custom_prompt_${Date.now()}`,
+    name: name.trim(),
+    description: description?.trim() || '用户自定义提示词编排方案',
+    isBuiltin: false,
+    layers: JSON.parse(JSON.stringify(currentLayers)),
+  };
+
+  const all = loadPromptPresets();
+  const updated = [...all.filter((p) => !p.isBuiltin), newPreset];
+  savePromptPresets(updated);
+  setActivePromptPresetId(newPreset.id);
+  return newPreset;
+}
+
+export function deletePromptPreset(id: string): void {
+  // If it's a builtin preset, mark it as deleted/hidden
+  const isBuiltin = BUILTIN_PROMPT_PRESETS.some((b) => b.id === id);
+  if (isBuiltin) {
+    const deletedIds = loadDeletedPromptPresetIds();
+    if (!deletedIds.includes(id)) {
+      saveDeletedPromptPresetIds([...deletedIds, id]);
+    }
+  } else {
+    // If it's custom, remove from storage
+    const all = loadPromptPresets();
+    const updated = all.filter((p) => p.id !== id && !p.isBuiltin);
+    savePromptPresets(updated);
+  }
+
+  // If the active preset was deleted, switch to the first available preset
+  if (getActivePromptPresetId() === id) {
+    const remaining = loadPromptPresets();
+    if (remaining.length > 0) {
+      setActivePromptPresetId(remaining[0].id);
+      applyPromptPreset(remaining[0]);
+    }
+  }
+  window.dispatchEvent(new CustomEvent('rp_engine_prompt_presets_changed'));
+}
+
+export function updatePromptPreset(id: string, updates: Partial<Pick<PromptPreset, 'name' | 'description' | 'layers'>>): void {
+  const all = loadPromptPresets();
+  const target = all.find((p) => p.id === id);
+  if (!target) return;
+
+  if (target.isBuiltin) {
+    // If it's a builtin, clone it into a custom one so user modifications persist
+    const newCustom: PromptPreset = {
+      ...target,
+      ...updates,
+      id: `custom_fork_${Date.now()}`,
+      isBuiltin: false,
+      name: updates.name ? updates.name.trim() : `${target.name} (已修改)`,
+    };
+    const customOnly = all.filter((p) => !p.isBuiltin);
+    savePromptPresets([...customOnly, newCustom]);
+    setActivePromptPresetId(newCustom.id);
+    if (updates.layers) {
+      applyPromptPreset(newCustom);
+    }
+  } else {
+    // Custom preset
+    const updatedCustoms = all
+      .filter((p) => !p.isBuiltin)
+      .map((p) => (p.id === id ? { ...p, ...updates, name: updates.name ? updates.name.trim() : p.name } : p));
+    savePromptPresets(updatedCustoms);
+    if (getActivePromptPresetId() === id && updates.layers) {
+      savePromptLayers(updates.layers);
+    }
+  }
+  window.dispatchEvent(new CustomEvent('rp_engine_prompt_presets_changed'));
+}
+
+export function duplicatePromptPreset(id: string): PromptPreset | null {
+  const all = loadPromptPresets();
+  const source = all.find((p) => p.id === id);
+  if (!source) return null;
+
+  const duplicated: PromptPreset = {
+    id: `custom_preset_${Date.now()}`,
+    name: `${source.name} (副本)`,
+    description: source.description || '由现有方案复制衍生的预设',
+    isBuiltin: false,
+    layers: JSON.parse(JSON.stringify(source.layers)),
+  };
+
+  const customOnly = all.filter((p) => !p.isBuiltin);
+  savePromptPresets([...customOnly, duplicated]);
+  window.dispatchEvent(new CustomEvent('rp_engine_prompt_presets_changed'));
+  return duplicated;
+}
+
+export function importPresetsFromJson(jsonStr: string): { success: boolean; count: number; error?: string } {
+  try {
+    const parsed = JSON.parse(jsonStr);
+    const presetsToAdd: PromptPreset[] = [];
+
+    // Support single preset or array of presets
+    const list = Array.isArray(parsed) ? parsed : (parsed.presets && Array.isArray(parsed.presets)) ? parsed.presets : [parsed];
+
+    for (const item of list) {
+      if (item && typeof item === 'object' && item.name && Array.isArray(item.layers)) {
+        presetsToAdd.push({
+          id: `custom_import_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+          name: String(item.name).trim(),
+          description: item.description ? String(item.description).trim() : '导入的提示词预设方案',
+          isBuiltin: false,
+          layers: item.layers,
+        });
+      }
+    }
+
+    if (presetsToAdd.length === 0) {
+      return { success: false, count: 0, error: '未识别到有效的提示词预设数据，请检查 JSON 格式' };
+    }
+
+    const currentPresets = loadPromptPresets();
+    const customOnly = currentPresets.filter((p) => !p.isBuiltin);
+    savePromptPresets([...customOnly, ...presetsToAdd]);
+    window.dispatchEvent(new CustomEvent('rp_engine_prompt_presets_changed'));
+    return { success: true, count: presetsToAdd.length };
+  } catch (err: any) {
+    return { success: false, count: 0, error: err.message || 'JSON 解析失败' };
+  }
+}
+
 export function loadPromptLayers(): PromptLayer[] {
   try {
     const ver = localStorage.getItem(PROMPT_LAYERS_VERSION_KEY);

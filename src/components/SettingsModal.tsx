@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { X, Layers, UserCheck, Sparkles } from 'lucide-react';
+import { X, Layers, UserCheck, Sparkles, BookmarkCheck } from 'lucide-react';
 import CharacterEditor from './CharacterEditor';
 import PromptInjectionEditor from './PromptInjectionEditor';
+import PromptPresetsManager from './PromptPresetsManager';
 import { StardewPixelFlower, LinePuppyMascot } from './FrenchLacePuppyElements';
 
 interface Props {
@@ -17,7 +18,7 @@ export default function SettingsModal({
   currentCharacterId,
   onEngineReload,
 }: Props) {
-  const [activeTab, setActiveTab] = useState<'prompt' | 'character'>('prompt');
+  const [activeTab, setActiveTab] = useState<'presets' | 'prompt' | 'character'>('presets');
 
   if (!open) return null;
 
@@ -38,7 +39,7 @@ export default function SettingsModal({
                 <StardewPixelFlower />
               </div>
               <p className="text-[10px] text-[#998380] mt-0.5">
-                提示词分层编排、六维情绪自然平复衰减、视觉空间感知与角色卡深度编辑
+                提示词预设方案库、分层流水线编排、六维情绪自然平复衰减与角色卡深度编辑
               </p>
             </div>
           </div>
@@ -52,6 +53,20 @@ export default function SettingsModal({
 
         {/* Tab Navigation */}
         <div className="flex border-b border-[#f2d0d9] bg-[#fff5f7]/60 text-xs font-semibold px-2 sm:px-4 select-none shrink-0 overflow-x-auto custom-scrollbar">
+          {/* Tab 1: 提示词预设 */}
+          <button
+            onClick={() => setActiveTab('presets')}
+            className={`px-4 py-3 border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+              activeTab === 'presets'
+                ? 'border-[#e07a93] text-[#8a3854] bg-white font-bold shadow-xs'
+                : 'border-transparent text-[#998380] hover:text-[#4a3e3d]'
+            }`}
+          >
+            <BookmarkCheck className="size-3.5 text-[#e07a93] shrink-0" />
+            <span>提示词预设方案</span>
+          </button>
+
+          {/* Tab 2: 提示词编排 */}
           <button
             onClick={() => setActiveTab('prompt')}
             className={`px-4 py-3 border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
@@ -63,6 +78,8 @@ export default function SettingsModal({
             <Layers className="size-3.5 text-[#e07a93] shrink-0" />
             <span>提示词编排 & 实时推演预览</span>
           </button>
+
+          {/* Tab 3: 角色卡 */}
           <button
             onClick={() => setActiveTab('character')}
             className={`px-4 py-3 border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
@@ -78,10 +95,19 @@ export default function SettingsModal({
 
         {/* Content */}
         <div className="flex-1 p-3.5 sm:p-5 overflow-y-auto min-h-0 bg-[#fdf8f9]/50 custom-scrollbar">
+          {activeTab === 'presets' && (
+            <PromptPresetsManager
+              currentCharacterId={currentCharacterId}
+              onUpdated={onEngineReload}
+              onNavigateToPipeline={() => setActiveTab('prompt')}
+            />
+          )}
+
           {activeTab === 'prompt' && (
             <PromptInjectionEditor
               currentCharacterId={currentCharacterId}
               onUpdated={onEngineReload}
+              onNavigateToPresets={() => setActiveTab('presets')}
             />
           )}
 

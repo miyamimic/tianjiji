@@ -85,7 +85,7 @@ const APPS: Array<{
   {
     id: 'game_lobby',
     name: '游戏大厅',
-    subtitle: '捉鬼牌·五子棋·表情',
+    subtitle: '你画我猜·捉鬼牌·五子棋',
     icon: Gamepad2,
     gradient: 'from-amber-500 via-purple-600 to-rose-600',
     badge: '娱乐',

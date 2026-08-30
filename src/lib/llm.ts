@@ -4,12 +4,23 @@ export type LlmConfig = {
   model: string;
 };
 
+export interface LlmPreset {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey?: string;
+  model: string;
+  note?: string;
+}
+
 export type LlmMessage = {
   role: 'system' | 'user' | 'assistant';
   content: string;
 };
 
 const STORAGE_KEY = '__rp_engine_llm_config';
+const PRESETS_STORAGE_KEY = '__rp_engine_llm_presets';
+const CACHED_MODELS_STORAGE_KEY = '__rp_engine_llm_cached_models';
 
 export function loadLlmConfig(): LlmConfig {
   try {
@@ -17,9 +28,9 @@ export function loadLlmConfig(): LlmConfig {
     if (raw) {
       const parsed = JSON.parse(raw);
       return {
-        baseUrl: parsed.baseUrl || '',
-        apiKey: parsed.apiKey || '',
-        model: parsed.model || 'gpt-4o-mini',
+        baseUrl: typeof parsed.baseUrl === 'string' ? parsed.baseUrl.trim() : '',
+        apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey.trim() : '',
+        model: typeof parsed.model === 'string' && parsed.model.trim() ? parsed.model.trim() : 'gpt-4o-mini',
       };
     }
   } catch {
@@ -30,7 +41,61 @@ export function loadLlmConfig(): LlmConfig {
 
 export function saveLlmConfig(config: LlmConfig): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    const safeConfig: LlmConfig = {
+      baseUrl: (config.baseUrl || '').trim(),
+      apiKey: (config.apiKey || '').trim(),
+      model: (config.model || '').trim() || 'gpt-4o-mini',
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(safeConfig));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('rp_engine_llm_config_saved', { detail: safeConfig }));
+    }
+  } catch {
+    // ignore
+  }
+}
+
+export function loadLlmPresets(): LlmPreset[] {
+  try {
+    const raw = localStorage.getItem(PRESETS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        // Only return user-created presets (strictly filter out any legacy builtin presets)
+        return parsed.filter((p: any) => p && !p.isBuiltin && typeof p.name === 'string');
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+export function saveLlmPresets(presets: LlmPreset[]): void {
+  try {
+    const userOnly = presets.filter((p) => p && !(p as any).isBuiltin);
+    localStorage.setItem(PRESETS_STORAGE_KEY, JSON.stringify(userOnly));
+  } catch {
+    // ignore
+  }
+}
+
+export function loadCachedAvailableModels(): string[] {
+  try {
+    const raw = localStorage.getItem(CACHED_MODELS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
+
+export function saveCachedAvailableModels(models: string[]): void {
+  try {
+    localStorage.setItem(CACHED_MODELS_STORAGE_KEY, JSON.stringify(models));
   } catch {
     // ignore
   }
@@ -281,6 +346,15 @@ export function cleanRawLlmOutput(raw: string): string {
     .replace(/<thought[\s\S]*?<\/thought>/gi, '')
     .replace(/<reasoning[\s\S]*?<\/reasoning>/gi, '')
     .trim();
+  
+  // If stripping the reasoning tag leaves text completely empty (e.g. unclosed tag or only thinking tokens),
+  // salvage the text inside or after the tag instead of returning an empty string
+  if (!cleaned && raw.trim()) {
+    const salvaged = raw.replace(/<\/?(?:think|thought|reasoning)[^>]*>/gi, '').trim();
+    if (salvaged) {
+      cleaned = salvaged;
+    }
+  }
   return cleaned;
 }
 
@@ -360,17 +434,31 @@ function parseSingleStructuredItem(parsed: any): StructuredLlmResponse | null {
     }
   }
 
-  // If reply is empty but text or content exists
+  // Extensive aliases for reply content to prevent any blank dialogue
   if (!reply && typeof parsed.content === 'string') reply = parsed.content;
   if (!reply && typeof parsed.text === 'string') reply = parsed.text;
+  if (!reply && typeof parsed.message === 'string') reply = parsed.message;
+  if (!reply && typeof parsed.response === 'string') reply = parsed.response;
+  if (!reply && typeof parsed.output === 'string') reply = parsed.output;
+  if (!reply && typeof parsed.answer === 'string') reply = parsed.answer;
+  if (!reply && typeof parsed.dialogue === 'string') reply = parsed.dialogue;
+  if (!reply && typeof parsed.dialog === 'string') reply = parsed.dialog;
+  if (!reply && typeof parsed.speak === 'string') reply = parsed.speak;
+  if (!reply && typeof parsed.回复 === 'string') reply = parsed.回复;
+  if (!reply && typeof parsed.对话 === 'string') reply = parsed.对话;
+  if (!reply && typeof parsed.台词 === 'string') reply = parsed.台词;
+  if (!reply && typeof parsed.正文 === 'string') reply = parsed.正文;
 
-  // Synthesize reply if only action or dialogue exists, but NEVER inject thought into reply!
-  if (!reply && (action || typeof parsed.dialogue === 'string')) {
-    const dialogue = typeof parsed.dialogue === 'string' ? parsed.dialogue : '';
-    reply = [action ? `（${action}）` : '', dialogue].filter(Boolean).join(' ');
+  // Synthesize reply if only action or dialogue exists
+  if (!reply && action) {
+    reply = `（${action}）`;
+  }
+  // Fallback: If only thought exists and no reply, encapsulate as thought speech
+  if (!reply && thought) {
+    reply = `*（${thought}）*`;
   }
 
-  if (!reply) return null;
+  if (!reply || !reply.trim()) return null;
 
   // Parse emotion delta safely
   const rawDelta = parsed.emotion_delta || parsed.情绪变化delta || parsed.emotionDelta;

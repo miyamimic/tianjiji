@@ -15,7 +15,7 @@ import type { Character } from '../data/types';
 import { loadCharAvatar } from '../lib/customStore';
 import { ambiencePlayer, type AmbienceState } from '../lib/ambiencePlayer';
 import CreateCharacterModal from './CreateCharacterModal';
-import { LinePuppyMascot, LinePuppyDoodle, FlowerLacePattern, StardewPixelFlower } from './FrenchLacePuppyElements';
+import { LinePuppyMascot, LinePuppyDoodle, FlowerLacePattern, StardewPixelFlower, CuteBlueFishIcon } from './FrenchLacePuppyElements';
 
 interface Props {
   currentCharacter: Character;
@@ -187,9 +187,9 @@ export default function TopBar({
               )}
             </div>
 
-            {/* Line Puppy & LLM status badge */}
+            {/* Cute Blue Fish & LLM status badge */}
             <div className="ml-1 sm:ml-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/80 border border-[#f2d0d9] shadow-xs">
-              <LinePuppyMascot size={18} variant="happy" className="hidden sm:inline-block" />
+              <CuteBlueFishIcon size={20} className="hidden sm:inline-block" />
               <div
                 className={`size-2 rounded-full ${
                   llmReady ? 'bg-emerald-400' : 'bg-[#e6b8c4]'

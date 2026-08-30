@@ -48,6 +48,19 @@ export default function App() {
 
   const [currentThemeId, setCurrentThemeId] = useState(() => loadCurrentTheme());
 
+  useEffect(() => {
+    const handleLlmConfigSaved = (e: Event) => {
+      const customEvt = e as CustomEvent<LlmConfig>;
+      if (customEvt.detail) {
+        setLlmConfig(customEvt.detail);
+      } else {
+        setLlmConfig(loadLlmConfig());
+      }
+    };
+    window.addEventListener('rp_engine_llm_config_saved', handleLlmConfigSaved);
+    return () => window.removeEventListener('rp_engine_llm_config_saved', handleLlmConfigSaved);
+  }, []);
+
   const [stickerToast, setStickerToast] = useState<{
     by: 'user' | 'ai';
     message: string;
@@ -293,6 +306,17 @@ export default function App() {
     }
   };
 
+  const handleRegenerateWithPreset = async (messageId: string, presetId: string) => {
+    setIsLoading(true);
+    try {
+      await engine.regenerateWithPromptPreset(messageId, presetId, llmReady ? llmConfig : undefined);
+    } catch (e) {
+      console.error('换预设重生成失败', e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const bgSrc = scene === 'welcome' ? '/welcome_bg.png' : (customChatBg || '/chat_bg.png');
   const bg = BG_SIZE[scene];
   const pos = BG_OBJECT_POS[scene];
@@ -423,6 +447,8 @@ export default function App() {
                       onEdit={(id, newContent) => engine.editMessage(id, newContent)}
                       onTriggerReply={handleTriggerReply}
                       onReroll={handleReroll}
+                      onRegenerateWithPreset={handleRegenerateWithPreset}
+                      onSwitchVersion={(id, index) => engine.switchMessageVersion(id, index)}
                     />
                   );
                 })}

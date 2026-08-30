@@ -348,7 +348,7 @@ export function KittyBowDoodle({
   );
 }
 
-export function PuppyHeartsDoodle({
+export function ScarfBunnyDoodle({
   className = '',
   size = 24,
 }: {
@@ -363,119 +363,116 @@ export function PuppyHeartsDoodle({
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={`select-none inline-block shrink-0 ${className}`}
-      aria-label="抱爱心小狗"
+      aria-label="围巾小兔"
     >
-      {/* White Body Base */}
-      <path
-        d="M 33 78 C 30 55, 32 38, 45 32 C 60 30, 72 35, 75 52 C 78 68, 70 78, 64 80 C 50 82, 38 82, 33 78 Z"
-        fill="#FFFFFF"
-      />
+      <defs>
+        {/* Charcoal crayon texture for authentic hand-drawn picture-book feel */}
+        <filter id="scarf-bunny-crayon" x="-10%" y="-10%" width="120%" height="120%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="3" result="noise" />
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="0.9" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </defs>
 
-      {/* Left Rounded Ear */}
-      <path
-        d="M 36 34 C 27 30, 24 41, 32 44"
-        stroke="#1F1D1D"
-        strokeWidth="4.2"
-        strokeLinecap="round"
-      />
-      {/* Head Top Outline */}
-      <path
-        d="M 38 33 C 44 29, 54 30, 59 34"
-        stroke="#1F1D1D"
-        strokeWidth="4.2"
-        strokeLinecap="round"
-      />
-      {/* Right Rounded Ear */}
-      <path
-        d="M 61 34 C 67 29, 73 37, 67 43"
-        stroke="#1F1D1D"
-        strokeWidth="4.2"
-        strokeLinecap="round"
-      />
+      <g filter="url(#scarf-bunny-crayon)">
+        {/* White Bunny Head & Ears Base */}
+        <path
+          d="M 33 63
+             C 26 60, 24 54, 26 48
+             C 28 42, 32 37, 34 31
+             C 35 23, 36 15, 41 12
+             C 46 9, 49 14, 49 22
+             C 49 29, 50 35, 51 37
+             C 52 35, 53 29, 53 22
+             C 53 14, 56 9, 61 12
+             C 66 15, 67 23, 68 31
+             C 70 37, 74 42, 76 48
+             C 78 54, 76 60, 69 63
+             Z"
+          fill="#FFFFFF"
+        />
 
-      {/* Left Body Outline */}
-      <path
-        d="M 33 46 C 30 52, 32 66, 33 70"
-        stroke="#1F1D1D"
-        strokeWidth="4.2"
-        strokeLinecap="round"
-      />
-      {/* Left Foot */}
-      <path
-        d="M 33 71 C 30 77, 34 81, 41 80"
-        stroke="#1F1D1D"
-        strokeWidth="4.2"
-        strokeLinecap="round"
-      />
-      {/* Bottom Tummy to Right Foot */}
-      <path
-        d="M 44 80 C 49 76, 52 76, 57 80 C 62 82, 65 79, 66 73"
-        stroke="#1F1D1D"
-        strokeWidth="4.2"
-        strokeLinecap="round"
-      />
-      {/* Cute Little Tail */}
-      <path
-        d="M 66 69 C 74 65, 75 73, 68 76"
-        stroke="#1F1D1D"
-        strokeWidth="4"
-        strokeLinecap="round"
-      />
+        {/* Soft Pink Inner Ears */}
+        <path
+          d="M 41 18 C 38 18, 38 31, 41 31 C 44 31, 44 18, 41 18 Z"
+          fill="#F8B4C0"
+        />
+        <path
+          d="M 61 18 C 58 18, 58 31, 61 31 C 64 31, 64 18, 61 18 Z"
+          fill="#F8B4C0"
+        />
 
-      {/* Right Arm Up holding floating heart */}
-      <path
-        d="M 65 52 C 68 47, 72 49, 76 53"
-        stroke="#1F1D1D"
-        strokeWidth="4.2"
-        strokeLinecap="round"
-      />
-      {/* Left Arm holding chest heart */}
-      <path
-        d="M 40 53 C 44 54, 48 53, 50 51"
-        stroke="#1F1D1D"
-        strokeWidth="4.2"
-        strokeLinecap="round"
-      />
-      <path
-        d="M 39 63 C 44 61, 48 59, 52 59"
-        stroke="#1F1D1D"
-        strokeWidth="4.2"
-        strokeLinecap="round"
-      />
+        {/* Soft Pink Crayon Blush */}
+        <rect
+          x="27.5"
+          y="55.5"
+          width="9.5"
+          height="4.5"
+          rx="2.2"
+          fill="#F7A0AF"
+          opacity="0.95"
+        />
+        <rect
+          x="64.5"
+          y="55.5"
+          width="9.5"
+          height="4.5"
+          rx="2.2"
+          fill="#F7A0AF"
+          opacity="0.95"
+        />
 
-      {/* Puppy Face Features */}
-      {/* Dot Eyes */}
-      <circle cx="44" cy="42" r="2.8" fill="#1F1D1D" />
-      <circle cx="54" cy="42" r="2.8" fill="#1F1D1D" />
-      {/* Nose & Smile */}
-      <ellipse cx="49" cy="42" rx="2.5" ry="2" fill="#1F1D1D" />
-      <path
-        d="M 44 46 Q 49 48 54 46"
-        stroke="#1F1D1D"
-        strokeWidth="2.8"
-        strokeLinecap="round"
-      />
+        {/* Vertical Charcoal Oval Eyes */}
+        <ellipse cx="43" cy="56" rx="2" ry="3.2" fill="#1C1B1B" />
+        <ellipse cx="58" cy="56" rx="2" ry="3.2" fill="#1C1B1B" />
 
-      {/* Heart 1: In Chest / Paw */}
-      <path
-        d="M 52 52 C 50 48, 54 44, 57 47 C 60 44, 64 48, 62 52 C 59 56, 55 60, 52 61 C 49 60, 48 54, 52 52 Z"
-        fill="#FF7E88"
-        stroke="#1F1D1D"
-        strokeWidth="3.5"
-        strokeLinejoin="round"
-      />
+        {/* Charcoal Crayon Outline of Head & Ears */}
+        <path
+          d="M 33 63
+             C 26 60, 24 54, 26 48
+             C 28 42, 32 37, 34 31
+             C 35 23, 36 15, 41 12
+             C 46 9, 49 14, 49 22
+             C 49 29, 50 35, 51 37
+             C 52 35, 53 29, 53 22
+             C 53 14, 56 9, 61 12
+             C 66 15, 67 23, 68 31
+             C 70 37, 74 42, 76 48
+             C 78 54, 76 60, 69 63"
+          stroke="#1E1E1E"
+          strokeWidth="4.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
 
-      {/* Heart 2: Top Right Raised */}
-      <path
-        d="M 75 42 C 73 38, 77 34, 80 37 C 83 34, 87 38, 85 42 C 82 46, 78 50, 75 51 C 72 50, 71 44, 75 42 Z"
-        fill="#FF7E88"
-        stroke="#1F1D1D"
-        strokeWidth="3.5"
-        strokeLinejoin="round"
-      />
+        {/* Red Wool Scarf */}
+        {/* Scarf Left Hanging Tail */}
+        <path
+          d="M 30 67
+             C 30 73, 29 80, 31 84
+             C 32 86, 38 86, 40 82
+             C 41 78, 41 72, 40 68
+             Z"
+          fill="#B83D4A"
+        />
+        {/* Scarf Main Horizontal Collar Wrap */}
+        <path
+          d="M 28 66
+             C 26 62, 29 60, 36 60
+             C 46 61, 56 61, 65 60
+             C 72 60, 75 62, 74 66
+             C 73 70, 69 72, 62 72
+             C 52 73, 41 73, 31 72
+             C 27 71, 27 68, 28 66
+             Z"
+          fill="#B83D4A"
+        />
+      </g>
     </svg>
   );
 }
+
+// Export PuppyHeartsDoodle as alias to ensure seamless backward-compatibility
+export const PuppyHeartsDoodle = ScarfBunnyDoodle;
 
 export function LinePuppyDoodle({
   className = '',
@@ -716,4 +713,116 @@ export function Puffy3DCloudThoughtBubble({
     </div>
   );
 }
+
+/**
+ * CuteWavyFaceIcon: Minimalist kawaii sleepy/relaxed face with wavy omega/cat mouth
+ * Matches the user-provided reference illustration:
+ * - Two downward-sloping, arched thick rounded eye bars
+ * - Center smooth wavy kitten/omega mouth
+ */
+export function CuteWavyFaceIcon({
+  className = '',
+  size = 20,
+  width,
+  height,
+  color = 'currentColor',
+}: {
+  className?: string;
+  size?: number;
+  width?: number | string;
+  height?: number | string;
+  color?: string;
+}) {
+  return (
+    <svg
+      width={width ?? size}
+      height={height ?? size}
+      viewBox="0 0 100 100"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={`select-none inline-block shrink-0 ${className}`}
+      aria-label="可爱波浪嘴表情"
+    >
+      {/* Left Eye: Downward slanted, gently arched thick capsule */}
+      <path
+        d="M 10 52 C 16.5 44.5, 24 43.8, 31 47"
+        stroke={color}
+        strokeWidth="10"
+        strokeLinecap="round"
+      />
+      {/* Right Eye: Symmetric mirror of left eye */}
+      <path
+        d="M 90 52 C 83.5 44.5, 76 43.8, 69 47"
+        stroke={color}
+        strokeWidth="10"
+        strokeLinecap="round"
+      />
+      {/* Center Mouth: Wavy cute cat/omega mouth curve */}
+      <path
+        d="M 38 53.6 C 39.5 55.8, 41.2 57.2, 43.2 57.2 C 45.8 57.2, 47.6 50.3, 50 50.3 C 52.4 50.3, 54.2 57.2, 56.8 57.2 C 58.8 57.2, 60.5 55.8, 62 53.6"
+        stroke={color}
+        strokeWidth="5.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/**
+ * CuteBlueFishIcon: Adorable hand-drawn pastel blue fish doodle
+ * Matches the user-provided reference illustration:
+ * - Chubby oval body with soft pastel baby blue fill (#9EC4E8)
+ * - Bold charcoal outline with smooth rounded corners (#363236)
+ * - Distinct tail fin with upper and lower waist indents
+ * - Cute solid charcoal dot eye
+ */
+export function CuteBlueFishIcon({
+  className = '',
+  size = 20,
+  width,
+  height,
+  fillColor = '#9EC4E8',
+  strokeColor = '#363236',
+}: {
+  className?: string;
+  size?: number;
+  width?: number | string;
+  height?: number | string;
+  fillColor?: string;
+  strokeColor?: string;
+}) {
+  return (
+    <svg
+      width={width ?? size}
+      height={height ?? size}
+      viewBox="0 0 100 100"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={`select-none inline-block shrink-0 ${className}`}
+      aria-label="可爱小蓝鱼"
+    >
+      {/* Blue fish body with bold outline and tail fin */}
+      <path
+        d="M 15 50
+           C 15 32, 28 24, 47 24
+           C 60 24, 67 30, 71 36
+           C 74 34, 79 31, 84 32
+           C 87 36, 87 54, 84 58
+           C 79 59, 74 57, 71 55
+           C 67 61, 60 67, 47 67
+           C 28 67, 15 62, 15 50
+           Z"
+        fill={fillColor}
+        stroke={strokeColor}
+        strokeWidth="7.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* Dark charcoal round eye */}
+      <circle cx="33" cy="48" r="4.3" fill={strokeColor} />
+    </svg>
+  );
+}
+
 

@@ -12,11 +12,13 @@ import {
   Heart,
   RotateCcw,
   Sparkle,
-  Users
+  Users,
+  Palette
 } from 'lucide-react';
 import GomokuApp from './GomokuApp';
 import { GhostCardApp } from './GhostCardApp';
 import StickersApp from './StickersApp';
+import DrawAndGuessApp from './DrawAndGuessApp';
 import GameCharacterSelector from './GameCharacterSelector';
 import { 
   getPendingGameInvite, 
@@ -30,7 +32,7 @@ import { getCharacterStickers, getUserStickers } from '../../lib/stickerStore';
 import { getCharacterById, MOCK_CHARACTERS } from '../../data/characters';
 import type { Character, EmotionVector } from '../../data/types';
 
-export type GameLobbySubApp = 'lobby' | 'gomoku' | 'ghost_card' | 'stickers';
+export type GameLobbySubApp = 'lobby' | 'gomoku' | 'ghost_card' | 'stickers' | 'draw_guess';
 
 interface Props {
   currentCharacterId?: string;
@@ -160,6 +162,16 @@ export default function GameLobbyApp({
         </div>
       )}
 
+      {activeSub === 'draw_guess' && (
+        <div className="w-full h-full">
+          <DrawAndGuessApp
+            currentCharacterId={selectedOpponentId}
+            characterName={activeCharName}
+            onExit={() => setActiveSub('lobby')}
+          />
+        </div>
+      )}
+
       {/* Main Lobby Home View with Left Vertical Sidebar for Stickers */}
       {activeSub === 'lobby' && (
         <div className="flex w-full h-full gap-2.5 animate-in fade-in-0 duration-200">
@@ -235,7 +247,7 @@ export default function GameLobbyApp({
                     </div>
                   </div>
                   <span className="text-[9px] text-amber-300 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full font-mono">
-                    2 款游戏
+                    3 款对战游戏
                   </span>
                 </div>
               </div>
@@ -359,6 +371,50 @@ export default function GameLobbyApp({
                   </span>
                   <div className="flex items-center gap-1 text-amber-300 group-hover:translate-x-0.5 transition-transform font-medium">
                     <span>进入棋局</span>
+                    <ChevronRight className="size-3.5" />
+                  </div>
+                </div>
+              </div>
+
+              {/* Game 3: 你画我猜 (Draw & Guess) */}
+              <div
+                onClick={() => setActiveSub('draw_guess')}
+                className="group relative rounded-2xl bg-gradient-to-br from-rose-950/40 via-stone-900/80 to-pink-950/40 border border-pink-500/30 hover:border-pink-400/60 p-3 shadow-lg hover:shadow-pink-900/20 transition-all duration-200 cursor-pointer active:scale-[0.99] flex flex-col justify-between"
+              >
+                {/* Status Badge */}
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <div className="size-10 rounded-xl bg-gradient-to-br from-pink-500 via-rose-600 to-amber-500 flex items-center justify-center shadow-md ring-1 ring-white/20 group-hover:scale-105 transition-transform">
+                      <Palette className="size-5 text-white" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <h4 className="text-xs font-bold text-white group-hover:text-pink-300 transition-colors">
+                          你画我猜 · 笔尖默契
+                        </h4>
+                        <span className="text-[8.5px] px-1.5 py-0.2 rounded bg-pink-500/30 text-pink-200 border border-pink-400/30 font-medium">
+                          画技
+                        </span>
+                        <span className="text-[8.5px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-200 border border-amber-400/30 font-mono">
+                          NEW
+                        </span>
+                      </div>
+                      <p className="text-[9.5px] text-white/50">perfect-freehand 笔锋 · 轮流时序回放与猜词对决</p>
+                    </div>
+                  </div>
+
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-pink-500/30 text-pink-200 border border-pink-400/30">
+                    双回合循环
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-white/5 text-[10px] text-white/60">
+                  <span className="flex items-center gap-1 text-stone-300">
+                    <Sparkle className="size-3 text-pink-400" />
+                    <span>对手: {activeCharName} · 专属笔画抖动与起笔收笔</span>
+                  </span>
+                  <div className="flex items-center gap-1 text-pink-300 group-hover:translate-x-0.5 transition-transform font-medium">
+                    <span>挥毫对决</span>
                     <ChevronRight className="size-3.5" />
                   </div>
                 </div>
