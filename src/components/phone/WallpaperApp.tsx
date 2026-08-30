@@ -8,7 +8,7 @@ interface Props {
 }
 
 const PRESET_BGS = [
-  { id: 'default', name: '默认', url: '/https://i.postimg.cc/9fkRGTM0/https://i.pinimg.com/736x/30/e1/c1/30e1c109644dc4eef34aac2b8be080af.jpg' },
+  { id: 'default', name: '默认', url: 'https://postimg.cc/DWqwhS13' },
   { id: 'rain', name: '夜雨微澜', url: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1200&auto=format&fit=crop' },
   { id: 'lounge', name: '暮色沉醉酒馆', url: 'https://images.unsplash.com/photo-1572116469696-31de0f17cc34?q=80&w=1200&auto=format&fit=crop' },
   { id: 'cyber', name: '赛博霓虹窗景', url: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?q=80&w=1200&auto=format&fit=crop' },
