@@ -77,6 +77,20 @@ export const WORD_CATEGORIES: WordCategory[] = [
       { text: '闹钟', hints: ['早晨叫你起床', '圆盘上有指针', '头顶有两个敲击铃铛'] },
     ],
   },
+  {
+    id: 'idiom',
+    name: '成语典故',
+    emoji: '📜',
+    description: '四字经典成语与意境描摹',
+    words: [
+      { text: '浑水摸鱼', hints: ['四个字成语', '比喻乘混乱捞取利益', '包含一种水里游的生灵'] },
+      { text: '守株待兔', hints: ['四个字成语', '比喻死守狭隘经验不知变通', '包含一种长耳朵动物'] },
+      { text: '画龙点睛', hints: ['四个字成语', '在关键处添上精妙一笔', '充满神韵与爱意'] },
+      { text: '风和日丽', hints: ['四个字成语', '形容春光明媚暖阳高照', '挂在天空的耀眼存在'] },
+      { text: '掌上明珠', hints: ['四个字成语', '比喻极受宠爱与珍视之人', '璀璨闪烁的饰品'] },
+      { text: '招蜂引蝶', hints: ['四个字成语', '形容吸引众人的目光', '在花间飞舞的美丽精灵'] },
+    ],
+  },
 ];
 
 // -------------------------------------------------------------
@@ -1060,6 +1074,18 @@ export const preDrawData: Record<string, StrokeData[]> = {
   ],
 };
 
+// Visual alias map for rich category words (e.g. Idioms to visual drawings)
+export const WORD_VISUAL_MAP: Record<string, string> = {
+  浑水摸鱼: '小鱼',
+  守株待兔: '兔子',
+  画龙点睛: '爱心',
+  风和日丽: '太阳',
+  掌上明珠: '钻戒',
+  招蜂引蝶: '蝴蝶',
+  心心相印: '爱心',
+  借花献佛: '玫瑰花',
+};
+
 // -------------------------------------------------------------
 // Utility Functions
 // -------------------------------------------------------------
@@ -1070,7 +1096,8 @@ export const preDrawData: Record<string, StrokeData[]> = {
 export function hasPreDrawData(word: string): boolean {
   if (!word) return false;
   const clean = word.trim();
-  return Boolean(preDrawData[clean]);
+  const visualKey = WORD_VISUAL_MAP[clean] || clean;
+  return Boolean(preDrawData[visualKey]);
 }
 
 /**
@@ -1079,13 +1106,41 @@ export function hasPreDrawData(word: string): boolean {
 export function getPreDrawData(word: string): StrokeData[] | null {
   if (!word) return null;
   const clean = word.trim();
-  return preDrawData[clean] || null;
+  const visualKey = WORD_VISUAL_MAP[clean] || clean;
+  return preDrawData[visualKey] || null;
 }
 
 /**
  * Randomly pick a secret word for AI drawing (must have preDrawData)
  */
-export function getRandomAiSecretWord(excludeWord?: string): { word: string; category: string; hints: string[] } {
+export function getRandomAiSecretWord(
+  categoryId?: string,
+  excludeWord?: string
+): { word: string; category: string; hints: string[] } {
+  let targetCats = WORD_CATEGORIES;
+  if (categoryId && categoryId !== 'all') {
+    targetCats = WORD_CATEGORIES.filter((c) => c.id === categoryId);
+    if (targetCats.length === 0) targetCats = WORD_CATEGORIES;
+  }
+
+  // Find all words in target categories that have pre-draw data
+  const candidates: { word: string; category: string; hints: string[] }[] = [];
+  for (const cat of targetCats) {
+    for (const w of cat.words) {
+      if (hasPreDrawData(w.text) && w.text !== excludeWord) {
+        candidates.push({
+          word: w.text,
+          category: cat.name,
+          hints: w.hints,
+        });
+      }
+    }
+  }
+
+  if (candidates.length > 0) {
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  }
+
   const availableKeys = Object.keys(preDrawData).filter((w) => w !== excludeWord);
   const pickedWord = availableKeys[Math.floor(Math.random() * availableKeys.length)] || '爱心';
 

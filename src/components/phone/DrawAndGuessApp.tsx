@@ -13,17 +13,17 @@ import {
   Send,
   Volume2,
   VolumeX,
-  Eye,
   Bot,
   User,
   HelpCircle as QuestionIcon,
   Unlock,
-  Sparkle
+  MessageCircle,
+  Lightbulb,
+  Award
 } from 'lucide-react';
 import {
   WORD_CATEGORIES,
   AI_ARTISTS,
-  preDrawData,
   hasPreDrawData,
   getPreDrawData,
   getRandomWord,
@@ -35,8 +35,15 @@ import {
   renderStrokeToCanvas,
   playSound,
   type StrokeData,
-  type CharacterBrushParams,
 } from '../../lib/perfectFreehandHelper';
+import {
+  loadLlmConfig,
+  generateDrawAndGuessAiOpening,
+  generateDrawAndGuessPlayerGuessReaction,
+  generateDrawAndGuessAiGuessReaction,
+} from '../../lib/llm';
+import { Character } from '../../data/types';
+import { loadSavedCharacters } from '../../lib/customStore';
 
 interface Props {
   currentCharacterId?: string;
@@ -56,7 +63,7 @@ type GamePhase =
 
 interface ChatMessage {
   id: string;
-  sender: 'ai' | 'player' | 'system';
+  sender: 'ai' | 'player';
   name: string;
   text: string;
   time: string;
@@ -97,6 +104,32 @@ export default function DrawAndGuessApp({
   });
   const currentArtist = getAiArtistById(selectedCharId);
 
+  // Active full character data for LLM persona
+  const [activeChar, setActiveChar] = useState<Character>(() => {
+    const list = loadSavedCharacters();
+    const found = list.find((c) => c.character_id === selectedCharId || c.name === currentArtist.name);
+    if (found) return found;
+    return {
+      character_id: currentArtist.id,
+      name: currentArtist.name,
+      core: {
+        values: [currentArtist.title, currentArtist.tag, currentArtist.personality],
+        instinct_base: 'observe',
+        speech_filter: 'casual',
+      },
+      emotion: {
+        current: { anger: 0.1, fear: 0.1, joy: 0.6, sadness: 0.1, desire: 0.3, warmth: 0.7 },
+        baseline: { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 },
+        inertia: { anger: 0.5, fear: 0.5, joy: 0.5, sadness: 0.5, desire: 0.5, warmth: 0.5 },
+        triggers: [],
+      },
+      background_threads: { active: [] },
+      memory: { anchors: [] },
+      action_tendency: { control_actions: [], touch_actions: [], forbidden_actions: [], control_affinity: 0.5, touch_affinity: 0.7 },
+      speech: { catchphrases: [], forbidden_phrases: [] },
+    };
+  });
+
   // Sound effects toggle
   const [soundEnabled, setSoundEnabled] = useState(true);
   const triggerSound = useCallback((type: 'draw' | 'correct' | 'wrong' | 'complete' | 'click') => {
@@ -114,7 +147,7 @@ export default function DrawAndGuessApp({
   const [aiSecretRevealed, setAiSecretRevealed] = useState<boolean>(false);
   const [aiHintLevel, setAiHintLevel] = useState<number>(0);
 
-  // Player Drawing Topic State (Used in round_player_draw)
+  // Player Drawing Topic State (Used in round_player_draw - STRICTLY HIDDEN FROM AI!)
   const [playerTopic, setPlayerTopic] = useState<{ word: string; category: string; hints: string[] }>(() =>
     getRandomWord('all')
   );
@@ -128,6 +161,11 @@ export default function DrawAndGuessApp({
     correct: boolean;
     text: string;
   } | null>(null);
+
+  // AI Guessing in Player Drawing Round (Stage 1: Wrong -> Stage 2: Close -> Stage 3: Correct)
+  const [aiGuessStage, setAiGuessStage] = useState<0 | 1 | 2 | 3>(0);
+  const [aiIsThinking, setAiIsThinking] = useState<boolean>(false);
+  const [playerInteractiveInput, setPlayerInteractiveInput] = useState<string>('');
 
   // Score state
   const [scores, setScores] = useState({ playerWins: 0, aiWins: 0 });
@@ -153,7 +191,7 @@ export default function DrawAndGuessApp({
       sender: 'ai',
       name: currentArtist.name,
       avatar: currentArtist.avatar,
-      text: `你好！我是${currentArtist.name}（${currentArtist.tag}）。准备好来一场心有灵犀的你画我猜了吗？你可以选择【你先画】还是【我先画】哦！`,
+      text: `你好呀！我是${currentArtist.name}。准备好来一场心有灵犀的你画我猜了吗？不管是你画还是我画，我都奉陪到底哦～`,
       time: '刚刚',
     },
   ]);
@@ -167,7 +205,7 @@ export default function DrawAndGuessApp({
   }, [chatMessages]);
 
   const addChatMessage = useCallback(
-    (sender: 'ai' | 'player' | 'system', text: string, senderName?: string, avatar?: string) => {
+    (sender: 'ai' | 'player', text: string, senderName?: string, avatar?: string) => {
       const now = new Date();
       const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
       setChatMessages((prev) => [
@@ -185,6 +223,15 @@ export default function DrawAndGuessApp({
     [currentArtist]
   );
 
+  // Sync activeChar when selectedCharId changes
+  useEffect(() => {
+    const list = loadSavedCharacters();
+    const found = list.find((c) => c.character_id === selectedCharId || c.name === currentArtist.name);
+    if (found) {
+      setActiveChar(found);
+    }
+  }, [selectedCharId, currentArtist]);
+
   // Clear Canvas to pure smooth paper white
   const clearCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -196,11 +243,10 @@ export default function DrawAndGuessApp({
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Subtle paper background with crisp drawing area
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Guide dot pattern
+    // Subtle paper guide dots
     ctx.fillStyle = 'rgba(203, 213, 225, 0.4)';
     const dotSpacing = 30;
     for (let x = 20; x < canvas.width; x += dotSpacing) {
@@ -237,148 +283,135 @@ export default function DrawAndGuessApp({
   // -------------------------------------------------------------
   // AI DRAWING ROUND (AI画·你猜) - Strictly Secret Word Bank
   // -------------------------------------------------------------
-  const startAiDrawingRound = useCallback((newSecretWordObj?: { word: string; category: string; hints: string[] }) => {
-    stopAnimation();
+  const startAiDrawingRound = useCallback(
+    async (newSecretWordObj?: { word: string; category: string; hints: string[] }) => {
+      stopAnimation();
 
-    const activeSecret = newSecretWordObj || aiSecret;
-    const strokes = getPreDrawData(activeSecret.word);
-    if (!strokes || strokes.length === 0) return;
+      const activeSecret = newSecretWordObj || aiSecret;
+      const strokes = getPreDrawData(activeSecret.word);
+      if (!strokes || strokes.length === 0) return;
 
-    setRound('round_ai_draw');
-    setPhase('ai_drawing');
-    setAiSecretRevealed(false);
-    setAiHintLevel(0);
-    setGuessInput('');
-    setGuessFeedback(null);
-    setGuessAttempts(0);
-    clearCanvas();
-    triggerSound('click');
-
-    // AI speech (does NOT reveal the word!)
-    const startLines = currentArtist.dialogues.startDraw;
-    const randomStart = startLines[Math.floor(Math.random() * startLines.length)];
-    addChatMessage('ai', `${randomStart}（我已经选好秘密题目啦，看我的画笔挥毫！）`);
-
-    // Begin time-series sequential stroke playback
-    isPlayingRef.current = true;
-    let strokeIdx = 0;
-    let strokeStartTime = performance.now();
-    const completedStrokes: StrokeData[] = [];
-    let midSpoken = false;
-
-    const animate = (timestamp: number) => {
-      if (!isPlayingRef.current) return;
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      const currentStroke = strokes[strokeIdx];
-      const strokeDuration = currentStroke.duration || 600;
-      const elapsed = timestamp - strokeStartTime;
-      const progress = Math.min(1, elapsed / strokeDuration);
-
-      // Mid-stroke dialogue trigger
-      if (!midSpoken && strokeIdx === Math.floor(strokes.length / 2)) {
-        midSpoken = true;
-        const midLines = currentArtist.dialogues.drawing;
-        addChatMessage('ai', midLines[Math.floor(Math.random() * midLines.length)]);
-      }
-
-      // Calculate number of visible points
-      const ptCount = Math.max(2, Math.floor(currentStroke.points.length * progress));
-      const partialPoints = currentStroke.points.slice(0, ptCount);
-
-      // Render full canvas frame
+      setRound('round_ai_draw');
+      setPhase('ai_drawing');
+      setAiSecretRevealed(false);
+      setAiHintLevel(0);
+      setGuessInput('');
+      setGuessFeedback(null);
+      setGuessAttempts(0);
       clearCanvas();
+      triggerSound('click');
 
-      // Draw all already completed strokes
-      completedStrokes.forEach((s) => {
-        const outline = getStrokeOutline(s.points, {
-          ...currentArtist.brushParams,
-          size: s.size || currentArtist.brushParams.size || 10,
-        });
-        renderStrokeToCanvas(ctx, outline, s.color, false);
+      // AI speech generated via LLM or character persona (DOES NOT REVEAL THE WORD!)
+      const config = loadLlmConfig();
+      generateDrawAndGuessAiOpening(config, activeChar, activeSecret.category, activeSecret.word.length).then((opening) => {
+        addChatMessage('ai', opening);
       });
 
-      // Draw current stroke up to current progress
-      if (partialPoints.length >= 2) {
-        const currentOutline = getStrokeOutline(partialPoints, {
-          ...currentArtist.brushParams,
-          size: currentStroke.size || currentArtist.brushParams.size || 10,
+      // Begin sequential stroke playback
+      isPlayingRef.current = true;
+      let strokeIdx = 0;
+      let strokeStartTime = performance.now();
+      const completedStrokes: StrokeData[] = [];
+      let midSpoken = false;
+
+      const animate = (timestamp: number) => {
+        if (!isPlayingRef.current) return;
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        const currentStroke = strokes[strokeIdx];
+        const strokeDuration = currentStroke.duration || 600;
+        const elapsed = timestamp - strokeStartTime;
+        const progress = Math.min(1, elapsed / strokeDuration);
+
+        // Mid-stroke dialogue trigger
+        if (!midSpoken && strokeIdx === Math.floor(strokes.length / 2)) {
+          midSpoken = true;
+          const midLines = currentArtist.dialogues.drawing;
+          addChatMessage('ai', midLines[Math.floor(Math.random() * midLines.length)]);
+        }
+
+        const ptCount = Math.max(2, Math.floor(currentStroke.points.length * progress));
+        const partialPoints = currentStroke.points.slice(0, ptCount);
+
+        clearCanvas();
+
+        completedStrokes.forEach((s) => {
+          const outline = getStrokeOutline(s.points, {
+            ...currentArtist.brushParams,
+            size: s.size || currentArtist.brushParams.size || 10,
+          });
+          renderStrokeToCanvas(ctx, outline, s.color, false);
         });
-        renderStrokeToCanvas(ctx, currentOutline, currentStroke.color, false);
 
-        // Draw brush tip cursor
-        const lastPt = partialPoints[partialPoints.length - 1];
-        ctx.save();
-        ctx.fillStyle = currentStroke.color;
-        ctx.beginPath();
-        ctx.arc(lastPt[0], lastPt[1], 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = '#FFFFFF';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        ctx.restore();
-      }
+        if (partialPoints.length >= 2) {
+          const currentOutline = getStrokeOutline(partialPoints, {
+            ...currentArtist.brushParams,
+            size: currentStroke.size || currentArtist.brushParams.size || 10,
+          });
+          renderStrokeToCanvas(ctx, currentOutline, currentStroke.color, false);
 
-      if (progress < 1) {
-        animFrameIdRef.current = requestAnimationFrame(animate);
-      } else {
-        // Current stroke is complete
-        completedStrokes.push(currentStroke);
-        strokeIdx++;
-        if (strokeIdx < strokes.length) {
-          // Next stroke after brief natural delay
-          strokeStartTime = performance.now() + 60;
+          const lastPt = partialPoints[partialPoints.length - 1];
+          ctx.save();
+          ctx.fillStyle = currentStroke.color;
+          ctx.beginPath();
+          ctx.arc(lastPt[0], lastPt[1], 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#FFFFFF';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.restore();
+        }
+
+        if (progress < 1) {
           animFrameIdRef.current = requestAnimationFrame(animate);
         } else {
-          // All strokes finished!
-          isPlayingRef.current = false;
-          clearCanvas();
-          // Final render of all completed strokes
-          completedStrokes.forEach((s) => {
-            const outline = getStrokeOutline(s.points, {
-              ...currentArtist.brushParams,
-              size: s.size || currentArtist.brushParams.size || 10,
+          completedStrokes.push(currentStroke);
+          strokeIdx++;
+          if (strokeIdx < strokes.length) {
+            strokeStartTime = performance.now() + 60;
+            animFrameIdRef.current = requestAnimationFrame(animate);
+          } else {
+            isPlayingRef.current = false;
+            clearCanvas();
+            completedStrokes.forEach((s) => {
+              const outline = getStrokeOutline(s.points, {
+                ...currentArtist.brushParams,
+                size: s.size || currentArtist.brushParams.size || 10,
+              });
+              renderStrokeToCanvas(ctx, outline, s.color, false);
             });
-            renderStrokeToCanvas(ctx, outline, s.color, false);
-          });
 
-          setPhase('guessing');
-          triggerSound('complete');
+            setPhase('guessing');
+            triggerSound('complete');
 
-          const finishLines = currentArtist.dialogues.finishDraw;
-          addChatMessage(
-            'ai',
-            `${finishLines[Math.floor(Math.random() * finishLines.length)]} 题目共有【${activeSecret.word.length}个字】，快在右侧输入你的猜测吧！`
-          );
+            const finishLines = currentArtist.dialogues.finishDraw;
+            addChatMessage(
+              'ai',
+              `${finishLines[Math.floor(Math.random() * finishLines.length)]} 题目共有【${activeSecret.word.length}个字】，快在右侧猜猜看是什么吧！`
+            );
+          }
         }
-      }
-    };
+      };
 
-    animFrameIdRef.current = requestAnimationFrame(animate);
-  }, [
-    stopAnimation,
-    aiSecret,
-    clearCanvas,
-    triggerSound,
-    currentArtist,
-    addChatMessage,
-  ]);
+      animFrameIdRef.current = requestAnimationFrame(animate);
+    },
+    [stopAnimation, aiSecret, clearCanvas, triggerSound, activeChar, currentArtist, addChatMessage]
+  );
 
-  // Switch secret word for AI behind the scenes (No spoiler to user)
+  // Switch secret word for AI
   const handleRerollAiSecretWord = useCallback(() => {
     triggerSound('click');
-    const newSecret = getRandomAiSecretWord(aiSecret.word);
+    const newSecret = getRandomAiSecretWord(undefined, aiSecret.word);
     setAiSecret(newSecret);
-    addChatMessage('system', `🎲 AI已重新秘密挑选了一道画作题目（分类：${newSecret.category} · ${newSecret.word.length}个字）`);
     startAiDrawingRound(newSecret);
-  }, [aiSecret.word, triggerSound, addChatMessage, startAiDrawingRound]);
+  }, [aiSecret.word, triggerSound, startAiDrawingRound]);
 
   // Handle Player Guess submission
   const handleGuessSubmit = useCallback(
-    (e?: React.FormEvent) => {
+    async (e?: React.FormEvent) => {
       if (e) e.preventDefault();
       const trimmed = guessInput.trim();
       if (!trimmed || phase !== 'guessing') return;
@@ -386,12 +419,16 @@ export default function DrawAndGuessApp({
       addChatMessage('player', trimmed);
       const newAttempts = guessAttempts + 1;
       setGuessAttempts(newAttempts);
+      setGuessInput('');
 
-      // Check guess against target word
+      // Check guess against secret word
       const isMatch =
         trimmed === aiSecret.word ||
         trimmed.includes(aiSecret.word) ||
         aiSecret.word.includes(trimmed);
+
+      const config = loadLlmConfig();
+      const subtleHint = aiSecret.hints[Math.min(aiHintLevel, aiSecret.hints.length - 1)];
 
       if (isMatch) {
         triggerSound('correct');
@@ -403,14 +440,12 @@ export default function DrawAndGuessApp({
         setScores((prev) => ({ ...prev, playerWins: prev.playerWins + 1 }));
         setPhase('roundA_success');
 
-        const winLines = currentArtist.dialogues.correctGuess;
-        addChatMessage('ai', `${winLines[Math.floor(Math.random() * winLines.length)]} 答案就是【${aiSecret.word}】！`);
+        generateDrawAndGuessPlayerGuessReaction(config, activeChar, aiSecret.word, trimmed, true, newAttempts).then(
+          (reply) => addChatMessage('ai', reply)
+        );
       } else {
         triggerSound('wrong');
-        const wrongLines = currentArtist.dialogues.wrongGuess;
-        addChatMessage('ai', wrongLines[Math.floor(Math.random() * wrongLines.length)]);
 
-        // Gradually reveal hints
         if (newAttempts >= 2 && aiHintLevel === 0 && aiSecret.hints.length > 0) {
           setAiHintLevel(1);
         } else if (newAttempts >= 4 && aiHintLevel < aiSecret.hints.length) {
@@ -421,10 +456,19 @@ export default function DrawAndGuessApp({
           correct: false,
           text: `不对哦，再仔细端详一下画面的线条与神韵吧~`,
         });
+
+        generateDrawAndGuessPlayerGuessReaction(
+          config,
+          activeChar,
+          aiSecret.word,
+          trimmed,
+          false,
+          newAttempts,
+          subtleHint
+        ).then((reply) => addChatMessage('ai', reply));
       }
-      setGuessInput('');
     },
-    [guessInput, phase, aiSecret, triggerSound, currentArtist, addChatMessage, guessAttempts, aiHintLevel]
+    [guessInput, phase, aiSecret, triggerSound, activeChar, addChatMessage, guessAttempts, aiHintLevel]
   );
 
   // Give up and reveal secret answer
@@ -436,30 +480,38 @@ export default function DrawAndGuessApp({
       correct: false,
       text: `已揭晓答案：【${aiSecret.word}】（${aiSecret.category}）`,
     });
-    addChatMessage('ai', `这道题的答案是【${aiSecret.word}】哦！没关系，下一盘一定能猜中！`);
+    addChatMessage('ai', `这道题的答案其实是【${aiSecret.word}】哦！没关系，下一盘我们再战！`);
   }, [aiSecret, triggerSound, addChatMessage]);
 
   // -------------------------------------------------------------
-  // PLAYER DRAWING ROUND (你画·AI猜)
+  // PLAYER DRAWING ROUND (你画·AI猜 - 题目绝对不暴露给AI！)
   // -------------------------------------------------------------
-  const startPlayerDrawingRound = useCallback((chosenTopic?: { word: string; category: string; hints: string[] }) => {
-    stopAnimation();
-    setRound('round_player_draw');
-    setPhase('player_drawing');
-    setPlayerStrokes([]);
-    currentStrokeRef.current = [];
-    clearCanvas();
-    triggerSound('click');
+  const startPlayerDrawingRound = useCallback(
+    (chosenTopic?: { word: string; category: string; hints: string[] }) => {
+      stopAnimation();
+      setRound('round_player_draw');
+      setPhase('player_drawing');
+      setPlayerStrokes([]);
+      currentStrokeRef.current = [];
+      setAiGuessStage(0);
+      setAiIsThinking(false);
+      setPlayerInteractiveInput('');
+      clearCanvas();
+      triggerSound('click');
 
-    const topic = chosenTopic || playerTopic;
-    setPlayerTopic(topic);
+      const topic = chosenTopic || playerTopic;
+      setPlayerTopic(topic);
 
-    const playerLines = currentArtist.dialogues.playerTurn;
-    addChatMessage(
-      'ai',
-      `${playerLines[Math.floor(Math.random() * playerLines.length)]} 本轮你的题目是：【${topic.word}】！在画板上挥毫，画好后点击下方“完成绘画，让TA猜”！`
-    );
-  }, [stopAnimation, clearCanvas, triggerSound, playerTopic, currentArtist, addChatMessage]);
+      const playerTurnGreetings = [
+        '“画板交给你了！信马由缰地画吧，我会在一旁认真看着的。”',
+        '“我很期待你笔下的线条，画好后随时叫我来猜哦～”',
+        '“来吧，画板已备好，尽情发挥你的画技吧！”',
+      ];
+      const randomGreeting = playerTurnGreetings[Math.floor(Math.random() * playerTurnGreetings.length)];
+      addChatMessage('ai', randomGreeting);
+    },
+    [stopAnimation, clearCanvas, triggerSound, playerTopic, addChatMessage]
+  );
 
   // Pick a new random word for player to draw
   const handleRerollPlayerWord = useCallback(() => {
@@ -639,28 +691,116 @@ export default function DrawAndGuessApp({
     clearCanvas();
   }, [phase, triggerSound, clearCanvas]);
 
-  // Player completes drawing and asks AI to guess
-  const handleFinishPlayerDrawing = useCallback(() => {
-    if (playerStrokes.length === 0) {
-      addChatMessage('system', '画板上还没有任何笔画哦，请先在画布上挥毫几笔吧！');
-      return;
-    }
+  // Player completes drawing and triggers AI Stage 1 Guessing
+  const handleFinishPlayerDrawing = useCallback(async () => {
+    if (playerStrokes.length === 0) return;
     stopAnimation();
     setPhase('player_finished');
+    setAiGuessStage(1);
+    setAiIsThinking(true);
     triggerSound('complete');
 
-    addChatMessage('player', `我画完啦！题目是【${playerTopic.word}】，你快猜猜看！`);
+    // Player natural chat (NO SPOILERS OF TOPIC!)
+    addChatMessage('player', '我画好啦！你快来看看我画的是什么～');
 
-    setTimeout(() => {
-      const reactions = currentArtist.dialogues.playerFinished;
-      const aiReply = reactions[Math.floor(Math.random() * reactions.length)];
-      addChatMessage(
-        'ai',
-        `${aiReply} 这分明就是【${playerTopic.word}】！每一笔线条都直击灵魂，画得太传神了！`
+    const config = loadLlmConfig();
+    try {
+      // Stage 1: AI purposefully guesses wrong and asks for clues
+      const reply = await generateDrawAndGuessAiGuessReaction(
+        config,
+        activeChar,
+        1,
+        playerTopic.category,
+        playerStrokes.length
       );
+      addChatMessage('ai', reply);
+    } finally {
+      setAiIsThinking(false);
+    }
+  }, [playerStrokes.length, stopAnimation, triggerSound, addChatMessage, activeChar, playerTopic.category]);
+
+  // Player interacts with AI during AI Guessing (gives text hints or encouragement)
+  const handlePlayerSendInteractiveMessage = useCallback(
+    async (customText?: string) => {
+      const text = (customText || playerInteractiveInput).trim();
+      if (!text || aiIsThinking) return;
+
+      addChatMessage('player', text);
+      setPlayerInteractiveInput('');
+      setAiIsThinking(true);
+
+      const nextStage = aiGuessStage === 1 ? 2 : 3;
+      setAiGuessStage(nextStage as 2 | 3);
+
+      const config = loadLlmConfig();
+      try {
+        if (nextStage === 2) {
+          // Stage 2: AI gets very close and asks for confirmation/encouragement
+          const reply = await generateDrawAndGuessAiGuessReaction(
+            config,
+            activeChar,
+            2,
+            playerTopic.category,
+            playerStrokes.length,
+            text
+          );
+          addChatMessage('ai', reply);
+        } else {
+          // Stage 3: AI excitedly guesses correctly!
+          const reply = await generateDrawAndGuessAiGuessReaction(
+            config,
+            activeChar,
+            3,
+            playerTopic.category,
+            playerStrokes.length,
+            text,
+            playerTopic.word
+          );
+          addChatMessage('ai', reply);
+          triggerSound('correct');
+          setScores((prev) => ({ ...prev, aiWins: prev.aiWins + 1 }));
+        }
+      } finally {
+        setAiIsThinking(false);
+      }
+    },
+    [playerInteractiveInput, aiIsThinking, aiGuessStage, activeChar, playerTopic, playerStrokes.length, addChatMessage, triggerSound]
+  );
+
+  // Quick hint actions for player
+  const handleSendQuickHint = useCallback(() => {
+    const hint = playerTopic.hints[0] || '生活里很常见的东西哦～';
+    handlePlayerSendInteractiveMessage(`给你一个小提示：${hint}`);
+  }, [playerTopic.hints, handlePlayerSendInteractiveMessage]);
+
+  const handleSendWrongFeedback = useCallback(() => {
+    handlePlayerSendInteractiveMessage('方向全猜偏啦！再仔细看看线条轮廓嘛～');
+  }, [handlePlayerSendInteractiveMessage]);
+
+  const handleRevealAndPraise = useCallback(async () => {
+    if (aiIsThinking) return;
+    setAiIsThinking(true);
+    setAiGuessStage(3);
+    addChatMessage('player', `好啦揭晓谜底！其实我画的是【${playerTopic.word}】哦！`);
+
+    const config = loadLlmConfig();
+    try {
+      const reply = await generateDrawAndGuessAiGuessReaction(
+        config,
+        activeChar,
+        3,
+        playerTopic.category,
+        playerStrokes.length,
+        '揭晓答案',
+        playerTopic.word
+      );
+      addChatMessage('ai', reply);
+      triggerSound('correct');
       setScores((prev) => ({ ...prev, aiWins: prev.aiWins + 1 }));
-    }, 850);
-  }, [playerStrokes.length, stopAnimation, triggerSound, addChatMessage, playerTopic.word, currentArtist]);
+    } finally {
+      setAiIsThinking(false);
+    }
+  }, [aiIsThinking, playerTopic, playerStrokes.length, activeChar, addChatMessage, triggerSound]);
 
   // Replay Player's Drawing Animation
   const handleReplayPlayerDrawing = useCallback(() => {
@@ -832,7 +972,7 @@ export default function DrawAndGuessApp({
               </button>
             </div>
 
-            {/* Mode-Specific Status / Quick Switch Indicator */}
+            {/* Mode-Specific Status / Category Pick */}
             {round === 'round_player_draw' ? (
               <div className="flex items-center gap-1.5 flex-wrap">
                 <select
@@ -866,7 +1006,7 @@ export default function DrawAndGuessApp({
               <div className="flex items-center gap-2">
                 <span className="text-[10px] text-pink-300 bg-pink-500/10 border border-pink-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
                   <QuestionIcon className="size-3 text-pink-400" />
-                  <span>题库已深度保密 · 凭画技猜词</span>
+                  <span>题目已加密 · 凭画技猜词</span>
                 </span>
                 <button
                   onClick={handleRerollAiSecretWord}
@@ -874,25 +1014,25 @@ export default function DrawAndGuessApp({
                   title="让AI重新挑一道秘密题目"
                 >
                   <RefreshCw className="size-3" />
-                  <span>重挑秘密题目</span>
+                  <span>重挑题目</span>
                 </button>
               </div>
             )}
           </div>
 
-          {/* Word Prompt / Hidden Secret Strip */}
+          {/* Topic Strip: STRICTLY FOR PLAYER ONLY in round_player_draw */}
           {round === 'round_player_draw' ? (
             <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-amber-950/30 rounded-xl border border-amber-500/30 shrink-0 flex-wrap">
               <div className="flex items-center gap-2">
                 <span className="text-[10.5px] text-amber-300 font-bold flex items-center gap-1">
                   <Palette className="size-3.5" />
-                  <span>你要画的题目:</span>
+                  <span>你要画的题目（仅自己可见）:</span>
                 </span>
                 <span className="px-2.5 py-0.5 rounded-md bg-amber-400/25 border border-amber-400/50 text-amber-200 font-bold text-sm tracking-wider">
                   {playerTopic.word}
                 </span>
                 <span className="text-[10px] text-amber-300/70">
-                  （分类：{playerTopic.category}）
+                  （{playerTopic.category} · {playerTopic.word.length}个字）
                 </span>
               </div>
 
@@ -921,7 +1061,7 @@ export default function DrawAndGuessApp({
               <div className="flex items-center gap-2">
                 <span className="text-[10.5px] text-pink-300 font-bold flex items-center gap-1">
                   <QuestionIcon className="size-3.5" />
-                  <span>秘密题目:</span>
+                  <span>AI秘密题目:</span>
                 </span>
                 {aiSecretRevealed ? (
                   <span className="px-2.5 py-0.5 rounded-md bg-emerald-500/25 border border-emerald-400/50 text-emerald-200 font-bold text-sm tracking-wider flex items-center gap-1">
@@ -996,7 +1136,7 @@ export default function DrawAndGuessApp({
               {phase === 'player_drawing' && (
                 <div className="px-2.5 py-1 rounded-full bg-amber-950/85 text-amber-200 font-bold text-[10.5px] backdrop-blur-sm border border-amber-400/40 flex items-center gap-1.5 shadow">
                   <User className="size-3.5 text-amber-400" />
-                  <span>轮到你画：请在画板绘制【{playerTopic.word}】</span>
+                  <span>请在画板自由绘制</span>
                 </div>
               )}
               {phase === 'player_replaying' && (
@@ -1007,7 +1147,7 @@ export default function DrawAndGuessApp({
               )}
             </div>
 
-            {/* Hint Display in Guessing Phase */}
+            {/* Hint Display in AI Draw Guessing Phase */}
             {round === 'round_ai_draw' && phase === 'guessing' && aiHintLevel > 0 && (
               <div className="absolute bottom-2 left-2 z-10 bg-black/85 px-3 py-1.5 rounded-xl border border-amber-400/40 text-amber-200 text-[10px] max-w-xs shadow">
                 <span className="font-bold text-amber-300">💡 提示：</span>
@@ -1162,7 +1302,7 @@ export default function DrawAndGuessApp({
                         className="px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-400/40 text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
                       >
                         <Play className="size-3" />
-                        <span>🎬 回放我的画作</span>
+                        <span>🎬 回放画作</span>
                       </button>
 
                       <button
@@ -1180,7 +1320,7 @@ export default function DrawAndGuessApp({
                           stopAnimation();
                           clearCanvas();
                         }}
-                        className="px-3 py-1.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 text-pink-200 border border-pink-400/40 text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
+                        className="px-3.5 py-1.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 text-pink-200 border border-pink-400/40 text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
                       >
                         <span>换AI来画（我猜）</span>
                         <ChevronRight className="size-3.5" />
@@ -1194,10 +1334,10 @@ export default function DrawAndGuessApp({
         </div>
 
         {/* ================= RIGHT SIDEBAR: AI CHARACTER & CHAT STREAM ================= */}
-        <div className="w-full md:w-72 shrink-0 flex flex-col bg-stone-900/80 border border-white/10 rounded-2xl p-2.5 shadow-xl backdrop-blur-md gap-2.5">
+        <div className="w-full md:w-80 shrink-0 flex flex-col bg-stone-900/80 border border-white/10 rounded-2xl p-2.5 shadow-xl backdrop-blur-md gap-2.5 overflow-hidden">
           
           {/* AI Artist Character Switcher & Card */}
-          <div className="p-2 rounded-xl bg-gradient-to-br from-stone-950/60 to-black/60 border border-white/10 space-y-1.5">
+          <div className="p-2 rounded-xl bg-gradient-to-br from-stone-950/60 to-black/60 border border-white/10 space-y-1.5 shrink-0">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="text-xl">{currentArtist.avatar}</span>
@@ -1232,46 +1372,21 @@ export default function DrawAndGuessApp({
                 ))}
               </select>
             </div>
-
-            {/* Character Brush Spec Metrics */}
-            <div className="grid grid-cols-4 gap-1 pt-1 border-t border-white/5 text-[9px] text-center font-mono">
-              <div className="bg-white/5 p-1 rounded">
-                <span className="text-white/40 block">平滑</span>
-                <span className="text-emerald-300 font-bold">{Math.round(currentArtist.brushParams.smoothing * 100)}%</span>
-              </div>
-              <div className="bg-white/5 p-1 rounded">
-                <span className="text-white/40 block">抖动</span>
-                <span className="text-amber-300 font-bold">{Math.round(currentArtist.brushParams.jitter * 100)}%</span>
-              </div>
-              <div className="bg-white/5 p-1 rounded">
-                <span className="text-white/40 block">粗细</span>
-                <span className="text-pink-300 font-bold">{Math.round(currentArtist.brushParams.thinning * 100)}%</span>
-              </div>
-              <div className="bg-white/5 p-1 rounded">
-                <span className="text-white/40 block">笔锋</span>
-                <span className="text-purple-300 font-bold">{currentArtist.brushParams.taperStart}</span>
-              </div>
-            </div>
           </div>
 
           {/* Chat Messages Log */}
-          <div className="flex-1 flex flex-col min-h-[160px] max-h-[260px] md:max-h-none bg-black/40 rounded-xl border border-white/5 p-2 overflow-hidden">
+          <div className="flex-1 flex flex-col min-h-[180px] bg-black/40 rounded-xl border border-white/5 p-2 overflow-hidden">
             <div className="text-[10px] text-white/40 pb-1 mb-1 border-b border-white/5 flex items-center justify-between font-mono">
-              <span>局内对话互动</span>
+              <span className="flex items-center gap-1">
+                <MessageCircle className="size-3 text-pink-400" />
+                <span>局内实时互动</span>
+              </span>
               <span className="text-emerald-400">● 实时在线</span>
             </div>
 
             <div ref={chatScrollRef} className="flex-1 overflow-y-auto space-y-2 pr-1 no-scrollbar text-[11px]">
               {chatMessages.map((msg) => {
                 const isAi = msg.sender === 'ai';
-                const isSystem = msg.sender === 'system';
-                if (isSystem) {
-                  return (
-                    <div key={msg.id} className="text-center text-[9.5px] text-amber-300/80 py-0.5 bg-white/5 rounded-lg">
-                      {msg.text}
-                    </div>
-                  );
-                }
                 return (
                   <div
                     key={msg.id}
@@ -1279,7 +1394,7 @@ export default function DrawAndGuessApp({
                   >
                     <span className="text-sm shrink-0">{isAi ? msg.avatar || '🤖' : '🎨'}</span>
                     <div
-                      className={`max-w-[82%] rounded-xl p-2 leading-relaxed shadow-sm ${
+                      className={`max-w-[84%] rounded-xl p-2 leading-relaxed shadow-sm ${
                         isAi
                           ? 'bg-stone-800 text-stone-200 rounded-tl-none border border-white/5'
                           : 'bg-gradient-to-r from-pink-600 to-rose-600 text-white rounded-tr-none'
@@ -1294,10 +1409,17 @@ export default function DrawAndGuessApp({
                   </div>
                 );
               })}
+
+              {aiIsThinking && (
+                <div className="flex items-center gap-1.5 text-[10px] text-pink-300/80 italic p-1 animate-pulse">
+                  <Bot className="size-3 animate-spin text-pink-400" />
+                  <span>{currentArtist.name} 正在仔细端详画布并思索...</span>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Guess Submission Input / Feedback Area */}
+          {/* Bottom Interactive Area */}
           <div className="space-y-1.5 shrink-0">
             {round === 'round_ai_draw' ? (
               <form onSubmit={handleGuessSubmit} className="space-y-1.5">
@@ -1345,14 +1467,67 @@ export default function DrawAndGuessApp({
                 )}
               </form>
             ) : (
-              <div className="p-2 rounded-xl bg-black/40 border border-white/5 text-[10.5px] text-white/70 space-y-1">
-                <div className="flex items-center gap-1 text-amber-300 font-bold">
-                  <Sparkles className="size-3" />
-                  <span>轮到你作画</span>
+              /* Player Drawing Round: Natural Interactive Chat & Hint Chips */
+              <div className="space-y-1.5">
+                {phase === 'player_finished' && aiGuessStage > 0 && aiGuessStage < 3 && (
+                  <div className="flex items-center gap-1 flex-wrap pb-0.5">
+                    <button
+                      onClick={handleSendQuickHint}
+                      disabled={aiIsThinking}
+                      className="px-2 py-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-400/30 text-[10px] flex items-center gap-1 transition cursor-pointer active:scale-95 disabled:opacity-50"
+                    >
+                      <Lightbulb className="size-3 text-amber-300" />
+                      <span>给TA一点提示</span>
+                    </button>
+                    <button
+                      onClick={handleSendWrongFeedback}
+                      disabled={aiIsThinking}
+                      className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/15 text-stone-300 border border-white/10 text-[10px] flex items-center gap-1 transition cursor-pointer active:scale-95 disabled:opacity-50"
+                    >
+                      <span>猜错啦，再猜！</span>
+                    </button>
+                    <button
+                      onClick={handleRevealAndPraise}
+                      disabled={aiIsThinking}
+                      className="px-2 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/30 text-[10px] flex items-center gap-1 transition cursor-pointer active:scale-95 disabled:opacity-50 ml-auto"
+                    >
+                      <Award className="size-3 text-emerald-400" />
+                      <span>揭晓答案</span>
+                    </button>
+                  </div>
+                )}
+
+                <div className="relative flex items-center">
+                  <input
+                    type="text"
+                    placeholder={
+                      phase === 'player_drawing'
+                        ? '在画板绘制中，画好后让TA猜～'
+                        : aiGuessStage === 3
+                        ? 'TA已经猜中啦！可点击下方再画一局'
+                        : '打字给TA提示或聊两句...'
+                    }
+                    disabled={phase === 'player_drawing' || aiIsThinking || aiGuessStage === 3}
+                    value={playerInteractiveInput}
+                    onChange={(e) => setPlayerInteractiveInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && playerInteractiveInput.trim()) {
+                        e.preventDefault();
+                        handlePlayerSendInteractiveMessage();
+                      }
+                    }}
+                    className="w-full pl-3 pr-16 py-2 bg-stone-800/90 border border-white/20 rounded-xl text-xs text-white placeholder-stone-400 outline-none focus:border-amber-400 disabled:opacity-50 disabled:cursor-not-allowed shadow-inner"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => handlePlayerSendInteractiveMessage()}
+                    disabled={phase === 'player_drawing' || aiIsThinking || !playerInteractiveInput.trim() || aiGuessStage === 3}
+                    className="absolute right-1.5 px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:bg-stone-700 text-stone-950 font-bold text-[10.5px] transition cursor-pointer flex items-center gap-1 shadow"
+                  >
+                    <span>发送</span>
+                    <Send className="size-3" />
+                  </button>
                 </div>
-                <p>
-                  请根据提示【<strong className="text-amber-200">{playerTopic.word}</strong>】在画板自由作画，支持选择调色板与橡皮。画好后点击“完成绘画，让TA猜”！
-                </p>
               </div>
             )}
           </div>

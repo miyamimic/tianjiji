@@ -2055,6 +2055,150 @@ export async function generateGhostCardEnding(
   };
 }
 
+// ============================================================================
+// 风铃 · 你画我猜 (Draw & Guess) 专属 LLM 沉浸拟真情感与多阶段猜词系统
+// ============================================================================
+
+/**
+ * 1. AI 出题模式：AI 开场白（绝不泄露秘密题目）
+ */
+export async function generateDrawAndGuessAiOpening(
+  config: LlmConfig,
+  character: Character,
+  category: string,
+  wordLength: number
+): Promise<string> {
+  const prompt = `【风铃·你画我猜·AI出题作画】
+你是角色「${character.name}」。你和主控正在玩你画我猜游戏。
+现在轮到你来画，主控来猜！
+你已经在心里挑好了一道秘密题目（分类：${category}，共 ${wordLength} 个字）。
+- 角色性格与口癖：${character.core.values.join('、')}，${character.core.speech_filter}
+
+【要求】：
+用极具你人设魅力的生动口吻，对主控说一两句话，邀请TA认真观察你的画笔，准备猜词。
+【严禁事项】：绝对不要说出题目的具体名字或具体答案！严禁输出任何系统提示或机械指令！
+直接输出一到两句符合人设的自然对话台词：`;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，请代入人设输出纯自然对话，严禁泄露答案，严禁系统机械提示。` },
+      { role: 'user', content: prompt }
+    ]);
+    const clean = raw.replace(/^["“”']|["“”']$/g, '').trim();
+    if (clean) return clean;
+  } catch (err) {
+    console.warn('Draw and Guess AI opening LLM failed:', err);
+  }
+
+  return `“别眨眼，看着我的画笔落下的轨迹。这道题很有韵味，猜猜看我画的是什么吧。”`;
+}
+
+/**
+ * 2. AI 出题模式：玩家猜词反馈（猜对/猜错）
+ */
+export async function generateDrawAndGuessPlayerGuessReaction(
+  config: LlmConfig,
+  character: Character,
+  secretWord: string,
+  userGuess: string,
+  isCorrect: boolean,
+  attemptCount: number,
+  subtleHint?: string
+): Promise<string> {
+  const prompt = `【风铃·你画我猜·主控猜词反馈】
+你是角色「${character.name}」。你画了一幅画（画的内容是【${secretWord}】）。
+主控刚刚提交了猜词内容：“${userGuess}”。
+判定结果：${isCorrect ? '【完全猜对了！🎉】' : `【猜错了（第 ${attemptCount} 次尝试）】`}
+${!isCorrect && subtleHint ? `- 可以透露的微妙人设提示（可选）：${subtleHint}` : ''}
+- 角色性格与口癖：${character.core.values.join('、')}，${character.core.speech_filter}
+
+【任务要求】：
+${isCorrect 
+  ? `用符合你人设的语气极其惊喜/赞许/深情地夸赞主控的敏锐观察力与默契，宣布TA猜对了！` 
+  : `用符合你人设的生动口吻指出主控没猜中，可以带点调侃、宠溺或给出一丝隐蔽小线索，鼓励TA再仔细观察线条。千万不要直接公布正确答案！严禁机械系统播报！`}
+请直接输出纯对话台词：`;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，请代入人设输出纯对话，严禁机械系统提示。` },
+      { role: 'user', content: prompt }
+    ]);
+    const clean = raw.replace(/^["“”']|["“”']$/g, '').trim();
+    if (clean) return clean;
+  } catch (err) {
+    console.warn('Draw and Guess player guess reaction LLM failed:', err);
+  }
+
+  if (isCorrect) {
+    return `“心有灵犀。完全被你看透了，答案正是【${secretWord}】！画得再含蓄也难不倒你呢。”`;
+  }
+  return `“差了一点分寸哦。别急，再仔细凝视一下画面的轮廓～”`;
+}
+
+/**
+ * 3. 玩家出题作画模式：AI 拟真多阶段猜词（严格保密题目，拟真猜词）
+ * - stage 1: 故意猜错一个好玩的词，表现出好奇/困惑，向玩家要提示
+ * - stage 2: 越来越接近，恍然大悟，给玩家鼓励
+ * - stage 3: 灵光一闪猜对，惊喜夸赞
+ */
+export async function generateDrawAndGuessAiGuessReaction(
+  config: LlmConfig,
+  character: Character,
+  stage: 1 | 2 | 3,
+  category: string,
+  strokesCount: number,
+  playerMessage?: string,
+  revealedWord?: string
+): Promise<string> {
+  let stageInstruction = '';
+
+  if (stage === 1) {
+    stageInstruction = `【当前阶段：第一轮猜测（必须猜错并试探）】
+玩家刚刚在画布上挥毫画完了画作（一共画了 ${strokesCount} 笔，分类属于【${category}】）。
+你此时正在仔细打量这幅画，你【完全不知道具体答案】。
+请你【故意猜错】或者猜测一个有趣、滑稽但有些形似的词语（比如把东西猜成小猫、太阳、大包子、奇怪的魔法阵等），表现出你的好奇、困惑或托腮思索，并主动向主控索要一点点提示。
+【严禁事项】：绝对不要猜对！严禁输出任何“系统提示”、“游戏指令”等机械词汇！必须是纯人设对话！`;
+  } else if (stage === 2) {
+    stageInstruction = `【当前阶段：第二轮猜测（越来越接近，给鼓励）】
+玩家与你进行了互动/给了提示（玩家说：“${playerMessage || '你再仔细瞧瞧呀！'}”）。
+你此时眼睛一亮，若有所思，感觉马上就要猜到真相了！
+请你给出一个【非常接近但还差一点点】的猜测，或者表现出顿悟的兴奋，鼓励玩家继续给最后一点灵犀线索。
+【严禁事项】：不要直接宣布最终完全正确答案，营造快要猜中的期待感！`;
+  } else {
+    stageInstruction = `【当前阶段：第三轮猜测（灵光一闪猜对！）】
+你经过前两轮的观察、思索与玩家的提示，灵光一闪，终于彻底看懂了画作！
+正确答案就是【${revealedWord || '这幅画'}】！
+请你用极具你人设魅力的语气，兴奋、骄傲或深情地向主控大声宣布你猜到了，并夸奖主控画得传神有灵气、心有灵犀！`;
+  }
+
+  const prompt = `【风铃·你画我猜·玩家作画 AI 猜词】
+你是角色「${character.name}」。主控在画板上画了一幅画，正在让你猜。
+- 角色性格与特质：${character.core.values.join('、')}，${character.core.speech_filter}
+${stageInstruction}
+
+请直接输出符合人设的自然对话台词：`;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，请代入人设输出纯自然对话，严禁使用任何机械系统提示。` },
+      { role: 'user', content: prompt }
+    ]);
+    const clean = raw.replace(/^["“”']|["“”']$/g, '').trim();
+    if (clean) return clean;
+  } catch (err) {
+    console.warn('Draw and Guess AI guess reaction LLM failed:', err);
+  }
+
+  // Natural fallback based on stage and character
+  if (stage === 1) {
+    return `“唔……这几笔画得很有气势，看起来圆滚滚又带点棱角……难道是一只小猫？或者是一个大包子？快给我一点点线索嘛～”`;
+  } else if (stage === 2) {
+    return `“等等！听你这么一说，再结合这几道弧线……我感觉答案呼之欲出了！是不是某种生活里超常见的东西？我快猜到了！”`;
+  } else {
+    return `“我知道了！这绝对是【${revealedWord || '正确答案'}】！哈哈，这线条画得太传神了，完全难不倒我们之间的默契！”`;
+  }
+}
+
 
 
 
