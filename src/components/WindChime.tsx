@@ -732,14 +732,14 @@ export default function WindChime({
 
             {/* Smartphone Screen Body */}
             <div
-              className={`flex-1 overflow-y-auto ${
-                activeApp === 'game_lobby' ? 'px-2.5 sm:px-3.5 py-2' : 'px-4 py-3'
+              className={`flex-1 ${
+                activeApp === 'game_lobby' ? 'overflow-hidden flex flex-col p-1 sm:p-2' : 'overflow-y-auto px-4 py-3'
               } no-scrollbar`}
             >
               
               {/* ========== HOME SCREEN (3-COLUMNS APP GRID) ========== */}
               {!activeApp ? (
-                <div className="space-y-3.5 pt-1 animate-in fade-in-0 duration-200 select-none">
+                <div className="space-y-3.5 pt-1 animate-in fade-in-0 duration-200 select-none overflow-y-auto">
                   {/* Home Greeting & Status Widget */}
                   <div className="p-3 rounded-2xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] border border-white/10 shadow-md space-y-2">
                     <div className="flex items-center justify-between">
@@ -934,7 +934,7 @@ export default function WindChime({
                 </div>
               ) : (
                 /* ========== IN-APP DETAIL VIEW ========== */
-                <div className="animate-in fade-in-0 duration-200 pt-1">
+                <div className={`animate-in fade-in-0 duration-200 ${activeApp === 'game_lobby' ? 'flex-1 flex flex-col min-h-0 overflow-hidden' : 'pt-1'}`}>
                   {activeApp === 'game_lobby' && (
                     <GameLobbyApp
                       currentCharacterId={currentCharacterId}

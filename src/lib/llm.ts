@@ -2129,6 +2129,117 @@ function getFallbackStrokesForTopic(topic: string, round: number): LlmStrokeInst
 }
 
 /**
+ * ⓪ 开局选题商量互动 (TOPIC NEGOTIATION & PROPOSAL)
+ * 让 AI 角色主动找玩家商量要出什么类型的题目，充满人设互动感
+ */
+export async function generateDrawAndGuessTopicProposal(
+  config: LlmConfig,
+  character: Character
+): Promise<{ speech: string; suggestedCategories: string[] }> {
+  const currentEmotion = character.emotion?.current || { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 };
+
+  const prompt = `【风铃·你画我猜·开局出题商量】
+你是角色「${character.name}」。你正准备和主控开一局“你画我猜”（由你来画、主控来猜）。
+- 你的核心人设：${character.core.values.join('、')}，语言风格：${character.core.speech_filter}
+- 当前六维情绪：温情${(currentEmotion.warmth * 100).toFixed(0)}%、喜悦${(currentEmotion.joy * 100).toFixed(0)}%
+
+【任务】：
+用完全符合你性格的口吻向主控发起商量，问主控这把想猜什么类型的题目（如成语典故、可爱动物、美味食物、恋爱浪漫、日常物品等），或者问主控想要简单的还是挑战难的。
+- speech：1-2句话，生动自然，绝非冰冷系统提示。
+- suggestedCategories：列出2-3个你推荐的分类选项。
+
+【输出纯JSON】：
+\`\`\`json
+{
+  "speech": "今天想猜点什么？成语典故、可爱动物、还是美味甜点？挑个你拿手的，或者让我随心落笔？",
+  "suggestedCategories": ["成语典故", "可爱动物", "美味食物", "恋爱主题"]
+}
+\`\`\``;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，输出纯JSON。` },
+      { role: 'user', content: prompt },
+    ]);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      return {
+        speech: String(parsed.speech || `今天想猜什么类型？挑选一个，或者由我自由出题？`),
+        suggestedCategories: Array.isArray(parsed.suggestedCategories) && parsed.suggestedCategories.length > 0
+          ? parsed.suggestedCategories
+          : ['可爱动物', '成语典故', '美味食物', '日常物品'],
+      };
+    }
+  } catch (err) {
+    console.warn('generateDrawAndGuessTopicProposal failed:', err);
+  }
+
+  return {
+    speech: `“今天想来点什么难度的？挑一个你感兴趣的题目分类，我来为你执笔。”`,
+    suggestedCategories: ['可爱动物', '成语典故', '美味食物', '日常物品'],
+  };
+}
+
+/**
+ * ⓪.2 玩家回复商量后，角色拍板定下秘密题目与开笔台词
+ */
+export async function generateDrawAndGuessTopicAgreement(
+  config: LlmConfig,
+  character: Character,
+  playerMessage: string,
+  selectedCategoryName: string,
+  candidateWords: string[]
+): Promise<{ speech: string; chosenWord: string; chosenCategory: string }> {
+  const prompt = `【风铃·你画我猜·敲定题目与准备落笔】
+你是角色「${character.name}」。
+- 你的核心性格：${character.core.values.join('、')}，语言风格：${character.core.speech_filter}
+- 主控选择/对你说了：“${playerMessage || selectedCategoryName}”。
+- 候选题目池：${candidateWords.join('、')}
+
+【任务】：
+1. 从候选题目池中秘密挑选一个最符合主控心意/最具表现力的题目【chosenWord】（绝不能在speech里直接透露此词！）。
+2. speech：回应主控1句话，表示胸有成竹/欣然应允并准备落笔，暗示所选大类别，极具人设魅力。
+
+【输出纯JSON】：
+\`\`\`json
+{
+  "chosenWord": "小鱼",
+  "chosenCategory": "${selectedCategoryName}",
+  "speech": "好，既然你想猜这个，看好了，我的第一笔马上落下。"
+}
+\`\`\``;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，输出纯JSON。` },
+      { role: 'user', content: prompt },
+    ]);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      const word = parsed.chosenWord && candidateWords.includes(parsed.chosenWord)
+        ? parsed.chosenWord
+        : candidateWords[Math.floor(Math.random() * candidateWords.length)] || '爱心';
+      return {
+        speech: String(parsed.speech || `好，那就依你。看好了，我这就下笔。`),
+        chosenWord: word,
+        chosenCategory: String(parsed.chosenCategory || selectedCategoryName),
+      };
+    }
+  } catch (err) {
+    console.warn('generateDrawAndGuessTopicAgreement failed:', err);
+  }
+
+  const fallbackWord = candidateWords[Math.floor(Math.random() * candidateWords.length)] || '爱心';
+  return {
+    speech: `“好，既然选了${selectedCategoryName}，看好了，我这就开始落笔。”`,
+    chosenWord: fallbackWord,
+    chosenCategory: selectedCategoryName,
+  };
+}
+
+/**
  * ① 开场与第 1 轮绘画生成 (OPENING & DRAWING_ROUND_1)
  */
 export async function generateDrawAndGuessOpeningAndStrokes(

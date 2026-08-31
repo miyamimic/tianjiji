@@ -6,9 +6,10 @@
  * live LLM stroke generation and persona synthesis.
  */
 import type { CharacterBrushParams } from '../lib/perfectFreehandHelper';
+import { loadSavedCharacters, loadCharAvatar } from '../lib/customStore';
 
 // -------------------------------------------------------------
-// Category and Word Bank Definition (x_)
+// Category and Word Bank Definition
 // -------------------------------------------------------------
 export interface WordCategory {
   id: string;
@@ -179,6 +180,78 @@ export const AI_ARTISTS: AiArtistCharacter[] = [
   },
 ];
 
+/**
+ * Get all available artists dynamically, seamlessly merging user-created custom characters
+ * and built-in preset characters so none are lost!
+ */
+export function getAllPlayableArtists(): AiArtistCharacter[] {
+  const result: AiArtistCharacter[] = [];
+  const presetMap = new Map<string, AiArtistCharacter>();
+  AI_ARTISTS.forEach((a) => {
+    presetMap.set(a.id, a);
+    presetMap.set(a.name, a);
+  });
+
+  try {
+    const saved = loadSavedCharacters();
+    if (Array.isArray(saved) && saved.length > 0) {
+      saved.forEach((char) => {
+        const customAvatar = loadCharAvatar(char.character_id);
+        const preset = presetMap.get(char.character_id) || presetMap.get(char.name);
+
+        if (preset) {
+          result.push({
+            ...preset,
+            id: char.character_id,
+            name: char.name,
+            avatar: customAvatar || preset.avatar || '🎨',
+            title: preset.title || `${char.name} · 专属画伴`,
+            tag: preset.tag || (char.core.values?.[0] ? `${char.core.values[0]}画风` : '专属风格'),
+            personality: preset.personality || char.core.values.join('、'),
+            paintingPersona:
+              preset.paintingPersona ||
+              `符合${char.name}性格（${char.core.values.join('、')}，${char.core.speech_filter}）的独特绘画风格。`,
+          });
+        } else {
+          // User-created Custom Character
+          const valuesStr = char.core?.values?.join('、') || '专属独立个性';
+          const filter = char.core?.speech_filter || 'casual';
+          const avatar = customAvatar || '🎨';
+
+          let brush = { thinning: 0.5, smoothing: 0.7, jitter: 0.1, taperStart: 10, taperEnd: 10, size: 10 };
+          if (filter === 'rough' || char.core?.instinct_base === 'attack') {
+            brush = { thinning: 0.8, smoothing: 0.45, jitter: 0.25, taperStart: 6, taperEnd: 6, size: 11 };
+          } else if (filter === 'gentle' || filter === 'formal') {
+            brush = { thinning: 0.6, smoothing: 0.85, jitter: 0.05, taperStart: 16, taperEnd: 14, size: 9 };
+          }
+
+          result.push({
+            id: char.character_id,
+            name: char.name,
+            avatar,
+            title: `${char.name} · 专属自创`,
+            tag: char.core?.values?.[0] || '自建角色',
+            personality: valuesStr,
+            paintingPersona: `自建角色「${char.name}」风格：${valuesStr}，说话语调：${filter}。${(char as any).custom_system_prompt || ''}`,
+            brushParams: brush,
+          });
+        }
+      });
+    }
+  } catch (err) {
+    console.warn('Failed to load dynamic characters:', err);
+  }
+
+  // Include guest presets (糊涂酱, 桃桃) if not in saved list
+  AI_ARTISTS.forEach((preset) => {
+    if (!result.some((r) => r.id === preset.id || r.name === preset.name)) {
+      result.push(preset);
+    }
+  });
+
+  return result.length > 0 ? result : AI_ARTISTS;
+}
+
 // -------------------------------------------------------------
 // Helper functions for random selection
 // -------------------------------------------------------------
@@ -192,8 +265,8 @@ export function getRandomAiSecretWord(
 ): { word: string; category: string; hints: string[] } {
   let catList = WORD_CATEGORIES;
   if (categoryId && categoryId !== 'all') {
-    catList = WORD_CATEGORIES.filter((c) => c.id === categoryId);
-    if (catList.length === 0) catList = WORD_CATEGORIES;
+    const filtered = WORD_CATEGORIES.filter((c) => c.id === categoryId);
+    if (filtered.length > 0) catList = filtered;
   }
 
   const allCandidates: { word: string; category: string; hints: string[] }[] = [];
@@ -228,8 +301,8 @@ export function getRandomAiSecretWord(
 export function getRandomWord(categoryId?: string): { word: string; category: string; hints: string[] } {
   let catList = WORD_CATEGORIES;
   if (categoryId && categoryId !== 'all') {
-    catList = WORD_CATEGORIES.filter((c) => c.id === categoryId);
-    if (catList.length === 0) catList = WORD_CATEGORIES;
+    const filtered = WORD_CATEGORIES.filter((c) => c.id === categoryId);
+    if (filtered.length > 0) catList = filtered;
   }
   const randomCat = catList[Math.floor(Math.random() * catList.length)];
   const randomItem = randomCat.words[Math.floor(Math.random() * randomCat.words.length)];
@@ -241,10 +314,11 @@ export function getRandomWord(categoryId?: string): { word: string; category: st
 }
 
 /**
- * Find AI artist profile by character id or fallback to Lu Chen
+ * Find AI artist profile by character id or fallback to first available
  */
 export function getAiArtistById(charId?: string): AiArtistCharacter {
-  if (!charId) return AI_ARTISTS[0];
-  const found = AI_ARTISTS.find((a) => a.id === charId);
-  return found || AI_ARTISTS[0];
+  const all = getAllPlayableArtists();
+  if (!charId) return all[0] || AI_ARTISTS[0];
+  const found = all.find((a) => a.id === charId || a.name === charId);
+  return found || all[0] || AI_ARTISTS[0];
 }

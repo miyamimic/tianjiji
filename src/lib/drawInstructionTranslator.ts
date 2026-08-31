@@ -185,8 +185,24 @@ export function translateInstructionToPixelPoints(
 }
 
 // -------------------------------------------------------------
-// Semantic descriptor of drawn strokes for AI Guessing & Hinting
+// Semantic & Geometric Vision Analysis for AI Guessing & Hinting
 // -------------------------------------------------------------
+function getColorNameZh(hex?: string): string {
+  if (!hex) return '墨黑';
+  const h = hex.toLowerCase();
+  if (h.includes('f43f5e') || h.includes('ef4444') || h.includes('dc2626') || h.includes('red') || h.includes('e11d48')) return '鲜红色';
+  if (h.includes('f97316') || h.includes('orange') || h.includes('ea580c')) return '活力橙色';
+  if (h.includes('eab308') || h.includes('facc15') || h.includes('yellow') || h.includes('ca8a04')) return '明黄色';
+  if (h.includes('22c55e') || h.includes('16a34a') || h.includes('green') || h.includes('10b981')) return '翠绿色';
+  if (h.includes('06b6d4') || h.includes('cyan') || h.includes('0ea5e9')) return '青天蓝';
+  if (h.includes('3b82f6') || h.includes('2563eb') || h.includes('blue')) return '蔚蓝色';
+  if (h.includes('8b5cf6') || h.includes('a855f7') || h.includes('purple')) return '梦幻紫色';
+  if (h.includes('ec4899') || h.includes('f472b6') || h.includes('pink')) return '粉樱色';
+  if (h.includes('78350f') || h.includes('92400e') || h.includes('854d0e') || h.includes('amber')) return '棕褐色';
+  if (h.includes('ffffff') || h.includes('f8fafc')) return '纯白色';
+  return '墨黑炭灰色';
+}
+
 export function generateStrokeSemanticSummary(
   strokes: Array<{ points: [number, number][]; color?: string; size?: number }>
 ): string {
@@ -194,34 +210,126 @@ export function generateStrokeSemanticSummary(
     return '画板目前空无一物，尚无笔迹。';
   }
 
-  const total = strokes.length;
-  let minX = 9999, maxX = -9999, minY = 9999, maxY = -9999;
+  const totalStrokes = strokes.length;
+  let minX = 99999, maxX = -99999, minY = 99999, maxY = -99999;
   let totalLength = 0;
+  const colorsUsed = new Set<string>();
+
+  interface StrokeMeta {
+    points: [number, number][];
+    color: string;
+    isLoop: boolean;
+    aspect: number;
+    cx: number;
+    cy: number;
+    w: number;
+    h: number;
+    len: number;
+  }
+
+  const strokeMetas: StrokeMeta[] = [];
 
   strokes.forEach((s) => {
-    s.points.forEach(([x, y]) => {
+    if (!s.points || s.points.length < 2) return;
+    const colorZh = getColorNameZh(s.color);
+    colorsUsed.add(colorZh);
+
+    let sMinX = 99999, sMaxX = -99999, sMinY = 99999, sMaxY = -99999;
+    let sLen = 0;
+
+    for (let i = 0; i < s.points.length; i++) {
+      const [x, y] = s.points[i];
       if (x < minX) minX = x;
       if (x > maxX) maxX = x;
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
-    });
-    for (let i = 1; i < s.points.length; i++) {
-      totalLength += Math.hypot(s.points[i][0] - s.points[i - 1][0], s.points[i][1] - s.points[i - 1][1]);
+
+      if (x < sMinX) sMinX = x;
+      if (x > sMaxX) sMaxX = x;
+      if (y < sMinY) sMinY = y;
+      if (y > sMaxY) sMaxY = y;
+
+      if (i > 0) {
+        const seg = Math.hypot(s.points[i][0] - s.points[i - 1][0], s.points[i][1] - s.points[i - 1][1]);
+        sLen += seg;
+        totalLength += seg;
+      }
     }
+
+    const sw = Math.max(1, sMaxX - sMinX);
+    const sh = Math.max(1, sMaxY - sMinY);
+    const diag = Math.hypot(sw, sh);
+    const startPt = s.points[0];
+    const endPt = s.points[s.points.length - 1];
+    const endDist = Math.hypot(endPt[0] - startPt[0], endPt[1] - startPt[1]);
+    const isLoop = s.points.length >= 6 && endDist < diag * 0.28;
+
+    strokeMetas.push({
+      points: s.points,
+      color: colorZh,
+      isLoop,
+      aspect: sw / sh,
+      cx: (sMinX + sMaxX) / 2,
+      cy: (sMinY + sMaxY) / 2,
+      w: sw,
+      h: sh,
+      len: sLen,
+    });
   });
 
-  const width = Math.max(1, maxX - minX);
-  const height = Math.max(1, maxY - minY);
-  const centerX = (minX + maxX) / 2;
-  const centerY = (minY + maxY) / 2;
+  const totalWidth = Math.max(1, maxX - minX);
+  const totalHeight = Math.max(1, maxY - minY);
+  const globalAspect = totalWidth / totalHeight;
 
-  let region = '中心区域';
-  if (centerX < 180) region = '画面左侧';
-  else if (centerX > 340) region = '画面右侧';
-  else if (centerY < 140) region = '画面上方';
-  else if (centerY > 240) region = '画面下方';
+  // Spatial features decomposition
+  const topCutoff = minY + totalHeight * 0.35;
+  const bottomCutoff = minY + totalHeight * 0.65;
 
-  const shapeType = width / height > 1.6 ? '横向延展结构' : height / width > 1.6 ? '纵向立柱结构' : '紧凑圆润/方形轮廓';
+  const topStrokes = strokeMetas.filter((s) => s.cy < topCutoff);
+  const midStrokes = strokeMetas.filter((s) => s.cy >= topCutoff && s.cy <= bottomCutoff);
+  const bottomStrokes = strokeMetas.filter((s) => s.cy > bottomCutoff);
+  const closedLoops = strokeMetas.filter((s) => s.isLoop);
 
-  return `画布共绘制了 ${total} 笔，主要分布在${region}，呈现${shapeType}，线条起伏丰富，笔势连贯。`;
+  const features: string[] = [];
+
+  // Overall shape
+  if (globalAspect > 1.8) {
+    features.push('整体呈横向扁平宽长延展布局');
+  } else if (globalAspect < 0.55) {
+    features.push('整体呈纵向修长高挑站立布局');
+  } else {
+    features.push('整体比例匀称，呈居中饱满轮廓');
+  }
+
+  // Loops & Bodies
+  if (closedLoops.length > 0) {
+    features.push(`包含 ${closedLoops.length} 个闭合环形/圈形主体轮廓`);
+  }
+
+  // Top region
+  if (topStrokes.length > 0) {
+    const hasSmallTop = topStrokes.some((s) => s.w < totalWidth * 0.4 && s.h < totalHeight * 0.4);
+    if (hasSmallTop) {
+      features.push('顶部有突出的精致小构件（类似耳朵/角/花瓣/叶柄/帽子）');
+    }
+  }
+
+  // Bottom region
+  if (bottomStrokes.length > 0) {
+    const hasHorizontalBase = bottomStrokes.some((s) => s.aspect > 2.0);
+    const hasVerticalLegs = bottomStrokes.some((s) => s.aspect < 0.5);
+    if (hasHorizontalBase) {
+      features.push('底部有横向平稳托底/地平线/底座');
+    } else if (hasVerticalLegs) {
+      features.push('底部有支撑立柱/支腿/轮轴特征');
+    }
+  }
+
+  const colorsList = Array.from(colorsUsed).join('、') || '黑色';
+
+  return `【画作视觉几何解析报告】
+- 笔迹规模：共 ${totalStrokes} 笔，总笔长约 ${Math.round(totalLength)} 像素。
+- 用色构成：使用了 ${colorsList}。
+- 构图特征：${features.join('；')}。
+- 笔触密度：${totalStrokes <= 3 ? '简炼素描骨架' : totalStrokes <= 7 ? '结构分明且细节初具' : '笔法丰富细腻、层次饱满'}。`;
 }
