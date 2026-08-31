@@ -667,7 +667,7 @@ export default function WindChime({
           <div
             className={`relative w-full transition-all duration-300 ${
               activeApp === 'game_lobby'
-                ? 'max-w-full sm:max-w-[480px] h-full sm:h-[94vh] sm:max-h-[860px] sm:rounded-[36px] rounded-none bg-gradient-to-b from-[#1c1917] via-[#141210] to-[#0c0a09] border-0 sm:border-[2px] sm:border-amber-500/30'
+                ? 'max-w-full sm:max-w-[640px] md:max-w-[800px] h-full sm:h-[94vh] sm:max-h-[880px] sm:rounded-[36px] rounded-none bg-gradient-to-b from-[#1c1917] via-[#141210] to-[#0c0a09] border-0 sm:border-[2px] sm:border-amber-500/30'
                 : 'max-w-[390px] h-[660px] max-h-[92vh] rounded-[42px] bg-gradient-to-b from-[hsl(222_30%_12%)] via-[hsl(222_35%_8%)] to-[hsl(222_40%_5%)] border-[3px] border-white/20'
             } shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9),0_0_40px_rgba(245,158,11,0.15)] flex flex-col overflow-hidden ring-1 ring-black/80 z-10 animate-in zoom-in-95 duration-200`}
           >
@@ -732,14 +732,14 @@ export default function WindChime({
 
             {/* Smartphone Screen Body */}
             <div
-              className={`flex-1 ${
-                activeApp === 'game_lobby' ? 'overflow-hidden flex flex-col p-1 sm:p-2' : 'overflow-y-auto px-4 py-3'
-              } no-scrollbar`}
+              className={`flex-1 overflow-y-auto ${
+                activeApp === 'game_lobby' ? 'p-1 sm:p-2' : 'px-4 py-3'
+              } no-scrollbar flex flex-col min-h-0`}
             >
               
               {/* ========== HOME SCREEN (3-COLUMNS APP GRID) ========== */}
               {!activeApp ? (
-                <div className="space-y-3.5 pt-1 animate-in fade-in-0 duration-200 select-none overflow-y-auto">
+                <div className="space-y-3.5 pt-1 animate-in fade-in-0 duration-200 select-none">
                   {/* Home Greeting & Status Widget */}
                   <div className="p-3 rounded-2xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] border border-white/10 shadow-md space-y-2">
                     <div className="flex items-center justify-between">

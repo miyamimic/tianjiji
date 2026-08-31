@@ -163,7 +163,7 @@ export default function GameLobbyApp({
       )}
 
       {activeSub === 'draw_guess' && (
-        <div className="w-full h-full">
+        <div className="w-full flex-1 flex flex-col min-h-0">
           <DrawAndGuessApp
             currentCharacterId={selectedOpponentId}
             characterName={activeCharName}

@@ -218,16 +218,7 @@ export default function DrawAndGuessApp({
   const isPlayingRef = useRef<boolean>(false);
 
   // Chat conversation
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => [
-    {
-      id: 'init_1',
-      sender: 'ai',
-      name: currentArtist.name,
-      avatar: currentArtist.avatar,
-      text: `“今天想来点什么难度的？挑一个你感兴趣的分类，我来为你执笔。”`,
-      time: '刚刚',
-    },
-  ]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
 
   // Auto-scroll chat to bottom
@@ -1209,10 +1200,10 @@ export default function DrawAndGuessApp({
       </div>
 
       {/* ================= MAIN TWO-COLUMN BODY ================= */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-hidden p-2 sm:p-2.5 gap-2.5">
+      <div className="flex-1 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden p-2 sm:p-2.5 gap-2.5 min-h-0">
         
         {/* ================= LEFT MAIN CANVAS & CONTROLS ================= */}
-        <div className="flex-1 flex flex-col bg-stone-900/80 border border-white/10 rounded-2xl p-2.5 shadow-xl backdrop-blur-md overflow-hidden gap-2">
+        <div className="flex-1 flex flex-col bg-stone-900/80 border border-white/10 rounded-2xl p-2.5 shadow-xl backdrop-blur-md gap-2 shrink-0 md:shrink md:overflow-y-auto">
           
           {/* Top Control Bar: Mode Switcher & Opponent Selector */}
           <div className="flex flex-wrap items-center justify-between gap-1.5 pb-2 border-b border-white/10 shrink-0">
@@ -1274,7 +1265,7 @@ export default function DrawAndGuessApp({
           {/* Secret / Topic Status Strip */}
           {round === 'round_ai_draw' ? (
             <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-pink-950/30 rounded-xl border border-pink-500/30 shrink-0 flex-wrap">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[10.5px] text-pink-300 font-bold flex items-center gap-1">
                   <QuestionIcon className="size-3.5" />
                   <span>AI秘密题目:</span>
@@ -1289,7 +1280,7 @@ export default function DrawAndGuessApp({
                     <span>{aiSecret.word}</span>
                   </span>
                 ) : (
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5 flex-wrap">
                     <div className="flex items-center gap-1">
                       {Array.from({ length: aiSecret.word.length }).map((_, i) => (
                         <span
@@ -1329,7 +1320,7 @@ export default function DrawAndGuessApp({
             </div>
           ) : (
             <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-amber-950/30 rounded-xl border border-amber-500/30 shrink-0 flex-wrap">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-[10.5px] text-amber-300 font-bold flex items-center gap-1">
                   <Palette className="size-3.5" />
                   <span>你要画的题目（仅自己可见）:</span>
@@ -1371,8 +1362,8 @@ export default function DrawAndGuessApp({
           )}
 
           {/* ================= CANVAS DRAWING BOARD ================= */}
-          {/* Note: touch-action: none & select-none guarantee zero scroll interference */}
-          <div className="relative w-full flex-1 min-h-[260px] max-h-[380px] bg-white rounded-2xl shadow-2xl overflow-hidden border-2 border-stone-800 cursor-crosshair shrink-0 touch-none select-none">
+          {/* Note: touch-action: none & select-none guarantee zero scroll interference on the canvas itself */}
+          <div className="relative w-full h-[220px] sm:h-[260px] md:h-[300px] bg-white rounded-2xl shadow-xl overflow-hidden border-2 border-stone-800 cursor-crosshair shrink-0 touch-none select-none">
             <canvas
               ref={canvasRef}
               width={CANVAS_WIDTH}
@@ -1445,13 +1436,13 @@ export default function DrawAndGuessApp({
 
           {/* ================= FIXED INPUT & TOOLBAR DIRECTLY UNDER CANVAS ================= */}
           {/* This area is anchored directly under the canvas and NEVER scrolls away */}
-          <div className="shrink-0 pt-1">
+          <div className="shrink-0 pt-1 space-y-2">
             {round === 'round_ai_draw' ? (
               phase === 'topic_negotiation' ? (
                 /* Topic Negotiation Bar */
                 <div className="space-y-2 bg-stone-950/80 p-2.5 rounded-xl border border-pink-500/20">
-                  <div className="flex items-center gap-1.5 text-pink-300 font-bold text-[11px]">
-                    <Sparkles className="size-3.5" />
+                  <div className="flex items-center gap-1.5 text-pink-300 font-bold text-[11px] flex-wrap">
+                    <Sparkles className="size-3.5 shrink-0" />
                     <span>选择想猜的题目分类或告诉 {currentArtist.name}：</span>
                   </div>
                   {/* Category Chips */}
@@ -1496,7 +1487,7 @@ export default function DrawAndGuessApp({
                     <button
                       type="submit"
                       disabled={!negotiationInput.trim() || isNegotiating}
-                      className="px-4 py-2 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 disabled:opacity-40 text-white font-bold rounded-xl shadow-md border border-pink-300 text-xs flex items-center gap-1 transition active:scale-95 cursor-pointer"
+                      className="px-4 py-2 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 disabled:opacity-40 text-white font-bold rounded-xl shadow-md border border-pink-300 text-xs flex items-center gap-1 transition active:scale-95 cursor-pointer shrink-0"
                     >
                       <Send className="size-3.5" />
                       <span>商定开画</span>
@@ -1517,7 +1508,7 @@ export default function DrawAndGuessApp({
                   <button
                     type="submit"
                     disabled={!guessInput.trim()}
-                    className="px-5 py-2 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 disabled:opacity-40 text-white font-bold rounded-xl shadow-md border border-pink-300 text-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+                    className="px-5 py-2 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 disabled:opacity-40 text-white font-bold rounded-xl shadow-md border border-pink-300 text-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer shrink-0"
                   >
                     <Send className="size-3.5" />
                     <span>提交猜词</span>
@@ -1577,7 +1568,7 @@ export default function DrawAndGuessApp({
                   </div>
 
                   {/* Brush Tools */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <div className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded-lg border border-white/10">
                       <span className="text-[10px] text-stone-400">粗细:</span>
                       <input
@@ -1687,7 +1678,7 @@ export default function DrawAndGuessApp({
                     <button
                       type="submit"
                       disabled={!playerInteractiveInput.trim() || aiIsThinking}
-                      className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-stone-950 font-bold rounded-xl shadow-md text-xs flex items-center gap-1 transition active:scale-95 cursor-pointer"
+                      className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-stone-950 font-bold rounded-xl shadow-md text-xs flex items-center gap-1 transition active:scale-95 cursor-pointer shrink-0"
                     >
                       <Send className="size-3.5" />
                       <span>发送</span>
@@ -1721,8 +1712,8 @@ export default function DrawAndGuessApp({
         </div>
 
         {/* ================= RIGHT CONVERSATION & GUESSING PANEL ================= */}
-        {/* Dedicated scrollable chat stream */}
-        <div className="w-full md:w-80 lg:w-96 flex flex-col bg-stone-900/80 border border-white/10 rounded-2xl p-2.5 shadow-xl backdrop-blur-md overflow-hidden shrink-0">
+        {/* Dedicated scrollable chat stream with independent scrolling */}
+        <div className="w-full md:w-80 lg:w-96 flex flex-col bg-stone-900/80 border border-white/10 rounded-2xl p-2.5 shadow-xl backdrop-blur-md shrink-0 h-[220px] sm:h-[260px] md:h-auto md:flex-1 min-h-[160px] overflow-hidden">
           
           {/* Header of Chat Panel */}
           <div className="flex items-center justify-between pb-2 border-b border-white/10 shrink-0">
@@ -1739,7 +1730,7 @@ export default function DrawAndGuessApp({
           {/* Chat Bubble Stream */}
           <div
             ref={chatScrollRef}
-            className="flex-1 overflow-y-auto no-scrollbar py-2.5 space-y-2.5 text-[11px]"
+            className="flex-1 overflow-y-auto no-scrollbar py-2.5 space-y-2.5 text-[11px] min-h-0"
           >
             {chatMessages.map((msg) => {
               const isMe = msg.sender === 'player';
