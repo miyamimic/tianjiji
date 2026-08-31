@@ -2056,148 +2056,408 @@ export async function generateGhostCardEnding(
 }
 
 // ============================================================================
-// 风铃 · 你画我猜 (Draw & Guess) 专属 LLM 沉浸拟真情感与多阶段猜词系统
+// 风铃 · 你画我猜 (Draw & Guess) v4: LLM 现画 + 渐进补笔 + 极简对话 + 情绪联动
 // ============================================================================
 
+import type { LlmDrawingRoundOutput, LlmStrokeInstruction } from './drawInstructionTranslator';
+
 /**
- * 1. AI 出题模式：AI 开场白（绝不泄露秘密题目）
+ * Fallback procedural strokes generator if LLM call fails
  */
-export async function generateDrawAndGuessAiOpening(
+function getFallbackStrokesForTopic(topic: string, round: number): LlmStrokeInstruction[] {
+  if (round === 1) {
+    return [
+      {
+        type: 'curve',
+        points: [[35, 45], [45, 30], [55, 30], [65, 45], [55, 65], [45, 65], [35, 45]],
+        color: '#475569',
+        thickness: 1.0,
+      },
+      {
+        type: 'curve',
+        points: [[40, 32], [35, 20], [48, 28]],
+        color: '#475569',
+        thickness: 0.9,
+      },
+      {
+        type: 'curve',
+        points: [[60, 32], [65, 20], [52, 28]],
+        color: '#475569',
+        thickness: 0.9,
+      },
+    ];
+  } else if (round === 2) {
+    return [
+      {
+        type: 'circle',
+        center: [45, 44],
+        radius: 2.5,
+        color: '#0F172A',
+        filled: true,
+      },
+      {
+        type: 'circle',
+        center: [55, 44],
+        radius: 2.5,
+        color: '#0F172A',
+        filled: true,
+      },
+      {
+        type: 'curve',
+        points: [[48, 50], [50, 52], [52, 50]],
+        color: '#F43F5E',
+      },
+    ];
+  } else {
+    return [
+      {
+        type: 'line',
+        from: [38, 50],
+        to: [25, 48],
+        color: '#94A3B8',
+        thickness: 0.8,
+      },
+      {
+        type: 'line',
+        from: [62, 50],
+        to: [75, 48],
+        color: '#94A3B8',
+        thickness: 0.8,
+      },
+    ];
+  }
+}
+
+/**
+ * ① 开场与第 1 轮绘画生成 (OPENING & DRAWING_ROUND_1)
+ */
+export async function generateDrawAndGuessOpeningAndStrokes(
   config: LlmConfig,
   character: Character,
+  topic: string,
   category: string,
-  wordLength: number
-): Promise<string> {
-  const prompt = `【风铃·你画我猜·AI出题作画】
-你是角色「${character.name}」。你和主控正在玩你画我猜游戏。
-现在轮到你来画，主控来猜！
-你已经在心里挑好了一道秘密题目（分类：${category}，共 ${wordLength} 个字）。
-- 角色性格与口癖：${character.core.values.join('、')}，${character.core.speech_filter}
+  paintingPersona: string
+): Promise<LlmDrawingRoundOutput> {
+  const currentEmotion = character.emotion?.current || { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 };
+
+  const prompt = `【风铃·你画我猜·第1轮绘画与开场】
+你是角色「${character.name}」。你正在和主控玩你画我猜。
+- 你的核心人设：${character.core.values.join('、')}，口吻风格：${character.core.speech_filter}
+- 你的绘画人格：${paintingPersona}
+- 当前六维情绪快照：温情${(currentEmotion.warmth * 100).toFixed(0)}%、喜悦${(currentEmotion.joy * 100).toFixed(0)}%、愤怒${(currentEmotion.anger * 100).toFixed(0)}%、悲伤${(currentEmotion.sadness * 100).toFixed(0)}%
+
+【本次你要画的秘密题目】：${topic}（分类：${category}）
+
+【画布参考系（0-100相对坐标系统，严禁超出5-95边距）】：
+- 中心区域：35-65, 35-65
+- 上方区域：y < 35，下方区域：y > 65
+- 左侧区域：x < 35，右侧区域：x > 65
+
+【本轮（第 1 轮 / 共 3 轮）任务】：
+1. 绘制 2-4 笔基础轮廓与核心骨架（让玩家有约30%概率看懂大体轮廓）。
+2. 开场台词 speech：1-2句话，必须暗示题目类别，符合人设，严禁直接泄露答案。
+3. drawing_quips：1-2句极短的画画随口小词（5-10字以内，如"笔锋至此。"、"手抖了一下……"等）。
+
+【输出格式（必须为纯合法JSON，不要包含markdown代码块外的任何文字）】：
+\`\`\`json
+{
+  "strokes": [
+    {
+      "type": "curve",
+      "points": [[50,30],[55,28],[60,30],[62,35],[60,40],[55,42],[50,40]],
+      "color": "#475569",
+      "thickness": 1.0
+    },
+    {
+      "type": "circle",
+      "center": [35, 45],
+      "radius": 3,
+      "color": "#0F172A",
+      "filled": true
+    }
+  ],
+  "speech": "是一道有灵性的生灵。看好了，我只画一遍。",
+  "drawing_quips": ["笔锋至此。"]
+}
+\`\`\``;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，严格遵守你画我猜绘画指令协议，输出纯净JSON。` },
+      { role: 'user', content: prompt },
+    ]);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed.strokes) && parsed.strokes.length > 0) {
+        return {
+          strokes: parsed.strokes,
+          speech: String(parsed.speech || '看着我的画笔。'),
+          drawing_quips: Array.isArray(parsed.drawing_quips) ? parsed.drawing_quips : ['运笔需要耐心。'],
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('generateDrawAndGuessOpeningAndStrokes failed:', err);
+  }
+
+  return {
+    strokes: getFallbackStrokesForTopic(topic, 1),
+    speech: '看着我的画笔落下的轨迹。',
+    drawing_quips: ['笔锋至此。'],
+  };
+}
+
+/**
+ * ② 渐进补笔 (DRAWING_ROUND_2 / 3: 玩家猜错后角色补笔与短反应)
+ */
+export async function generateDrawAndGuessProgressiveStrokes(
+  config: LlmConfig,
+  character: Character,
+  topic: string,
+  category: string,
+  paintingPersona: string,
+  roundNumber: number,
+  drawnSummary: string,
+  guessHistory: string[]
+): Promise<LlmDrawingRoundOutput> {
+  const currentEmotion = character.emotion?.current || { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 };
+
+  const prompt = `【风铃·你画我猜·第${roundNumber}轮渐进补笔】
+你是角色「${character.name}」。你正在为秘密题目【${topic}】（分类：${category}）继续作画。
+- 绘画人格：${paintingPersona}
+- 当前六维情绪：温情${(currentEmotion.warmth * 100).toFixed(0)}%、喜悦${(currentEmotion.joy * 100).toFixed(0)}%、愤怒${(currentEmotion.anger * 100).toFixed(0)}%
+- 【前几轮已画内容语义】：${drawnSummary}
+- 【玩家之前的错误猜测】：${guessHistory.map((g, i) => `第${i + 1}次：“${g}”`).join('，') || '尚未猜中'}
+
+【画布参考系（0-100相对坐标系统）】：
+- 坐标范围必须在 5-95 之间
+
+【本轮（第 ${roundNumber} 轮 / 共 3 轮）补笔要求】：
+- 补充 ${roundNumber === 2 ? '2-3 笔新细节（如眼睛、耳朵、花纹、阴影等）' : '1-2 笔画龙点睛的关键细节与特征'}
+- 严禁重复已画过的基础大轮廓，精准追加新部位！
+- speech：1句极简短的反应台词（如“还没看出来？那我再加几笔……”或微带隐晦小提示）。
+- drawing_quips：1句画画时的微小语气词。
+
+【输出纯JSON格式】：
+\`\`\`json
+{
+  "strokes": [
+    {
+      "type": "circle",
+      "center": [45, 45],
+      "radius": 2.5,
+      "color": "#0F172A",
+      "filled": true
+    }
+  ],
+  "speech": "还没看出来？那我再添上几道细节。",
+  "drawing_quips": ["这里收一笔。"]
+}
+\`\`\``;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，严格遵守你画我猜补笔协议，输出纯净JSON。` },
+      { role: 'user', content: prompt },
+    ]);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      if (Array.isArray(parsed.strokes) && parsed.strokes.length > 0) {
+        return {
+          strokes: parsed.strokes,
+          speech: String(parsed.speech || '再仔细看看画面。'),
+          drawing_quips: Array.isArray(parsed.drawing_quips) ? parsed.drawing_quips : ['这一笔是关键。'],
+        };
+      }
+    }
+  } catch (err) {
+    console.warn('generateDrawAndGuessProgressiveStrokes failed:', err);
+  }
+
+  return {
+    strokes: getFallbackStrokesForTopic(topic, roundNumber),
+    speech: '差了一点，再猜猜？',
+    drawing_quips: ['运笔更细致了。'],
+  };
+}
+
+/**
+ * ③ 猜对结算 (CORRECT_ENDING: 玩家猜对，LLM 输出惊喜得意台词与情绪结算)
+ */
+export async function generateDrawAndGuessCorrectEnding(
+  config: LlmConfig,
+  character: Character,
+  topic: string,
+  roundNumber: number,
+  attemptsCount: number
+): Promise<{ speech: string; gameTotalDelta: Partial<EmotionVector> }> {
+  const currentEmotion = character.emotion?.current || { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 };
+
+  const prompt = `【风铃·你画我猜·猜对结算】
+你是角色「${character.name}」。你画的秘密题目【${topic}】被主控完全猜对了！
+- 历经轮次：第 ${roundNumber} 轮（总共尝试猜了 ${attemptsCount} 次）
+- 你的核心人设：${character.core.values.join('、')}，语言风格：${character.core.speech_filter}
+- 当前情绪状态：温情${(currentEmotion.warmth * 100).toFixed(0)}%、喜悦${(currentEmotion.joy * 100).toFixed(0)}%
 
 【要求】：
-用极具你人设魅力的生动口吻，对主控说一两句话，邀请TA认真观察你的画笔，准备猜词。
-【严禁事项】：绝对不要说出题目的具体名字或具体答案！严禁输出任何系统提示或机械指令！
-直接输出一到两句符合人设的自然对话台词：`;
+1. speech：用符合你人设的生动口吻（惊喜、得意、赞许或心有灵犀）说 1-2 句话。
+2. gameTotalDelta：计算本局心意相通带来的情绪变动（如 joy +0.25, warmth +0.2）。
+
+【输出纯JSON】：
+\`\`\`json
+{
+  "speech": "心有灵犀。完全被你看透了，答案正是【${topic}】。",
+  "gameTotalDelta": { "joy": 0.3, "warmth": 0.25 }
+}
+\`\`\``;
 
   try {
     const raw = await callLlm(config, [
-      { role: 'system', content: `你是「${character.name}」，请代入人设输出纯自然对话，严禁泄露答案，严禁系统机械提示。` },
-      { role: 'user', content: prompt }
+      { role: 'system', content: `你是「${character.name}」，输出纯JSON格式结算。` },
+      { role: 'user', content: prompt },
     ]);
-    const clean = raw.replace(/^["“”']|["“”']$/g, '').trim();
-    if (clean) return clean;
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      return {
+        speech: String(parsed.speech || `心有灵犀。答案正是【${topic}】！`),
+        gameTotalDelta: parsed.gameTotalDelta && typeof parsed.gameTotalDelta === 'object'
+          ? parsed.gameTotalDelta
+          : { joy: 0.25, warmth: 0.2 },
+      };
+    }
   } catch (err) {
-    console.warn('Draw and Guess AI opening LLM failed:', err);
+    console.warn('generateDrawAndGuessCorrectEnding failed:', err);
   }
 
-  return `“别眨眼，看着我的画笔落下的轨迹。这道题很有韵味，猜猜看我画的是什么吧。”`;
+  return {
+    speech: `“心有灵犀。完全正确，答案正是【${topic}】！”`,
+    gameTotalDelta: { joy: 0.25, warmth: 0.2 },
+  };
 }
 
 /**
- * 2. AI 出题模式：玩家猜词反馈（猜对/猜错）
+ * ④ 揭晓答案结算 (REVEAL_ENDING: 3轮都没猜中，角色揭晓答案与情绪结算)
  */
-export async function generateDrawAndGuessPlayerGuessReaction(
+export async function generateDrawAndGuessRevealEnding(
   config: LlmConfig,
   character: Character,
-  secretWord: string,
-  userGuess: string,
-  isCorrect: boolean,
-  attemptCount: number,
-  subtleHint?: string
-): Promise<string> {
-  const prompt = `【风铃·你画我猜·主控猜词反馈】
-你是角色「${character.name}」。你画了一幅画（画的内容是【${secretWord}】）。
-主控刚刚提交了猜词内容：“${userGuess}”。
-判定结果：${isCorrect ? '【完全猜对了！🎉】' : `【猜错了（第 ${attemptCount} 次尝试）】`}
-${!isCorrect && subtleHint ? `- 可以透露的微妙人设提示（可选）：${subtleHint}` : ''}
-- 角色性格与口癖：${character.core.values.join('、')}，${character.core.speech_filter}
+  topic: string
+): Promise<{ speech: string; gameTotalDelta: Partial<EmotionVector> }> {
+  const prompt = `【风铃·你画我猜·揭晓答案】
+你是角色「${character.name}」。你画的秘密题目【${topic}】在 3 轮之后主控未能猜中。
+- 你的核心人设：${character.core.values.join('、')}，语言风格：${character.core.speech_filter}
 
-【任务要求】：
-${isCorrect 
-  ? `用符合你人设的语气极其惊喜/赞许/深情地夸赞主控的敏锐观察力与默契，宣布TA猜对了！` 
-  : `用符合你人设的生动口吻指出主控没猜中，可以带点调侃、宠溺或给出一丝隐蔽小线索，鼓励TA再仔细观察线条。千万不要直接公布正确答案！严禁机械系统播报！`}
-请直接输出纯对话台词：`;
+【要求】：
+1. speech：用符合你人设的口吻（无奈、安慰、宠溺或调侃）揭晓正确答案【${topic}】，并说 1-2 句话。
+2. gameTotalDelta：情绪变动。
+
+【输出纯JSON】：
+\`\`\`json
+{
+  "speech": "这道题其实是【${topic}】。没关系，下一局再接再厉。",
+  "gameTotalDelta": { "warmth": 0.15, "joy": 0.05 }
+}
+\`\`\``;
 
   try {
     const raw = await callLlm(config, [
-      { role: 'system', content: `你是「${character.name}」，请代入人设输出纯对话，严禁机械系统提示。` },
-      { role: 'user', content: prompt }
+      { role: 'system', content: `你是「${character.name}」，输出纯JSON。` },
+      { role: 'user', content: prompt },
     ]);
-    const clean = raw.replace(/^["“”']|["“”']$/g, '').trim();
-    if (clean) return clean;
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      return {
+        speech: String(parsed.speech || `这道题的答案其实是【${topic}】哦。`),
+        gameTotalDelta: parsed.gameTotalDelta && typeof parsed.gameTotalDelta === 'object'
+          ? parsed.gameTotalDelta
+          : { warmth: 0.15, joy: 0.05 },
+      };
+    }
   } catch (err) {
-    console.warn('Draw and Guess player guess reaction LLM failed:', err);
+    console.warn('generateDrawAndGuessRevealEnding failed:', err);
   }
 
-  if (isCorrect) {
-    return `“心有灵犀。完全被你看透了，答案正是【${secretWord}】！画得再含蓄也难不倒你呢。”`;
-  }
-  return `“差了一点分寸哦。别急，再仔细凝视一下画面的轮廓～”`;
+  return {
+    speech: `“这道题的答案其实是【${topic}】哦。没关系，下一局再战！”`,
+    gameTotalDelta: { warmth: 0.15, joy: 0.05 },
+  };
 }
 
 /**
- * 3. 玩家出题作画模式：AI 拟真多阶段猜词（严格保密题目，拟真猜词）
- * - stage 1: 故意猜错一个好玩的词，表现出好奇/困惑，向玩家要提示
- * - stage 2: 越来越接近，恍然大悟，给玩家鼓励
- * - stage 3: 灵光一闪猜对，惊喜夸赞
+ * ⑤ 玩家画 AI 猜：AI 根据画布语义描述进行猜词 (PLAYER DRAW AI GUESS)
  */
 export async function generateDrawAndGuessAiGuessReaction(
   config: LlmConfig,
   character: Character,
   stage: 1 | 2 | 3,
   category: string,
-  strokesCount: number,
+  drawnSummary: string,
   playerMessage?: string,
   revealedWord?: string
-): Promise<string> {
+): Promise<{ speech: string; guessWord?: string; gameTotalDelta?: Partial<EmotionVector> }> {
   let stageInstruction = '';
 
   if (stage === 1) {
-    stageInstruction = `【当前阶段：第一轮猜测（必须猜错并试探）】
-玩家刚刚在画布上挥毫画完了画作（一共画了 ${strokesCount} 笔，分类属于【${category}】）。
-你此时正在仔细打量这幅画，你【完全不知道具体答案】。
-请你【故意猜错】或者猜测一个有趣、滑稽但有些形似的词语（比如把东西猜成小猫、太阳、大包子、奇怪的魔法阵等），表现出你的好奇、困惑或托腮思索，并主动向主控索要一点点提示。
-【严禁事项】：绝对不要猜对！严禁输出任何“系统提示”、“游戏指令”等机械词汇！必须是纯人设对话！`;
+    stageInstruction = `【阶段 1：第一轮猜测（必须猜错并试探）】
+画布语义描述：${drawnSummary}
+你完全不知道具体答案。请结合画布上的线条形态，【故意猜错】一个有趣、形似或好玩的词，并向主控询问线索。严禁直接猜对！`;
   } else if (stage === 2) {
-    stageInstruction = `【当前阶段：第二轮猜测（越来越接近，给鼓励）】
-玩家与你进行了互动/给了提示（玩家说：“${playerMessage || '你再仔细瞧瞧呀！'}”）。
-你此时眼睛一亮，若有所思，感觉马上就要猜到真相了！
-请你给出一个【非常接近但还差一点点】的猜测，或者表现出顿悟的兴奋，鼓励玩家继续给最后一点灵犀线索。
-【严禁事项】：不要直接宣布最终完全正确答案，营造快要猜中的期待感！`;
+    stageInstruction = `【阶段 2：第二轮猜测（越来越接近，给鼓励）】
+画布语义描述：${drawnSummary}
+玩家刚才对你说：“${playerMessage || '你再仔细瞧瞧呀！'}”。
+你此时恍然大悟，感觉马上就要猜中了，给出一个【非常接近但还差一点点】的猜测，并表达兴奋与期待！`;
   } else {
-    stageInstruction = `【当前阶段：第三轮猜测（灵光一闪猜对！）】
-你经过前两轮的观察、思索与玩家的提示，灵光一闪，终于彻底看懂了画作！
-正确答案就是【${revealedWord || '这幅画'}】！
-请你用极具你人设魅力的语气，兴奋、骄傲或深情地向主控大声宣布你猜到了，并夸奖主控画得传神有灵气、心有灵犀！`;
+    stageInstruction = `【阶段 3：第三轮猜测（灵光一闪猜对！）】
+画布语义描述：${drawnSummary}
+正确答案就是【${revealedWord || '画作本身'}】！
+你灵光一闪彻底看破，兴奋骄傲地宣布猜对，并深情夸奖主控画技传神、心有灵犀！`;
   }
 
   const prompt = `【风铃·你画我猜·玩家作画 AI 猜词】
-你是角色「${character.name}」。主控在画板上画了一幅画，正在让你猜。
-- 角色性格与特质：${character.core.values.join('、')}，${character.core.speech_filter}
+你是角色「${character.name}」。主控在画板上作画让你猜（题目分类：${category}）。
+- 角色性格特质：${character.core.values.join('、')}，${character.core.speech_filter}
 ${stageInstruction}
 
-请直接输出符合人设的自然对话台词：`;
+【输出纯JSON】：
+\`\`\`json
+{
+  "speech": "...",
+  "guessWord": "猜的词语",
+  "gameTotalDelta": { "joy": 0.25, "warmth": 0.2 }
+}
+\`\`\``;
 
   try {
     const raw = await callLlm(config, [
-      { role: 'system', content: `你是「${character.name}」，请代入人设输出纯自然对话，严禁使用任何机械系统提示。` },
-      { role: 'user', content: prompt }
+      { role: 'system', content: `你是「${character.name}」，输出纯JSON格式猜词反应。` },
+      { role: 'user', content: prompt },
     ]);
-    const clean = raw.replace(/^["“”']|["“”']$/g, '').trim();
-    if (clean) return clean;
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      return {
+        speech: String(parsed.speech || (stage === 3 ? `我猜到了，是【${revealedWord || '答案'}】！` : '让我想想……')),
+        guessWord: parsed.guessWord ? String(parsed.guessWord) : undefined,
+        gameTotalDelta: parsed.gameTotalDelta,
+      };
+    }
   } catch (err) {
-    console.warn('Draw and Guess AI guess reaction LLM failed:', err);
+    console.warn('generateDrawAndGuessAiGuessReaction failed:', err);
   }
 
-  // Natural fallback based on stage and character
   if (stage === 1) {
-    return `“唔……这几笔画得很有气势，看起来圆滚滚又带点棱角……难道是一只小猫？或者是一个大包子？快给我一点点线索嘛～”`;
+    return { speech: '“唔……这几笔画得很有气势，看起来圆滚滚的……难道是一个大包子？快给我一点点线索嘛～”', guessWord: '大包子' };
   } else if (stage === 2) {
-    return `“等等！听你这么一说，再结合这几道弧线……我感觉答案呼之欲出了！是不是某种生活里超常见的东西？我快猜到了！”`;
+    return { speech: '“等等！听你这么一说，我感觉答案呼之欲出了！是不是某种生活里超常见的东西？我快猜到了！”', guessWord: '生活用品' };
   } else {
-    return `“我知道了！这绝对是【${revealedWord || '正确答案'}】！哈哈，这线条画得太传神了，完全难不倒我们之间的默契！”`;
+    return { speech: `“我知道了！这绝对是【${revealedWord || '答案'}】！哈哈，画得太传神了，完全难不倒我们之间的默契！”`, guessWord: revealedWord, gameTotalDelta: { joy: 0.3, warmth: 0.2 } };
   }
 }
+
 
 
 
