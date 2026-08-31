@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { X, Layers, UserCheck, Sparkles, BookmarkCheck } from 'lucide-react';
+import { X, Layers, UserCheck, Sparkles, BookmarkCheck, Database } from 'lucide-react';
 import CharacterEditor from './CharacterEditor';
 import PromptInjectionEditor from './PromptInjectionEditor';
 import PromptPresetsManager from './PromptPresetsManager';
+import DataBackupModal from './DataBackupModal';
 import { StardewPixelFlower, LinePuppyMascot } from './FrenchLacePuppyElements';
 
 interface Props {
@@ -10,6 +11,7 @@ interface Props {
   onClose: () => void;
   currentCharacterId: string;
   onEngineReload: () => void;
+  defaultTab?: 'presets' | 'prompt' | 'character' | 'backup';
 }
 
 export default function SettingsModal({
@@ -17,8 +19,9 @@ export default function SettingsModal({
   onClose,
   currentCharacterId,
   onEngineReload,
+  defaultTab = 'presets',
 }: Props) {
-  const [activeTab, setActiveTab] = useState<'presets' | 'prompt' | 'character'>('presets');
+  const [activeTab, setActiveTab] = useState<'presets' | 'prompt' | 'character' | 'backup'>(defaultTab);
 
   if (!open) return null;
 
@@ -39,7 +42,7 @@ export default function SettingsModal({
                 <StardewPixelFlower />
               </div>
               <p className="text-[10px] text-[#998380] mt-0.5">
-                提示词预设方案库、分层流水线编排、六维情绪自然平复衰减与角色卡深度编辑
+                本地存储管理、全量/单项分文件备份与导入恢复、提示词预设方案库与角色卡定制
               </p>
             </div>
           </div>
@@ -91,6 +94,19 @@ export default function SettingsModal({
             <UserCheck className="size-3.5 text-[#e07a93] shrink-0" />
             <span>角色卡与人设档案定制</span>
           </button>
+
+          {/* Tab 4: 数据备份与恢复 */}
+          <button
+            onClick={() => setActiveTab('backup')}
+            className={`px-4 py-3 border-b-2 transition-all flex items-center gap-1.5 whitespace-nowrap cursor-pointer ${
+              activeTab === 'backup'
+                ? 'border-[#e07a93] text-[#8a3854] bg-white font-bold shadow-xs'
+                : 'border-transparent text-[#998380] hover:text-[#4a3e3d]'
+            }`}
+          >
+            <Database className="size-3.5 text-[#e07a93] shrink-0" />
+            <span>数据备份与导入恢复</span>
+          </button>
         </div>
 
         {/* Content */}
@@ -115,6 +131,13 @@ export default function SettingsModal({
             <CharacterEditor
               currentCharacterId={currentCharacterId}
               onCharacterUpdated={onEngineReload}
+            />
+          )}
+
+          {activeTab === 'backup' && (
+            <DataBackupModal
+              currentCharacterId={currentCharacterId}
+              onDataImported={onEngineReload}
             />
           )}
         </div>

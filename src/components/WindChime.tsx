@@ -12,6 +12,7 @@ import {
   ShieldAlert, 
   Palette,
   Gamepad2,
+  Database,
   GripVertical,
   RotateCcw,
   Check,
@@ -26,6 +27,7 @@ import AmbienceApp from './phone/AmbienceApp';
 import DictionaryApp from './phone/DictionaryApp';
 import CssApp from './phone/CssApp';
 import GameLobbyApp, { type GameLobbySubApp } from './phone/GameLobbyApp';
+import DataBackupModal from './DataBackupModal';
 import type { LlmConfig } from '../lib/llm';
 import { 
   subscribeGameInvite, 
@@ -72,7 +74,7 @@ interface Props {
   onRejectGameInvite?: (invite: GameInvitation) => void;
 }
 
-export type AppId = 'game_lobby' | 'persona' | 'wallpaper' | 'llm' | 'ambience' | 'dictionary' | 'css';
+export type AppId = 'game_lobby' | 'backup' | 'persona' | 'wallpaper' | 'llm' | 'ambience' | 'dictionary' | 'css';
 
 const APPS: Array<{
   id: AppId;
@@ -89,6 +91,14 @@ const APPS: Array<{
     icon: Gamepad2,
     gradient: 'from-amber-500 via-purple-600 to-rose-600',
     badge: '娱乐',
+  },
+  {
+    id: 'backup',
+    name: '数据备份',
+    subtitle: '分文件与恢复',
+    icon: Database,
+    gradient: 'from-rose-500 via-pink-600 to-red-500',
+    badge: '安全',
   },
   {
     id: 'persona',
@@ -937,6 +947,14 @@ export default function WindChime({
                       onRejectGameInvite={onRejectGameInvite}
                       onExitLobby={() => setActiveApp(null)}
                     />
+                  )}
+                  {activeApp === 'backup' && (
+                    <div className="p-2 sm:p-3 bg-[#fffafb] rounded-2xl text-[#4a3e3d] shadow-sm max-h-[70vh] overflow-y-auto">
+                      <DataBackupModal
+                        currentCharacterId={currentCharacterId}
+                        onDataImported={onEngineReload}
+                      />
+                    </div>
                   )}
                   {activeApp === 'persona' && (
                     <PersonaApp

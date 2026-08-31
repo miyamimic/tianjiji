@@ -1083,7 +1083,32 @@ export function getPreDrawData(word: string): StrokeData[] | null {
 }
 
 /**
- * Randomly pick a word from category or across all categories
+ * Randomly pick a secret word for AI drawing (must have preDrawData)
+ */
+export function getRandomAiSecretWord(excludeWord?: string): { word: string; category: string; hints: string[] } {
+  const availableKeys = Object.keys(preDrawData).filter((w) => w !== excludeWord);
+  const pickedWord = availableKeys[Math.floor(Math.random() * availableKeys.length)] || '爱心';
+
+  for (const cat of WORD_CATEGORIES) {
+    const found = cat.words.find((w) => w.text === pickedWord);
+    if (found) {
+      return {
+        word: pickedWord,
+        category: cat.name,
+        hints: found.hints,
+      };
+    }
+  }
+
+  return {
+    word: pickedWord,
+    category: '趣味主题',
+    hints: ['常见的事物', '仔细观察画面的线条轮廓'],
+  };
+}
+
+/**
+ * Randomly pick a word from category or across all categories for player to draw
  */
 export function getRandomWord(categoryId?: string): { word: string; category: string; hints: string[] } {
   let catList = WORD_CATEGORIES;

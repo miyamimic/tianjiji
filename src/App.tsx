@@ -35,6 +35,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<'presets' | 'prompt' | 'character' | 'backup'>('presets');
   const [numbedModalInfo, setNumbedModalInfo] = useState<{
     characterName: string;
     numbedKeys: string[];
@@ -384,7 +385,10 @@ export default function App() {
             sidebarOpen={sidebarOpen}
             onClearHistory={() => engine.clearHistory()}
             onResetEmotion={() => engine.resetEmotion()}
-            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenSettings={() => {
+              setSettingsTab('presets');
+              setSettingsOpen(true);
+            }}
             llmReady={llmReady}
             portrait={portrait}
           />
@@ -494,10 +498,12 @@ export default function App() {
       </div>
 
       <SettingsModal
+        key={`${settingsTab}-${settingsOpen}`}
         open={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         currentCharacterId={character.character_id}
         onEngineReload={() => engine.reload()}
+        defaultTab={settingsTab}
       />
 
       <NumbedNoticeModal

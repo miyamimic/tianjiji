@@ -14,13 +14,11 @@ import {
   Volume2,
   VolumeX,
   Eye,
-  Smile,
-  Flame,
   Bot,
   User,
-  Sliders,
-  ExternalLink,
-  ChevronDown
+  HelpCircle as QuestionIcon,
+  Unlock,
+  Sparkle
 } from 'lucide-react';
 import {
   WORD_CATEGORIES,
@@ -29,8 +27,8 @@ import {
   hasPreDrawData,
   getPreDrawData,
   getRandomWord,
+  getRandomAiSecretWord,
   getAiArtistById,
-  type AiArtistCharacter,
 } from '../../data/drawAndGuessData';
 import {
   getStrokeOutline,
@@ -46,7 +44,7 @@ interface Props {
   onExit?: () => void;
 }
 
-type GameRound = 'roundA' | 'roundB';
+export type GameRound = 'round_ai_draw' | 'round_player_draw';
 type GamePhase =
   | 'idle'
   | 'ai_drawing'
@@ -105,23 +103,31 @@ export default function DrawAndGuessApp({
     if (soundEnabled) playSound(type);
   }, [soundEnabled]);
 
-  // Game Flow State
-  const [round, setRound] = useState<GameRound>('roundA');
+  // Main Mode Choice: 'round_player_draw' (我先画) or 'round_ai_draw' (AI先画)
+  const [round, setRound] = useState<GameRound>('round_player_draw');
   const [phase, setPhase] = useState<GamePhase>('idle');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [targetWord, setTargetWord] = useState<string>('爱心');
-  const [targetHints, setTargetHints] = useState<string[]>(['代表喜欢', '两瓣圆润', '红色的符号']);
-  const [customWordInput, setCustomWordInput] = useState<string>('');
-  const [customWordError, setCustomWordError] = useState<string | null>(null);
 
-  // Guessing state
+  // AI Drawing Secret Word State (Completely hidden from user in round_ai_draw!)
+  const [aiSecret, setAiSecret] = useState<{ word: string; category: string; hints: string[] }>(() =>
+    getRandomAiSecretWord()
+  );
+  const [aiSecretRevealed, setAiSecretRevealed] = useState<boolean>(false);
+  const [aiHintLevel, setAiHintLevel] = useState<number>(0);
+
+  // Player Drawing Topic State (Used in round_player_draw)
+  const [playerTopic, setPlayerTopic] = useState<{ word: string; category: string; hints: string[] }>(() =>
+    getRandomWord('all')
+  );
+  const [playerCategory, setPlayerCategory] = useState<string>('all');
+  const [customWordInput, setCustomWordInput] = useState<string>('');
+
+  // Guessing state in AI drawing round
   const [guessInput, setGuessInput] = useState<string>('');
   const [guessAttempts, setGuessAttempts] = useState<number>(0);
   const [guessFeedback, setGuessFeedback] = useState<{
     correct: boolean;
     text: string;
   } | null>(null);
-  const [showHint, setShowHint] = useState<boolean>(false);
 
   // Score state
   const [scores, setScores] = useState({ playerWins: 0, aiWins: 0 });
@@ -147,7 +153,7 @@ export default function DrawAndGuessApp({
       sender: 'ai',
       name: currentArtist.name,
       avatar: currentArtist.avatar,
-      text: `你好！我是${currentArtist.name}（${currentArtist.tag}）。准备好来一场心有灵犀的你画我猜了吗？`,
+      text: `你好！我是${currentArtist.name}（${currentArtist.tag}）。准备好来一场心有灵犀的你画我猜了吗？你可以选择【你先画】还是【我先画】哦！`,
       time: '刚刚',
     },
   ]);
@@ -194,7 +200,7 @@ export default function DrawAndGuessApp({
     ctx.fillStyle = '#FFFFFF';
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Subtle guide grid dot pattern (optional aesthetic polish)
+    // Guide dot pattern
     ctx.fillStyle = 'rgba(203, 213, 225, 0.4)';
     const dotSpacing = 30;
     for (let x = 20; x < canvas.width; x += dotSpacing) {
@@ -204,27 +210,6 @@ export default function DrawAndGuessApp({
     }
     ctx.restore();
   }, []);
-
-  // Redraw all completed strokes onto canvas
-  const redrawCompletedStrokes = useCallback(
-    (strokes: StrokeData[], brushParams: CharacterBrushParams) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      clearCanvas();
-
-      strokes.forEach((stroke) => {
-        const outline = getStrokeOutline(stroke.points, {
-          ...brushParams,
-          size: stroke.size || brushParams.size || 10,
-        });
-        renderStrokeToCanvas(ctx, outline, stroke.color, false);
-      });
-    },
-    [clearCanvas]
-  );
 
   // Cancel any running animation loop
   const stopAnimation = useCallback(() => {
@@ -250,34 +235,29 @@ export default function DrawAndGuessApp({
   }, [clearCanvas]);
 
   // -------------------------------------------------------------
-  // ROUND A: AI DRAWING & TIMED PLAYBACK ANIMATION
+  // AI DRAWING ROUND (AI画·你猜) - Strictly Secret Word Bank
   // -------------------------------------------------------------
-  const startAiDrawingRound = useCallback(() => {
+  const startAiDrawingRound = useCallback((newSecretWordObj?: { word: string; category: string; hints: string[] }) => {
     stopAnimation();
 
-    // Check if target word has preDrawData
-    if (!hasPreDrawData(targetWord)) {
-      setCustomWordError(`题库暂无 “${targetWord}” 的预制AI绘画笔画素材，请在上方选择内置词汇或点击随机抽取！`);
-      return;
-    }
-    setCustomWordError(null);
-
-    const strokes = getPreDrawData(targetWord);
+    const activeSecret = newSecretWordObj || aiSecret;
+    const strokes = getPreDrawData(activeSecret.word);
     if (!strokes || strokes.length === 0) return;
 
-    setRound('roundA');
+    setRound('round_ai_draw');
     setPhase('ai_drawing');
+    setAiSecretRevealed(false);
+    setAiHintLevel(0);
     setGuessInput('');
     setGuessFeedback(null);
     setGuessAttempts(0);
-    setShowHint(false);
     clearCanvas();
     triggerSound('click');
 
-    // AI speech
+    // AI speech (does NOT reveal the word!)
     const startLines = currentArtist.dialogues.startDraw;
     const randomStart = startLines[Math.floor(Math.random() * startLines.length)];
-    addChatMessage('ai', randomStart);
+    addChatMessage('ai', `${randomStart}（我已经选好秘密题目啦，看我的画笔挥毫！）`);
 
     // Begin time-series sequential stroke playback
     isPlayingRef.current = true;
@@ -329,7 +309,7 @@ export default function DrawAndGuessApp({
         });
         renderStrokeToCanvas(ctx, currentOutline, currentStroke.color, false);
 
-        // Draw cute brush stylus nib indicator at current drawing tip
+        // Draw brush tip cursor
         const lastPt = partialPoints[partialPoints.length - 1];
         ctx.save();
         ctx.fillStyle = currentStroke.color;
@@ -369,7 +349,10 @@ export default function DrawAndGuessApp({
           triggerSound('complete');
 
           const finishLines = currentArtist.dialogues.finishDraw;
-          addChatMessage('ai', finishLines[Math.floor(Math.random() * finishLines.length)]);
+          addChatMessage(
+            'ai',
+            `${finishLines[Math.floor(Math.random() * finishLines.length)]} 题目共有【${activeSecret.word.length}个字】，快在右侧输入你的猜测吧！`
+          );
         }
       }
     };
@@ -377,12 +360,21 @@ export default function DrawAndGuessApp({
     animFrameIdRef.current = requestAnimationFrame(animate);
   }, [
     stopAnimation,
-    targetWord,
+    aiSecret,
     clearCanvas,
     triggerSound,
     currentArtist,
     addChatMessage,
   ]);
+
+  // Switch secret word for AI behind the scenes (No spoiler to user)
+  const handleRerollAiSecretWord = useCallback(() => {
+    triggerSound('click');
+    const newSecret = getRandomAiSecretWord(aiSecret.word);
+    setAiSecret(newSecret);
+    addChatMessage('system', `🎲 AI已重新秘密挑选了一道画作题目（分类：${newSecret.category} · ${newSecret.word.length}个字）`);
+    startAiDrawingRound(newSecret);
+  }, [aiSecret.word, triggerSound, addChatMessage, startAiDrawingRound]);
 
   // Handle Player Guess submission
   const handleGuessSubmit = useCallback(
@@ -392,66 +384,105 @@ export default function DrawAndGuessApp({
       if (!trimmed || phase !== 'guessing') return;
 
       addChatMessage('player', trimmed);
-      setGuessAttempts((prev) => prev + 1);
+      const newAttempts = guessAttempts + 1;
+      setGuessAttempts(newAttempts);
 
       // Check guess against target word
       const isMatch =
-        trimmed === targetWord ||
-        trimmed.includes(targetWord) ||
-        targetWord.includes(trimmed);
+        trimmed === aiSecret.word ||
+        trimmed.includes(aiSecret.word) ||
+        aiSecret.word.includes(trimmed);
 
       if (isMatch) {
         triggerSound('correct');
+        setAiSecretRevealed(true);
         setGuessFeedback({
           correct: true,
-          text: `🎉 太神啦！完全猜对！答案正是【${targetWord}】！`,
+          text: `🎉 太神啦！完全猜对！答案正是【${aiSecret.word}】！`,
         });
         setScores((prev) => ({ ...prev, playerWins: prev.playerWins + 1 }));
         setPhase('roundA_success');
 
         const winLines = currentArtist.dialogues.correctGuess;
-        addChatMessage('ai', winLines[Math.floor(Math.random() * winLines.length)]);
+        addChatMessage('ai', `${winLines[Math.floor(Math.random() * winLines.length)]} 答案就是【${aiSecret.word}】！`);
       } else {
         triggerSound('wrong');
         const wrongLines = currentArtist.dialogues.wrongGuess;
         addChatMessage('ai', wrongLines[Math.floor(Math.random() * wrongLines.length)]);
 
-        if (guessAttempts >= 1) {
-          setShowHint(true);
+        // Gradually reveal hints
+        if (newAttempts >= 2 && aiHintLevel === 0 && aiSecret.hints.length > 0) {
+          setAiHintLevel(1);
+        } else if (newAttempts >= 4 && aiHintLevel < aiSecret.hints.length) {
+          setAiHintLevel((v) => Math.min(v + 1, aiSecret.hints.length));
         }
+
         setGuessFeedback({
           correct: false,
-          text: `不对哦，再仔细端详一下画面的线条吧~`,
+          text: `不对哦，再仔细端详一下画面的线条与神韵吧~`,
         });
       }
       setGuessInput('');
     },
-    [guessInput, phase, targetWord, triggerSound, currentArtist, addChatMessage, guessAttempts]
+    [guessInput, phase, aiSecret, triggerSound, currentArtist, addChatMessage, guessAttempts, aiHintLevel]
   );
 
+  // Give up and reveal secret answer
+  const handleGiveUpAndReveal = useCallback(() => {
+    triggerSound('click');
+    setAiSecretRevealed(true);
+    setPhase('roundA_success');
+    setGuessFeedback({
+      correct: false,
+      text: `已揭晓答案：【${aiSecret.word}】（${aiSecret.category}）`,
+    });
+    addChatMessage('ai', `这道题的答案是【${aiSecret.word}】哦！没关系，下一盘一定能猜中！`);
+  }, [aiSecret, triggerSound, addChatMessage]);
+
   // -------------------------------------------------------------
-  // ROUND B: PLAYER FREEHAND DRAWING & EVENT COLLECTION
+  // PLAYER DRAWING ROUND (你画·AI猜)
   // -------------------------------------------------------------
-  const startPlayerDrawingRound = useCallback(() => {
+  const startPlayerDrawingRound = useCallback((chosenTopic?: { word: string; category: string; hints: string[] }) => {
     stopAnimation();
-    setRound('roundB');
+    setRound('round_player_draw');
     setPhase('player_drawing');
     setPlayerStrokes([]);
     currentStrokeRef.current = [];
     clearCanvas();
     triggerSound('click');
 
-    // Pick a new word for the player to draw
-    const randomPick = getRandomWord(selectedCategory);
-    setTargetWord(randomPick.word);
-    setTargetHints(randomPick.hints);
+    const topic = chosenTopic || playerTopic;
+    setPlayerTopic(topic);
 
     const playerLines = currentArtist.dialogues.playerTurn;
     addChatMessage(
       'ai',
-      `${playerLines[Math.floor(Math.random() * playerLines.length)]} 这一轮你的题目是：【${randomPick.word}】！画好后点击下方“完成绘画，让TA猜”哦~`
+      `${playerLines[Math.floor(Math.random() * playerLines.length)]} 本轮你的题目是：【${topic.word}】！在画板上挥毫，画好后点击下方“完成绘画，让TA猜”！`
     );
-  }, [stopAnimation, clearCanvas, triggerSound, selectedCategory, currentArtist, addChatMessage]);
+  }, [stopAnimation, clearCanvas, triggerSound, playerTopic, currentArtist, addChatMessage]);
+
+  // Pick a new random word for player to draw
+  const handleRerollPlayerWord = useCallback(() => {
+    triggerSound('click');
+    const newWord = getRandomWord(playerCategory);
+    setPlayerTopic(newWord);
+    setCustomWordInput('');
+    startPlayerDrawingRound(newWord);
+  }, [playerCategory, triggerSound, startPlayerDrawingRound]);
+
+  // Custom player word
+  const handleApplyCustomPlayerWord = useCallback(() => {
+    const trimmed = customWordInput.trim();
+    if (!trimmed) return;
+    triggerSound('click');
+    const customTopic = {
+      word: trimmed,
+      category: '自定义',
+      hints: [`玩家自定义题目：${trimmed}`],
+    };
+    setPlayerTopic(customTopic);
+    startPlayerDrawingRound(customTopic);
+  }, [customWordInput, triggerSound, startPlayerDrawingRound]);
 
   // Convert mouse/touch event to exact canvas pixel coordinates
   const getCanvasPoint = useCallback((e: React.MouseEvent | React.TouchEvent): [number, number] | null => {
@@ -490,7 +521,6 @@ export default function DrawAndGuessApp({
       currentStrokeRef.current = [pt];
       triggerSound('draw');
 
-      // Draw initial dot
       const canvas = canvasRef.current;
       if (!canvas) return;
       const ctx = canvas.getContext('2d');
@@ -516,7 +546,6 @@ export default function DrawAndGuessApp({
       const pt = getCanvasPoint(e);
       if (!pt) return;
 
-      // Filter duplicate points
       const last = currentStrokeRef.current[currentStrokeRef.current.length - 1];
       if (last && Math.hypot(pt[0] - last[0], pt[1] - last[1]) < 2) return;
 
@@ -527,7 +556,6 @@ export default function DrawAndGuessApp({
       const ctx = canvas.getContext('2d');
       if (!ctx) return;
 
-      // Full redraw of past strokes + current active stroke
       clearCanvas();
 
       // Draw completed strokes
@@ -614,28 +642,27 @@ export default function DrawAndGuessApp({
   // Player completes drawing and asks AI to guess
   const handleFinishPlayerDrawing = useCallback(() => {
     if (playerStrokes.length === 0) {
-      addChatMessage('system', '画板上还没有任何笔画哦，请先在画布上作画吧！');
+      addChatMessage('system', '画板上还没有任何笔画哦，请先在画布上挥毫几笔吧！');
       return;
     }
     stopAnimation();
     setPhase('player_finished');
     triggerSound('complete');
 
-    addChatMessage('player', `我画完啦！题目是【${targetWord}】，你快猜猜看！`);
+    addChatMessage('player', `我画完啦！题目是【${playerTopic.word}】，你快猜猜看！`);
 
-    // Simulated AI response
     setTimeout(() => {
       const reactions = currentArtist.dialogues.playerFinished;
       const aiReply = reactions[Math.floor(Math.random() * reactions.length)];
       addChatMessage(
         'ai',
-        `${aiReply} 这分明就是【${targetWord}】！每一笔都直击灵魂，画得太传神了！`
+        `${aiReply} 这分明就是【${playerTopic.word}】！每一笔线条都直击灵魂，画得太传神了！`
       );
       setScores((prev) => ({ ...prev, aiWins: prev.aiWins + 1 }));
-    }, 900);
-  }, [playerStrokes.length, stopAnimation, triggerSound, addChatMessage, targetWord, currentArtist]);
+    }, 850);
+  }, [playerStrokes.length, stopAnimation, triggerSound, addChatMessage, playerTopic.word, currentArtist]);
 
-  // Replay Player's Drawing Animation (requestAnimationFrame)
+  // Replay Player's Drawing Animation
   const handleReplayPlayerDrawing = useCallback(() => {
     if (playerStrokes.length === 0) return;
     stopAnimation();
@@ -664,7 +691,6 @@ export default function DrawAndGuessApp({
 
       clearCanvas();
 
-      // Render completed
       completed.forEach((s) => {
         const outline = getStrokeOutline(s.points, {
           thinning: 0.5,
@@ -677,7 +703,6 @@ export default function DrawAndGuessApp({
         renderStrokeToCanvas(ctx, outline, s.color, s.color === '__ERASER__');
       });
 
-      // Render current in-progress
       if (partial.length >= 2) {
         const outline = getStrokeOutline(partial, {
           thinning: 0.5,
@@ -716,30 +741,13 @@ export default function DrawAndGuessApp({
     };
   }, [stopAnimation]);
 
-  // Random word picker from dropdown / dice button
-  const handlePickRandomWord = useCallback(() => {
-    triggerSound('click');
-    const pick = getRandomWord(selectedCategory);
-    setTargetWord(pick.word);
-    setTargetHints(pick.hints);
-    setCustomWordInput('');
-    setCustomWordError(null);
-  }, [selectedCategory, triggerSound]);
-
-  // Apply custom word input by player
-  const handleApplyCustomWord = useCallback(() => {
-    const trimmed = customWordInput.trim();
-    if (!trimmed) return;
-    triggerSound('click');
-    setTargetWord(trimmed);
-    setTargetHints([`自定义题目：${trimmed}`]);
-
-    if (!hasPreDrawData(trimmed)) {
-      setCustomWordError(`提示：暂无 “${trimmed}” 的AI预制素材。回合A将显示素材缺省提醒，建议在回合B由您亲自画出它！`);
-    } else {
-      setCustomWordError(null);
+  // Start with chosen mode on initial mount
+  useEffect(() => {
+    if (round === 'round_player_draw') {
+      startPlayerDrawingRound();
     }
-  }, [customWordInput, triggerSound]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <div className="w-full h-full flex flex-col bg-stone-950 text-white select-none overflow-hidden text-xs">
@@ -772,18 +780,6 @@ export default function DrawAndGuessApp({
             {soundEnabled ? <Volume2 className="size-3.5 text-emerald-400" /> : <VolumeX className="size-3.5 text-stone-500" />}
           </button>
 
-          {/* Standalone Cloudflare Pages Direct Link */}
-          <a
-            href="/draw-and-guess.html"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hidden sm:flex items-center gap-1 py-1 px-2.5 rounded-xl bg-gradient-to-r from-purple-600/30 to-pink-600/30 hover:from-purple-600/40 hover:to-pink-600/40 text-purple-200 border border-purple-400/40 text-[10px] font-semibold transition"
-            title="新窗口打开独立纯静态网页版"
-          >
-            <span>Cloudflare 版</span>
-            <ExternalLink className="size-3" />
-          </a>
-
           {/* Score Counter */}
           <div className="flex items-center gap-2 bg-black/40 px-2.5 py-1 rounded-full border border-white/10 font-mono text-[10.5px]">
             <span className="text-amber-300">你: {scores.playerWins}</span>
@@ -799,115 +795,173 @@ export default function DrawAndGuessApp({
         {/* ================= LEFT MAIN CANVAS & CONTROLS ================= */}
         <div className="flex-1 flex flex-col bg-stone-900/80 border border-white/10 rounded-2xl p-2.5 shadow-xl backdrop-blur-md overflow-y-auto no-scrollbar gap-2">
           
-          {/* Top Control Bar: Round Tabs, Category Selector, Word Picker */}
+          {/* Top Control Bar: Player Selects Who Draws First */}
           <div className="flex flex-wrap items-center justify-between gap-1.5 pb-2 border-b border-white/10 shrink-0">
-            {/* Round Switcher Tabs */}
-            <div className="flex items-center bg-black/50 p-0.5 rounded-xl border border-white/10">
+            {/* Mode Switcher Buttons */}
+            <div className="flex items-center bg-black/60 p-1 rounded-xl border border-white/10 gap-1">
               <button
                 onClick={() => {
-                  setRound('roundA');
-                  if (phase !== 'idle' && phase !== 'guessing') setPhase('idle');
+                  setRound('round_player_draw');
+                  startPlayerDrawingRound();
                 }}
-                className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition cursor-pointer flex items-center gap-1 ${
-                  round === 'roundA'
-                    ? 'bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow'
+                className={`px-3 py-1 rounded-lg font-bold text-[11px] transition cursor-pointer flex items-center gap-1.5 ${
+                  round === 'round_player_draw'
+                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-stone-950 shadow-md ring-1 ring-amber-300'
                     : 'text-stone-400 hover:text-white'
                 }`}
               >
-                <Bot className="size-3" />
-                <span>回合A：AI画·你猜</span>
+                <User className="size-3.5" />
+                <span>我先画（AI来猜）</span>
               </button>
+
               <button
                 onClick={() => {
-                  setRound('roundB');
-                  if (phase !== 'player_drawing' && phase !== 'player_finished') {
-                    startPlayerDrawingRound();
-                  }
+                  setRound('round_ai_draw');
+                  setPhase('idle');
+                  stopAnimation();
+                  clearCanvas();
                 }}
-                className={`px-2.5 py-1 rounded-lg font-bold text-[11px] transition cursor-pointer flex items-center gap-1 ${
-                  round === 'roundB'
-                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-stone-950 shadow'
+                className={`px-3 py-1 rounded-lg font-bold text-[11px] transition cursor-pointer flex items-center gap-1.5 ${
+                  round === 'round_ai_draw'
+                    ? 'bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow-md ring-1 ring-pink-300'
                     : 'text-stone-400 hover:text-white'
                 }`}
               >
-                <User className="size-3" />
-                <span>回合B：你画·AI猜</span>
+                <Bot className="size-3.5" />
+                <span>AI先画（我来猜）</span>
               </button>
             </div>
 
-            {/* Category and Word Randomizer */}
-            <div className="flex items-center gap-1.5 flex-wrap">
-              <select
-                value={selectedCategory}
-                onChange={(e) => {
-                  setSelectedCategory(e.target.value);
-                  const pick = getRandomWord(e.target.value);
-                  setTargetWord(pick.word);
-                  setTargetHints(pick.hints);
-                  setCustomWordError(null);
-                }}
-                className="bg-stone-800 border border-white/15 text-stone-200 rounded-lg px-2 py-1 text-[10.5px] cursor-pointer outline-none focus:border-amber-400"
-              >
-                <option value="all">🌟 全部分类</option>
-                {WORD_CATEGORIES.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.emoji} {c.name}
-                  </option>
-                ))}
-              </select>
+            {/* Mode-Specific Status / Quick Switch Indicator */}
+            {round === 'round_player_draw' ? (
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <select
+                  value={playerCategory}
+                  onChange={(e) => {
+                    setPlayerCategory(e.target.value);
+                    const pick = getRandomWord(e.target.value);
+                    setPlayerTopic(pick);
+                    startPlayerDrawingRound(pick);
+                  }}
+                  className="bg-stone-800 border border-white/15 text-stone-200 rounded-lg px-2 py-1 text-[10.5px] cursor-pointer outline-none focus:border-amber-400"
+                >
+                  <option value="all">🌟 全部分类</option>
+                  {WORD_CATEGORIES.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.emoji} {c.name}
+                    </option>
+                  ))}
+                </select>
 
-              <button
-                onClick={handlePickRandomWord}
-                className="px-2 py-1 bg-white/10 hover:bg-white/15 text-amber-300 rounded-lg border border-white/10 text-[10.5px] flex items-center gap-1 transition cursor-pointer active:scale-95"
-                title="随机换一题"
-              >
-                <RefreshCw className="size-3" />
-                <span>换一题</span>
-              </button>
-            </div>
+                <button
+                  onClick={handleRerollPlayerWord}
+                  className="px-2 py-1 bg-white/10 hover:bg-white/15 text-amber-300 rounded-lg border border-white/10 text-[10.5px] flex items-center gap-1 transition cursor-pointer active:scale-95"
+                  title="随机换一道画题"
+                >
+                  <RefreshCw className="size-3" />
+                  <span>换个题目</span>
+                </button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-pink-300 bg-pink-500/10 border border-pink-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <QuestionIcon className="size-3 text-pink-400" />
+                  <span>题库已深度保密 · 凭画技猜词</span>
+                </span>
+                <button
+                  onClick={handleRerollAiSecretWord}
+                  className="px-2 py-1 bg-white/10 hover:bg-white/15 text-pink-300 rounded-lg border border-white/10 text-[10.5px] flex items-center gap-1 transition cursor-pointer active:scale-95"
+                  title="让AI重新挑一道秘密题目"
+                >
+                  <RefreshCw className="size-3" />
+                  <span>重挑秘密题目</span>
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* Word / Custom Input Strip */}
-          <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-black/40 rounded-xl border border-white/5 shrink-0 flex-wrap">
-            <div className="flex items-center gap-2">
-              <span className="text-[10px] text-stone-400">当前题目:</span>
-              <span className="px-2 py-0.5 rounded-md bg-amber-400/20 border border-amber-400/40 text-amber-200 font-bold text-xs">
-                {targetWord}
-              </span>
-              {round === 'roundA' && phase === 'ai_drawing' && (
+          {/* Word Prompt / Hidden Secret Strip */}
+          {round === 'round_player_draw' ? (
+            <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-amber-950/30 rounded-xl border border-amber-500/30 shrink-0 flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="text-[10.5px] text-amber-300 font-bold flex items-center gap-1">
+                  <Palette className="size-3.5" />
+                  <span>你要画的题目:</span>
+                </span>
+                <span className="px-2.5 py-0.5 rounded-md bg-amber-400/25 border border-amber-400/50 text-amber-200 font-bold text-sm tracking-wider">
+                  {playerTopic.word}
+                </span>
+                <span className="text-[10px] text-amber-300/70">
+                  （分类：{playerTopic.category}）
+                </span>
+              </div>
+
+              {/* Custom Word Input */}
+              <div className="flex items-center gap-1">
+                <input
+                  type="text"
+                  placeholder="自定题目..."
+                  value={customWordInput}
+                  onChange={(e) => setCustomWordInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleApplyCustomPlayerWord();
+                  }}
+                  className="w-20 sm:w-24 px-2 py-0.5 bg-stone-800/80 border border-white/15 rounded-md text-[10.5px] text-stone-200 placeholder-stone-500 outline-none focus:border-amber-400"
+                />
+                <button
+                  onClick={handleApplyCustomPlayerWord}
+                  className="px-2 py-0.5 bg-white/10 hover:bg-white/15 text-stone-200 rounded-md border border-white/10 text-[10.5px] cursor-pointer"
+                >
+                  设定
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-2 px-2.5 py-1.5 bg-pink-950/30 rounded-xl border border-pink-500/30 shrink-0 flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="text-[10.5px] text-pink-300 font-bold flex items-center gap-1">
+                  <QuestionIcon className="size-3.5" />
+                  <span>秘密题目:</span>
+                </span>
+                {aiSecretRevealed ? (
+                  <span className="px-2.5 py-0.5 rounded-md bg-emerald-500/25 border border-emerald-400/50 text-emerald-200 font-bold text-sm tracking-wider flex items-center gap-1">
+                    <Unlock className="size-3 text-emerald-400" />
+                    <span>{aiSecret.word}</span>
+                  </span>
+                ) : (
+                  <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: aiSecret.word.length }).map((_, i) => (
+                        <span
+                          key={i}
+                          className="size-6 rounded-md bg-pink-500/20 border border-pink-400/40 text-pink-200 font-black text-sm flex items-center justify-center font-mono shadow-inner"
+                        >
+                          ？
+                        </span>
+                      ))}
+                    </div>
+                    <span className="text-[10px] text-pink-300/80">
+                      （{aiSecret.word.length}个字 · {aiSecret.category}）
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {phase === 'ai_drawing' && (
                 <span className="text-[10px] text-pink-300 animate-pulse flex items-center gap-1">
                   <span className="inline-block size-1.5 rounded-full bg-pink-400 animate-ping" />
-                  {currentArtist.name}正在挥毫作画中...
+                  {currentArtist.name} 挥毫作画中...
                 </span>
               )}
-            </div>
 
-            {/* Custom Input */}
-            <div className="flex items-center gap-1">
-              <input
-                type="text"
-                placeholder="自定义题目..."
-                value={customWordInput}
-                onChange={(e) => setCustomWordInput(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleApplyCustomWord();
-                }}
-                className="w-24 sm:w-28 px-2 py-0.5 bg-stone-800/80 border border-white/15 rounded-md text-[10.5px] text-stone-200 placeholder-stone-500 outline-none focus:border-amber-400"
-              />
-              <button
-                onClick={handleApplyCustomWord}
-                className="px-2 py-0.5 bg-white/10 hover:bg-white/15 text-stone-200 rounded-md border border-white/10 text-[10.5px] cursor-pointer"
-              >
-                设定
-              </button>
-            </div>
-          </div>
-
-          {/* Custom Word Error Notice */}
-          {customWordError && (
-            <div className="p-2 bg-amber-500/15 border border-amber-400/40 rounded-xl text-amber-200 text-[10.5px] flex items-center gap-2">
-              <AlertCircle className="size-4 shrink-0 text-amber-400" />
-              <span>{customWordError}</span>
+              {phase === 'guessing' && !aiSecretRevealed && (
+                <button
+                  onClick={handleGiveUpAndReveal}
+                  className="text-[10px] text-stone-400 hover:text-pink-300 underline cursor-pointer transition"
+                >
+                  认输揭晓答案
+                </button>
+              )}
             </div>
           )}
 
@@ -934,30 +988,30 @@ export default function DrawAndGuessApp({
                 </div>
               )}
               {phase === 'guessing' && (
-                <div className="px-2.5 py-1 rounded-full bg-emerald-950/80 text-emerald-300 font-bold text-[10.5px] backdrop-blur-sm border border-emerald-400/40 flex items-center gap-1.5 shadow animate-pulse">
+                <div className="px-2.5 py-1 rounded-full bg-emerald-950/85 text-emerald-300 font-bold text-[10.5px] backdrop-blur-sm border border-emerald-400/40 flex items-center gap-1.5 shadow animate-pulse">
                   <HelpCircle className="size-3.5 text-emerald-400" />
-                  <span>AI绘画完成！请在右侧输入你的答案</span>
+                  <span>AI 绘画完成！请在右侧输入你猜的词语</span>
                 </div>
               )}
               {phase === 'player_drawing' && (
-                <div className="px-2.5 py-1 rounded-full bg-amber-950/80 text-amber-200 font-bold text-[10.5px] backdrop-blur-sm border border-amber-400/40 flex items-center gap-1.5 shadow">
+                <div className="px-2.5 py-1 rounded-full bg-amber-950/85 text-amber-200 font-bold text-[10.5px] backdrop-blur-sm border border-amber-400/40 flex items-center gap-1.5 shadow">
                   <User className="size-3.5 text-amber-400" />
-                  <span>轮到你画：请在画板绘制【{targetWord}】</span>
+                  <span>轮到你画：请在画板绘制【{playerTopic.word}】</span>
                 </div>
               )}
               {phase === 'player_replaying' && (
-                <div className="px-2.5 py-1 rounded-full bg-purple-950/80 text-purple-200 font-bold text-[10.5px] backdrop-blur-sm border border-purple-400/40 flex items-center gap-1.5 shadow animate-pulse">
+                <div className="px-2.5 py-1 rounded-full bg-purple-950/85 text-purple-200 font-bold text-[10.5px] backdrop-blur-sm border border-purple-400/40 flex items-center gap-1.5 shadow animate-pulse">
                   <Play className="size-3.5 text-purple-400" />
                   <span>正在逐笔回放你的手绘轨迹...</span>
                 </div>
               )}
             </div>
 
-            {/* Hint Badge in Guessing Phase */}
-            {phase === 'guessing' && showHint && targetHints.length > 0 && (
-              <div className="absolute bottom-2 left-2 z-10 bg-black/80 px-2.5 py-1.5 rounded-xl border border-amber-400/40 text-amber-200 text-[10px] max-w-xs shadow">
+            {/* Hint Display in Guessing Phase */}
+            {round === 'round_ai_draw' && phase === 'guessing' && aiHintLevel > 0 && (
+              <div className="absolute bottom-2 left-2 z-10 bg-black/85 px-3 py-1.5 rounded-xl border border-amber-400/40 text-amber-200 text-[10px] max-w-xs shadow">
                 <span className="font-bold text-amber-300">💡 提示：</span>
-                {targetHints.join(' · ')}
+                {aiSecret.hints.slice(0, aiHintLevel).join(' · ')}
               </div>
             )}
           </div>
@@ -965,7 +1019,7 @@ export default function DrawAndGuessApp({
           {/* ================= CANVAS TOOLBAR & ACTION STRIP ================= */}
           <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
             {/* If in Player Drawing Mode: Color Palette & Brush Tools */}
-            {round === 'roundB' && (
+            {round === 'round_player_draw' && (
               <div className="flex items-center gap-1.5 flex-wrap">
                 {/* Color Swatches */}
                 <div className="flex items-center gap-1 p-1 bg-black/40 rounded-xl border border-white/10">
@@ -1043,15 +1097,15 @@ export default function DrawAndGuessApp({
 
             {/* Action Buttons for Round States */}
             <div className="flex items-center gap-2 ml-auto">
-              {round === 'roundA' && (
+              {round === 'round_ai_draw' && (
                 <>
                   {phase === 'idle' && (
                     <button
-                      onClick={startAiDrawingRound}
+                      onClick={() => startAiDrawingRound()}
                       className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-pink-500 via-rose-500 to-amber-500 text-white font-bold text-[11px] shadow-lg hover:scale-105 active:scale-95 transition cursor-pointer flex items-center gap-1.5"
                     >
                       <Play className="size-3.5" />
-                      <span>开始 AI 绘画</span>
+                      <span>开始 AI 绘画（准备猜词）</span>
                     </button>
                   )}
 
@@ -1065,21 +1119,31 @@ export default function DrawAndGuessApp({
                   )}
 
                   {phase === 'roundA_success' && (
-                    <button
-                      onClick={() => {
-                        setRound('roundB');
-                        startPlayerDrawingRound();
-                      }}
-                      className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-stone-950 font-bold text-[11px] shadow-lg hover:scale-105 active:scale-95 transition cursor-pointer flex items-center gap-1.5"
-                    >
-                      <span>进入下一回合（轮到你画）</span>
-                      <ChevronRight className="size-3.5" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleRerollAiSecretWord}
+                        className="px-3 py-1.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 text-pink-200 border border-pink-400/40 text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
+                      >
+                        <RefreshCw className="size-3" />
+                        <span>再猜一局</span>
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setRound('round_player_draw');
+                          startPlayerDrawingRound();
+                        }}
+                        className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-stone-950 font-bold text-[11px] shadow-lg hover:scale-105 active:scale-95 transition cursor-pointer flex items-center gap-1.5"
+                      >
+                        <span>换我来画（AI猜）</span>
+                        <ChevronRight className="size-3.5" />
+                      </button>
+                    </div>
                   )}
                 </>
               )}
 
-              {round === 'roundB' && (
+              {round === 'round_player_draw' && (
                 <>
                   {phase === 'player_drawing' && (
                     <button
@@ -1102,14 +1166,23 @@ export default function DrawAndGuessApp({
                       </button>
 
                       <button
-                        onClick={() => {
-                          setRound('roundA');
-                          setPhase('idle');
-                          handlePickRandomWord();
-                        }}
-                        className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500 text-white font-bold text-[11px] shadow-lg hover:scale-105 active:scale-95 transition cursor-pointer flex items-center gap-1.5"
+                        onClick={handleRerollPlayerWord}
+                        className="px-3.5 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 text-stone-950 font-bold text-[11px] shadow-lg hover:scale-105 active:scale-95 transition cursor-pointer flex items-center gap-1.5"
                       >
-                        <span>开始新一轮</span>
+                        <span>再画一局</span>
+                        <ChevronRight className="size-3.5" />
+                      </button>
+
+                      <button
+                        onClick={() => {
+                          setRound('round_ai_draw');
+                          setPhase('idle');
+                          stopAnimation();
+                          clearCanvas();
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 text-pink-200 border border-pink-400/40 text-[11px] font-bold transition cursor-pointer flex items-center gap-1"
+                      >
+                        <span>换AI来画（我猜）</span>
                         <ChevronRight className="size-3.5" />
                       </button>
                     </div>
@@ -1194,7 +1267,7 @@ export default function DrawAndGuessApp({
                 const isSystem = msg.sender === 'system';
                 if (isSystem) {
                   return (
-                    <div key={msg.id} className="text-center text-[9.5px] text-amber-300/80 py-0.5">
+                    <div key={msg.id} className="text-center text-[9.5px] text-amber-300/80 py-0.5 bg-white/5 rounded-lg">
                       {msg.text}
                     </div>
                   );
@@ -1224,9 +1297,9 @@ export default function DrawAndGuessApp({
             </div>
           </div>
 
-          {/* Guess Submission Input / Guess Feedback Area */}
+          {/* Guess Submission Input / Feedback Area */}
           <div className="space-y-1.5 shrink-0">
-            {round === 'roundA' && (
+            {round === 'round_ai_draw' ? (
               <form onSubmit={handleGuessSubmit} className="space-y-1.5">
                 <div className="relative flex items-center">
                   <input
@@ -1234,9 +1307,9 @@ export default function DrawAndGuessApp({
                     disabled={phase !== 'guessing'}
                     placeholder={
                       phase === 'ai_drawing'
-                        ? '等待AI画画完成中...'
+                        ? '等待AI作画完成中...'
                         : phase === 'guessing'
-                        ? '输入你猜的词语并回车...'
+                        ? `猜猜是什么？(${aiSecret.word.length}个字)`
                         : '点击开始AI绘画进入猜词'
                     }
                     value={guessInput}
@@ -1271,15 +1344,15 @@ export default function DrawAndGuessApp({
                   </div>
                 )}
               </form>
-            )}
-
-            {round === 'roundB' && (
+            ) : (
               <div className="p-2 rounded-xl bg-black/40 border border-white/5 text-[10.5px] text-white/70 space-y-1">
                 <div className="flex items-center gap-1 text-amber-300 font-bold">
                   <Sparkles className="size-3" />
-                  <span>轮到你作画说明</span>
+                  <span>轮到你作画</span>
                 </div>
-                <p>鼠标或手指在左侧画布拖拽自由作画。支持选择颜色与橡皮擦。画好后点击“完成绘画，让TA猜”，看看{currentArtist.name}的即时反馈！</p>
+                <p>
+                  请根据提示【<strong className="text-amber-200">{playerTopic.word}</strong>】在画板自由作画，支持选择调色板与橡皮。画好后点击“完成绘画，让TA猜”！
+                </p>
               </div>
             )}
           </div>

@@ -78,6 +78,14 @@ import { outboxQueue, type OutboxTaskResult } from '../lib/outboxQueue';
 import { backgroundKeepAlive } from '../lib/backgroundKeepAlive';
 
 
+import {
+  idbSaveChatSession,
+  idbLoadChatSession,
+  idbGetCachedChatSession,
+  idbMigrateFromLocalStorage,
+  type DBChatSession,
+} from '../lib/idb';
+
 const STORAGE_PREFIX = '__rp_engine_char_state_';
 const ACTIVE_CHAR_KEY = '__rp_engine_active_char_id';
 const LEGACY_STORAGE_KEY = '__rp_engine_state';
@@ -95,13 +103,25 @@ function getStorageKeyForChar(characterId: string): string {
 }
 
 function loadSavedStateForChar(characterId: string): SavedState | null {
+  // 1. Check IDB in-memory cache first for fast sync return
+  const idbCached = idbGetCachedChatSession(characterId);
+  if (idbCached && idbCached.characterId && idbCached.emotion) {
+    return {
+      characterId: idbCached.characterId,
+      emotion: idbCached.emotion,
+      backgroundThreads: idbCached.backgroundThreads || [],
+      triggeredAnchors: idbCached.triggeredAnchors || [],
+      messages: idbCached.messages || [],
+    };
+  }
+
+  // 2. Check localStorage fallback
   try {
     const raw = localStorage.getItem(getStorageKeyForChar(characterId));
     if (raw) {
       const parsed = JSON.parse(raw) as SavedState;
       if (parsed.characterId && parsed.emotion) return parsed;
     }
-    // Fallback: check legacy storage if character matches
     const legacyRaw = localStorage.getItem(LEGACY_STORAGE_KEY);
     if (legacyRaw) {
       const legacy = JSON.parse(legacyRaw) as SavedState;
@@ -128,15 +148,17 @@ function captureSnapshot(s: SessionState) {
 
 function saveState(s: SessionState) {
   try {
-    const data: SavedState = {
+    const data: DBChatSession = {
       characterId: s.characterId,
+      characterName: s.characterName,
       emotion: s.emotion,
       backgroundThreads: s.backgroundThreads,
       triggeredAnchors: s.triggeredAnchors,
       messages: s.messages,
+      updatedAt: Date.now(),
     };
-    localStorage.setItem(getStorageKeyForChar(s.characterId), JSON.stringify(data));
-    localStorage.setItem(ACTIVE_CHAR_KEY, s.characterId);
+    // Save to IndexedDB (asynchronous + resilient against 5MB localStorage caps)
+    idbSaveChatSession(data).catch(() => {});
   } catch {
     // non-fatal
   }
@@ -207,7 +229,40 @@ export function useEngine() {
     readyRef.current = true;
     rerender();
 
-    // Listen for outbox tasks completed in background or across tab switches
+    // 1. One-time migration of any legacy localStorage data to IndexedDB
+    idbMigrateFromLocalStorage().then(() => {
+      // After migration, if memory cache has newer data for active character, refresh stateRef
+      const s = stateRef.current;
+      const cached = idbGetCachedChatSession(s.characterId);
+      if (cached && cached.messages && cached.messages.length > s.messages.length) {
+        s.messages = cached.messages;
+        s.emotion = cached.emotion || s.emotion;
+        s.backgroundThreads = cached.backgroundThreads || s.backgroundThreads;
+        s.triggeredAnchors = cached.triggeredAnchors || s.triggeredAnchors;
+        rerender();
+      }
+    });
+
+    // 2. Global event listener for storage reload (e.g. after backup import)
+    const handleStorageReloaded = () => {
+      const s = stateRef.current;
+      const cached = idbGetCachedChatSession(s.characterId);
+      if (cached) {
+        s.messages = cached.messages || [];
+        s.emotion = cached.emotion || s.emotion;
+        s.backgroundThreads = cached.backgroundThreads || [];
+        s.triggeredAnchors = cached.triggeredAnchors || [];
+      }
+      const freshChar = getCharacterById(s.characterId);
+      if (freshChar) {
+        s.characterName = freshChar.name;
+      }
+      rerender();
+    };
+
+    window.addEventListener('rp_engine_storage_reloaded', handleStorageReloaded);
+
+    // 3. Listen for outbox tasks completed in background or across tab switches
     const unsub = outboxQueue.onCompleted((task) => {
       const s = stateRef.current;
       if (task.payload.characterId === s.characterId && task.result) {
@@ -225,7 +280,10 @@ export function useEngine() {
       }
     });
 
-    return () => unsub();
+    return () => {
+      unsub();
+      window.removeEventListener('rp_engine_storage_reloaded', handleStorageReloaded);
+    };
   }, [mergeAndDedupeMessages, rerender]);
 
   const persist = useCallback((s: SessionState) => {

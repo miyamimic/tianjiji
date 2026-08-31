@@ -224,8 +224,76 @@ export default function Sidebar({
     ? classifiedDynamicMemories 
     : classifiedDynamicMemories.filter((dm) => dm.tier === memoryTierFilter);
 
+  // Gesture handling: Swipe left to summon sidebar, Swipe right to exit sidebar
+  useEffect(() => {
+    let startX = 0;
+    let startY = 0;
+    let startTime = 0;
+
+    const handleTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      startTime = Date.now();
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      if (!startX || !startY) return;
+      const endX = e.changedTouches[0].clientX;
+      const endY = e.changedTouches[0].clientY;
+      const deltaX = endX - startX;
+      const deltaY = endY - startY;
+      const timeDiff = Date.now() - startTime;
+
+      // Reset coordinates
+      startX = 0;
+      startY = 0;
+
+      // Filter out long drags (> 800ms) or short jitters (< 45px)
+      if (timeDiff > 800) return;
+      if (Math.abs(deltaX) < 45 || Math.abs(deltaX) < Math.abs(deltaY) * 1.25) return;
+
+      // Ignore gesture if user is typing in an input or textarea
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable ||
+          target.closest('input, textarea, [role="slider"]'))
+      ) {
+        return;
+      }
+
+      if (!isOpen && deltaX < -45) {
+        // User swiped left: summon the 6-dimension emotion sidebar
+        onToggle();
+      } else if (isOpen && deltaX > 45) {
+        // User swiped right: exit/retract the 6-dimension emotion sidebar
+        onToggle();
+      }
+    };
+
+    window.addEventListener('touchstart', handleTouchStart, { passive: true });
+    window.addEventListener('touchend', handleTouchEnd, { passive: true });
+
+    return () => {
+      window.removeEventListener('touchstart', handleTouchStart);
+      window.removeEventListener('touchend', handleTouchEnd);
+    };
+  }, [isOpen, onToggle]);
+
   return (
     <>
+      {/* Mobile / Overlay Backdrop */}
+      {isOpen && (
+        <div
+          onClick={onToggle}
+          className="fixed inset-0 z-[65] bg-black/20 backdrop-blur-[1.5px] transition-opacity duration-300 md:hidden"
+          aria-hidden="true"
+        />
+      )}
+
       {/* Sidebar Chassis */}
       <aside
         className={`${
@@ -239,7 +307,7 @@ export default function Sidebar({
           <button
             onClick={onToggle}
             className="flex items-center gap-2 px-2 py-1 rounded-xl text-[#732641] hover:bg-[#fae1e8] transition-all cursor-pointer group"
-            title="收起六维情绪栏"
+            title="向右滑动或点击收起六维情绪栏"
             aria-label="收起六维情绪栏"
           >
             <ChevronLeft className="size-4 text-[#b83d5a] group-hover:-translate-x-0.5 transition-transform stroke-[2.5]" />

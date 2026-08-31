@@ -15,7 +15,7 @@ import type { Character } from '../data/types';
 import { loadCharAvatar } from '../lib/customStore';
 import { ambiencePlayer, type AmbienceState } from '../lib/ambiencePlayer';
 import CreateCharacterModal from './CreateCharacterModal';
-import { LinePuppyMascot, LinePuppyDoodle, FlowerLacePattern, StardewPixelFlower, CuteBlueFishIcon } from './FrenchLacePuppyElements';
+import { FlowerLacePattern, CuteBlueFishIcon } from './FrenchLacePuppyElements';
 
 interface Props {
   currentCharacter: Character;
@@ -44,8 +44,8 @@ export default function TopBar({
   onSwitchCharacter,
   onToggleSidebar,
   sidebarOpen,
-  onClearHistory,
-  onResetEmotion,
+  onClearHistory: _onClearHistory,
+  onResetEmotion: _onResetEmotion,
   onOpenSettings,
   llmReady,
   portrait = false,
@@ -65,7 +65,7 @@ export default function TopBar({
   return (
     <>
       <header
-        className={`fixed top-0 left-0 right-0 z-40 bg-white/70 backdrop-blur-xl border-b border-[#f2d0d9] shadow-sm transition-all duration-300 ${
+        className={`fixed top-0 left-0 right-0 z-40 bg-white/75 backdrop-blur-xl border-b border-[#f2d0d9] shadow-xs transition-all duration-300 ${
           !portrait && sidebarOpen ? 'pr-80' : 'pr-0'
         }`}
       >
@@ -74,10 +74,10 @@ export default function TopBar({
           <FlowerLacePattern className="w-full h-full object-cover" />
         </div>
 
-        <div className="flex h-14 items-center justify-between pl-14 sm:pl-16 pr-3 md:px-6">
-          {/* Left: character info + horizontal avatar switcher + cute puppy mascot */}
-          <div className="flex items-center gap-2">
-            <div className="size-9 rounded-full bg-gradient-to-br from-[#fcd3de] to-[#f7a8be] flex items-center justify-center text-sm font-serif font-bold text-[#8a3854] shadow-md shadow-[#e07a93]/20 overflow-hidden border-2 border-white shrink-0 relative group">
+        <div className="flex h-14 items-center justify-between pl-12 sm:pl-16 pr-2.5 sm:pr-4 md:px-6">
+          {/* Left: character info + horizontal avatar switcher + status badge */}
+          <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+            <div className="size-8 sm:size-9 rounded-full bg-gradient-to-br from-[#fcd3de] to-[#f7a8be] flex items-center justify-center text-xs sm:text-sm font-serif font-bold text-[#8a3854] shadow-sm overflow-hidden border-2 border-white shrink-0 relative group">
               {charAvatar ? (
                 <img src={charAvatar} alt={currentCharacter.name} className="w-full h-full object-cover" />
               ) : (
@@ -85,17 +85,17 @@ export default function TopBar({
               )}
             </div>
 
-            <div className="relative">
+            <div className="relative shrink-0">
               <button
                 onClick={() => setDropdownOpen((v) => !v)}
-                className="flex items-center gap-1.5 h-9 px-2.5 rounded-full bg-white/60 hover:bg-white/90 transition-all border border-[#f2d0d9] hover:border-[#e07a93] active:scale-95 shadow-sm"
+                className="flex items-center gap-1 sm:gap-1.5 h-8 sm:h-9 px-2 sm:px-2.5 rounded-full bg-white/60 hover:bg-white/90 transition-all border border-[#f2d0d9] hover:border-[#e07a93] active:scale-95 shadow-xs"
               >
-                <Heart className="size-4 fill-[#b83d5a] text-[#b83d5a] mr-0.5 shrink-0" />
-                <span className="font-serif font-bold text-[#732641] text-[14.5px] tracking-wide [text-shadow:0_1px_2px_rgba(224,122,147,0.3),0_2px_4px_rgba(115,38,65,0.12)]">
+                <Heart className="size-3.5 sm:size-4 fill-[#b83d5a] text-[#b83d5a] shrink-0" />
+                <span className="font-serif font-bold text-[#732641] text-xs sm:text-[14px] tracking-wide max-w-[80px] sm:max-w-[140px] truncate [text-shadow:0_1px_2px_rgba(224,122,147,0.25)]">
                   {currentCharacter.name}
                 </span>
                 <ChevronDown
-                  className={`size-3.5 text-[#998380] transition-transform duration-200 ${
+                  className={`size-3 sm:size-3.5 text-[#998380] transition-transform duration-200 shrink-0 ${
                     dropdownOpen ? 'rotate-180 text-[#e07a93]' : ''
                   }`}
                 />
@@ -187,16 +187,16 @@ export default function TopBar({
               )}
             </div>
 
-            {/* Cute Blue Fish & LLM status badge */}
-            <div className="ml-1 sm:ml-2 flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/80 border border-[#f2d0d9] shadow-xs">
-              <CuteBlueFishIcon size={20} className="hidden sm:inline-block" />
+            {/* Cute Blue Fish & LLM status badge (Always displays text on mobile and desktop) */}
+            <div className="flex items-center gap-1 sm:gap-1.5 px-2 py-0.5 sm:py-1 rounded-full bg-white/80 border border-[#f2d0d9] shadow-xs shrink-0">
+              <CuteBlueFishIcon size={16} className="hidden xs:inline-block sm:inline-block" />
               <div
-                className={`size-2 rounded-full ${
+                className={`size-2 rounded-full shrink-0 ${
                   llmReady ? 'bg-emerald-400' : 'bg-[#e6b8c4]'
                 } ${llmReady ? 'animate-pulse' : ''}`}
               />
-              <span className="text-[10px] font-serif font-medium text-[#8a3854] hidden sm:inline">
-                {llmReady ? '灵犀在线' : '本地离线'}
+              <span className="text-[10px] sm:text-[11px] font-serif font-medium text-[#8a3854] shrink-0 whitespace-nowrap">
+                {llmReady ? '在线' : '离线'}
               </span>
             </div>
 
@@ -204,7 +204,7 @@ export default function TopBar({
             {ambience.activeSound && (
               <button
                 onClick={() => ambiencePlayer.stop()}
-                className="ml-1 flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-[#fcedf1] hover:bg-red-50 text-[#8a3854] hover:text-red-500 border border-[#f2d0d9] transition-colors text-[11px] shadow-xs"
+                className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-[#fcedf1] hover:bg-red-50 text-[#8a3854] hover:text-red-500 border border-[#f2d0d9] transition-colors text-[10px] shadow-xs shrink-0"
                 title={`正在播放白噪音：${
                   ambience.activeSound === 'fire' ? '壁炉篝火' : ambience.activeSound === 'rain' ? '夜雨微澜' : '林间清风'
                 }（点击关闭）`}
@@ -212,7 +212,7 @@ export default function TopBar({
                 {ambience.activeSound === 'fire' && <Flame className="size-3 text-amber-500 animate-pulse" />}
                 {ambience.activeSound === 'rain' && <CloudRain className="size-3 text-pink-500 animate-bounce" />}
                 {ambience.activeSound === 'wind' && <Wind className="size-3 text-teal-500 animate-pulse" />}
-                <span className="text-[10px] font-serif hidden md:inline">
+                <span className="font-serif hidden md:inline">
                   {ambience.activeSound === 'fire' ? '篝火' : ambience.activeSound === 'rain' ? '夜雨' : '清风'}
                 </span>
               </button>
@@ -220,7 +220,7 @@ export default function TopBar({
           </div>
 
           {/* Right: settings + sidebar toggle */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
             <button
               onClick={onOpenSettings}
               className="size-8 sm:size-9 flex items-center justify-center rounded-full bg-white/70 hover:bg-white text-[#998380] hover:text-[#8a3854] border border-[#f2d0d9] transition-all shadow-xs cursor-pointer"
