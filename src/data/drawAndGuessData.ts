@@ -114,7 +114,7 @@ export const AI_ARTISTS: AiArtistCharacter[] = [
     id: 'char_001',
     name: '陆沉',
     avatar: '🍷',
-    title: '艺术大师 · 沉着内敛',
+    title: '沉着内敛 · 掌控从容',
     tag: '大师级画风',
     personality: '笔触沉稳流畅，分寸感极强，下笔如有神助。',
     paintingPersona: '大师级，一笔到位。线条少而精准，从容典雅，每笔都有深刻的几何与构图意义。',
@@ -144,45 +144,11 @@ export const AI_ARTISTS: AiArtistCharacter[] = [
       size: 11,
     },
   },
-  {
-    id: 'char_003',
-    name: '糊涂酱',
-    avatar: '🐱',
-    title: '灵魂画手 · 呆萌手残',
-    tag: '手残灵魂派',
-    personality: '手腕微微发抖，线条随缘起伏，全靠心意与真诚取胜。',
-    paintingPersona: '手残灵魂派。手腕微微发抖，线条经常歪歪扭扭但神韵意外可爱，偶尔画错会补一笔修正。',
-    brushParams: {
-      thinning: 0.2,
-      smoothing: 0.2,
-      jitter: 0.72,
-      taperStart: 2,
-      taperEnd: 2,
-      size: 10,
-    },
-  },
-  {
-    id: 'char_004',
-    name: '桃桃',
-    avatar: '🌸',
-    title: '治愈插画 · 软萌纯真',
-    tag: '治愈软萌风',
-    personality: '画风圆润饱满，线条温柔细腻，充满阳光糖果色。',
-    paintingPersona: '治愈插画风。笔画圆润饱满，线条温柔细腻，色彩偏爱暖粉与清透色调，喜欢添加装饰性小细节。',
-    brushParams: {
-      thinning: 0.35,
-      smoothing: 0.82,
-      jitter: 0.08,
-      taperStart: 14,
-      taperEnd: 12,
-      size: 10,
-    },
-  },
 ];
 
 /**
- * Get all available artists dynamically, seamlessly merging user-created custom characters
- * and built-in preset characters so none are lost!
+ * Get all available artists dynamically, pulling the real saved character list
+ * (including custom characters created in settings) with fallback to default characters.
  */
 export function getAllPlayableArtists(): AiArtistCharacter[] {
   const result: AiArtistCharacter[] = [];
@@ -196,6 +162,9 @@ export function getAllPlayableArtists(): AiArtistCharacter[] {
     const saved = loadSavedCharacters();
     if (Array.isArray(saved) && saved.length > 0) {
       saved.forEach((char) => {
+        if (char.name === '糊涂酱' || char.name.includes('糊涂')) {
+          return;
+        }
         const customAvatar = loadCharAvatar(char.character_id);
         const preset = presetMap.get(char.character_id) || presetMap.get(char.name);
 
@@ -207,14 +176,14 @@ export function getAllPlayableArtists(): AiArtistCharacter[] {
             avatar: customAvatar || preset.avatar || '🎨',
             title: preset.title || `${char.name} · 专属画伴`,
             tag: preset.tag || (char.core.values?.[0] ? `${char.core.values[0]}画风` : '专属风格'),
-            personality: preset.personality || char.core.values.join('、'),
+            personality: preset.personality || char.core.values?.join('、') || '',
             paintingPersona:
               preset.paintingPersona ||
-              `符合${char.name}性格（${char.core.values.join('、')}，${char.core.speech_filter}）的独特绘画风格。`,
+              `符合${char.name}性格（${char.core.values?.join('、') || ''}，${char.core.speech_filter}）的独特绘画风格。`,
           });
         } else {
           // User-created Custom Character
-          const valuesStr = char.core?.values?.join('、') || '专属独立个性';
+          const valuesStr = char.core?.values?.join('、') || '专属个性';
           const filter = char.core?.speech_filter || 'casual';
           const avatar = customAvatar || '🎨';
 
@@ -242,13 +211,7 @@ export function getAllPlayableArtists(): AiArtistCharacter[] {
     console.warn('Failed to load dynamic characters:', err);
   }
 
-  // Include guest presets (糊涂酱, 桃桃) if not in saved list
-  AI_ARTISTS.forEach((preset) => {
-    if (!result.some((r) => r.id === preset.id || r.name === preset.name)) {
-      result.push(preset);
-    }
-  });
-
+  // If no saved characters found, fallback to AI_ARTISTS
   return result.length > 0 ? result : AI_ARTISTS;
 }
 

@@ -308,10 +308,10 @@ export function loadSavedCharacters(): Character[] {
       if (Array.isArray(parsed) && parsed.length > 0) {
         const map = new Map<string, Character>();
         for (const c of parsed) {
-          if (c && c.character_id) map.set(c.character_id, c);
+          if (c && c.character_id && c.name !== '糊涂酱' && !c.name.includes('糊涂')) map.set(c.character_id, c);
         }
         for (const c of MOCK_CHARACTERS) {
-          if (!map.has(c.character_id)) map.set(c.character_id, c);
+          if (!map.has(c.character_id) && c.name !== '糊涂酱' && !c.name.includes('糊涂')) map.set(c.character_id, c);
         }
         return Array.from(map.values());
       }
@@ -319,8 +319,8 @@ export function loadSavedCharacters(): Character[] {
   } catch {
     // ignore
   }
-  // If not edited yet, return the default mock characters
-  return MOCK_CHARACTERS;
+  // If not edited yet, return the default mock characters filtered
+  return MOCK_CHARACTERS.filter((c) => c.name !== '糊涂酱' && !c.name.includes('糊涂'));
 }
 
 export function saveCharacterEdit(character: Character): void {

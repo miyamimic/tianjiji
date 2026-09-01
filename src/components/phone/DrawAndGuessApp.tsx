@@ -21,8 +21,10 @@ import {
   Award,
   Zap,
   Check,
-  ChevronDown
+  ChevronDown,
+  Home,
 } from 'lucide-react';
+import drawGuessBg from '../../assets/images/draw_guess_bg_1788233580724.jpg';
 import {
   WORD_CATEGORIES,
   AI_ARTISTS,
@@ -64,6 +66,7 @@ interface Props {
 
 export type GameRound = 'round_ai_draw' | 'round_player_draw';
 export type GamePhase =
+  | 'welcome'           // 选模式与分类引导界面
   | 'idle'
   | 'topic_negotiation' // LLM 商量出题/选题阶段
   | 'ai_generating'     // LLM 构思与生成阶段
@@ -72,7 +75,8 @@ export type GamePhase =
   | 'roundA_success'    // 结算阶段
   | 'player_drawing'    // 玩家作画阶段
   | 'player_finished'   // 玩家画完 AI 猜词互动阶段
-  | 'player_replaying'; // 重播玩家画作阶段
+  | 'player_replaying'  // 重播玩家画作阶段
+  | 'roundB_success';   // 玩家画 AI 猜成功结算
 
 interface ChatMessage {
   id: string;
@@ -158,7 +162,8 @@ export default function DrawAndGuessApp({
 
   // Main Mode Choice: 'round_ai_draw' (AI出题我猜) or 'round_player_draw' (我画AI猜)
   const [round, setRound] = useState<GameRound>('round_ai_draw');
-  const [phase, setPhase] = useState<GamePhase>('topic_negotiation');
+  const [phase, setPhase] = useState<GamePhase>('welcome');
+  const [selectedCategory, setSelectedCategory] = useState<string>('可爱动物');
 
   // Topic Negotiation State (AI商量出题)
   const [negotiationInput, setNegotiationInput] = useState<string>('');
@@ -456,7 +461,7 @@ export default function DrawAndGuessApp({
   // -------------------------------------------------------------
   // ① TOPIC NEGOTIATION START: AI 角色主动向玩家发起出题商量
   // -------------------------------------------------------------
-  const startTopicNegotiation = useCallback(async () => {
+  const startTopicNegotiation = useCallback(async (initialCategory?: string) => {
     if (isInitiatingProposalRef.current) return;
     isInitiatingProposalRef.current = true;
     stopAnimation();
@@ -479,6 +484,11 @@ export default function DrawAndGuessApp({
       const now = new Date();
       const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
       
+      let textMsg = proposal.speech;
+      if (initialCategory && initialCategory !== '自由出题') {
+        textMsg = `“我们来挑战【${initialCategory}】分类吧！我已经想好题目了，看看你能用几笔猜出来～”`;
+      }
+
       // Cleanly initialize the chat stream with this single opening proposal
       setChatMessages([
         {
@@ -486,7 +496,7 @@ export default function DrawAndGuessApp({
           sender: 'ai',
           name: currentArtist.name,
           avatar: currentArtist.avatar,
-          text: proposal.speech,
+          text: textMsg,
           time: timeStr,
         },
       ]);
@@ -999,47 +1009,37 @@ export default function DrawAndGuessApp({
     }
   }, [playerStrokes, stopAnimation, triggerSound, addChatMessage, activeChar, playerTopic.category]);
 
-  // Player interacts with AI during AI Guessing (gives text hints or encouragement)
+  // Player asks AI to guess drawing or interacts with AI
   const handlePlayerSendInteractiveMessage = useCallback(
     async (customText?: string) => {
+      if (aiIsThinking) return;
       const text = (customText || playerInteractiveInput).trim();
-      if (!text || aiIsThinking) return;
+      const sendText = text || '你看我画的是什么？快猜猜看～';
 
-      addChatMessage('player', text);
+      addChatMessage('player', sendText);
       setPlayerInteractiveInput('');
       setAiIsThinking(true);
-
-      const nextStage = aiGuessStage === 1 ? 2 : 3;
-      setAiGuessStage(nextStage as 2 | 3);
 
       const semanticSummary = generateStrokeSemanticSummary(playerStrokes);
       const config = loadLlmConfig();
       try {
-        if (nextStage === 2) {
-          // Stage 2: AI gets very close and asks for encouragement
-          const res = await generateDrawAndGuessAiGuessReaction(
-            config,
-            activeChar,
-            2,
-            playerTopic.category,
-            semanticSummary,
-            text
-          );
-          addChatMessage('ai', res.speech);
-        } else {
-          // Stage 3: AI excitedly guesses correctly!
-          const res = await generateDrawAndGuessAiGuessReaction(
-            config,
-            activeChar,
-            3,
-            playerTopic.category,
-            semanticSummary,
-            text,
-            playerTopic.word
-          );
-          addChatMessage('ai', res.speech);
+        const res = await generateDrawAndGuessAiGuessReaction(
+          config,
+          activeChar,
+          aiGuessStage + 1,
+          playerTopic.category,
+          semanticSummary,
+          sendText,
+          playerTopic.word
+        );
+
+        addChatMessage('ai', res.speech);
+
+        if (res.isCorrect) {
           triggerSound('correct');
           setScores((prev) => ({ ...prev, aiWins: prev.aiWins + 1 }));
+          setPhase('roundB_success');
+          setAiGuessStage(3);
 
           if (res.gameTotalDelta) {
             recordGameEmotionImpact({
@@ -1053,9 +1053,14 @@ export default function DrawAndGuessApp({
               totalDelta: res.gameTotalDelta,
               applied: true,
               appliedTimestamp: Date.now(),
-              summary: `【你画我猜】「${activeChar.name}」心领神会猜出了主控所画的【${playerTopic.word}】。`,
+              summary: `【你画我猜】「${activeChar.name}」精明猜出了主控所画的【${playerTopic.word}】。`,
             });
           }
+        } else {
+          triggerSound('click');
+          setAiGuessStage((prev) => (prev >= 3 ? 3 : (prev + 1) as 0 | 1 | 2 | 3));
+          // Keep canvas open in 'player_drawing' so player can add more strokes!
+          setPhase('player_drawing');
         }
       } finally {
         setAiIsThinking(false);
@@ -1195,117 +1200,252 @@ export default function DrawAndGuessApp({
     };
   }, [stopAnimation]);
 
-  // Initial mount: Start topic negotiation with AI
+  // Initial mount: Start on Welcome screen
   useEffect(() => {
-    if (!hasMountedRef.current) {
-      hasMountedRef.current = true;
-      startTopicNegotiation();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // Keep phase as 'welcome' on launch so player chooses mode and category first
   }, []);
 
   return (
-    <div className="w-full h-full flex flex-col bg-stone-950 text-white select-none overflow-hidden text-xs">
+    <div className="w-full h-full flex flex-col bg-stone-950 text-white select-none overflow-hidden text-xs relative">
+      
+      {/* ================= WELCOME / SETUP SCREEN OVERLAY ================= */}
+      {phase === 'welcome' && (
+        <div className="absolute inset-0 z-50 flex flex-col items-center justify-center p-3 sm:p-5 bg-stone-950 text-white overflow-hidden">
+          {/* Background Image */}
+          <img
+            src={drawGuessBg}
+            alt="你画我猜背景"
+            referrerPolicy="no-referrer"
+            className="absolute inset-0 w-full h-full object-cover opacity-30 blur-[1px]"
+          />
+          <div className="absolute inset-0 bg-gradient-to-t from-stone-950 via-stone-950/75 to-stone-950/45" />
+
+          {/* Setup Card */}
+          <div className="relative z-10 w-full max-w-sm sm:max-w-md bg-stone-900/90 border border-white/10 rounded-2xl p-4 sm:p-5 shadow-2xl backdrop-blur-xl flex flex-col gap-3.5 my-auto overflow-y-auto max-h-[95vh]">
+            
+            {/* Top Bar inside welcome card */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-1.5">
+                <Palette className="size-5 text-pink-400 animate-pulse" />
+                <span className="font-bold text-sm text-pink-300">你画我猜 · 笔尖默契</span>
+              </div>
+              {onExit && (
+                <button
+                  onClick={onExit}
+                  className="px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/15 text-stone-300 text-[10px] transition cursor-pointer"
+                >
+                  ← 退出
+                </button>
+              )}
+            </div>
+
+            <p className="text-stone-300 text-[11px] leading-relaxed">
+              欢迎来到你画我猜！先挑选你心仪的<b>玩法模式</b>与<b>题目分类</b>，开启趣味互动作画吧：
+            </p>
+
+            {/* 1. Mode Selector */}
+            <div className="space-y-1">
+              <div className="text-[10.5px] font-bold text-amber-300 flex items-center gap-1">
+                <Zap className="size-3 text-amber-400" />
+                <span>1. 选择玩法模式</span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  onClick={() => setRound('round_ai_draw')}
+                  className={`p-2.5 rounded-xl border text-left transition flex flex-col gap-0.5 cursor-pointer ${
+                    round === 'round_ai_draw'
+                      ? 'bg-gradient-to-br from-pink-500/25 to-rose-500/25 border-pink-400 text-white ring-1 ring-pink-500/50'
+                      : 'bg-white/5 border-white/10 text-stone-300 hover:bg-white/10'
+                  }`}
+                >
+                  <div className="font-bold text-xs flex items-center justify-between">
+                    <span>🎨 我猜 (AI出题)</span>
+                    {round === 'round_ai_draw' && <Check className="size-3.5 text-pink-400" />}
+                  </div>
+                  <p className="text-[9.5px] opacity-75 leading-tight">AI画伴执笔在画板作画，你在聊天框随时猜词</p>
+                </button>
+
+                <button
+                  onClick={() => setRound('round_player_draw')}
+                  className={`p-2.5 rounded-xl border text-left transition flex flex-col gap-0.5 cursor-pointer ${
+                    round === 'round_player_draw'
+                      ? 'bg-gradient-to-br from-amber-500/25 to-orange-500/25 border-amber-400 text-white ring-1 ring-amber-500/50'
+                      : 'bg-white/5 border-white/10 text-stone-300 hover:bg-white/10'
+                  }`}
+                >
+                  <div className="font-bold text-xs flex items-center justify-between">
+                    <span>✏️ 我画 (AI来猜)</span>
+                    {round === 'round_player_draw' && <Check className="size-3.5 text-amber-400" />}
+                  </div>
+                  <p className="text-[9.5px] opacity-75 leading-tight">你在画板挥毫作画，AI实时看懂线条并智能猜词</p>
+                </button>
+              </div>
+            </div>
+
+            {/* 2. Category Selector */}
+            <div className="space-y-1">
+              <div className="text-[10.5px] font-bold text-pink-300 flex items-center gap-1">
+                <Sparkles className="size-3 text-pink-400" />
+                <span>2. 选择题目分类</span>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {[
+                  { id: '可爱动物', name: '🐶 可爱动物' },
+                  { id: '美味食物', name: '🍔 美味食物' },
+                  { id: '日常物品', name: '📱 日常物品' },
+                  { id: '成语典故', name: '📜 成语典故' },
+                  { id: '自然科技', name: '🚀 自然科技' },
+                  { id: '自由出题', name: '💡 随机趣味' },
+                ].map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className={`py-1.5 px-2 rounded-xl border text-center text-[11px] transition font-medium cursor-pointer ${
+                      selectedCategory === cat.id
+                        ? 'bg-pink-500/20 border-pink-400 text-pink-300 font-bold'
+                        : 'bg-white/5 border-white/10 text-stone-300 hover:bg-white/10'
+                    }`}
+                  >
+                    {cat.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* 3. Character Selector */}
+            <div className="space-y-1">
+              <div className="text-[10.5px] font-bold text-emerald-300 flex items-center gap-1">
+                <Bot className="size-3 text-emerald-400" />
+                <span>3. 选择画伴角色</span>
+              </div>
+              <div className="flex items-center gap-2 bg-black/40 p-2 rounded-xl border border-white/10">
+                <span className="text-xl shrink-0">{currentArtist.avatar}</span>
+                <div className="flex-1 min-w-0">
+                  <select
+                    value={selectedCharId}
+                    onChange={(e) => setSelectedCharId(e.target.value)}
+                    className="bg-transparent text-amber-300 font-bold text-xs outline-none cursor-pointer w-full"
+                  >
+                    {playableArtists.map((a) => (
+                      <option key={a.id} value={a.id} className="bg-stone-900 text-white">
+                        {a.avatar} {a.name} ({a.tag || '画伴'})
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[9.5px] text-stone-400 truncate">{currentArtist.paintingPersona}</p>
+                </div>
+              </div>
+            </div>
+
+            {/* Start Game Button */}
+            <button
+              onClick={() => {
+                triggerSound('complete');
+                if (round === 'round_ai_draw') {
+                  startTopicNegotiation(selectedCategory);
+                } else {
+                  const topic = getRandomWord(selectedCategory);
+                  startPlayerDrawingRound(topic);
+                }
+              }}
+              className="w-full py-2.5 mt-1 bg-gradient-to-r from-pink-500 via-rose-500 to-amber-500 hover:from-pink-400 hover:to-amber-400 text-stone-950 font-extrabold rounded-xl shadow-lg shadow-pink-500/25 text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
+            >
+              <Play className="size-4 fill-stone-950" />
+              <span>开启互动 · 开始你画我猜</span>
+            </button>
+          </div>
+        </div>
+      )}
       
       {/* ================= TOP NAV BAR ================= */}
-      <div className="h-11 shrink-0 px-3 bg-stone-900 border-b border-white/10 flex items-center justify-between z-10">
-        <div className="flex items-center gap-2">
+      <div className="h-11 shrink-0 px-2 bg-stone-900 border-b border-white/10 flex items-center justify-between gap-1.5 z-10 w-full">
+        <div className="flex items-center gap-1 shrink-0">
           {onExit && (
             <button
               onClick={onExit}
-              className="py-1 px-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-stone-300 hover:text-white border border-white/10 flex items-center gap-1 transition active:scale-95 cursor-pointer font-medium"
+              className="p-1 px-2 rounded-lg bg-white/5 hover:bg-white/10 text-stone-300 hover:text-white border border-white/10 text-[11px] transition active:scale-95 cursor-pointer font-medium whitespace-nowrap"
             >
-              <span>← 返回大厅</span>
+              <span>← 返回</span>
             </button>
           )}
-          <div className="flex items-center gap-1.5 font-bold text-amber-300">
-            <Palette className="size-4 text-pink-400" />
-            <span className="tracking-wide">你画我猜 · 笔尖默契</span>
+
+          <button
+            onClick={() => setPhase('welcome')}
+            className="p-1 px-2 rounded-lg bg-pink-500/15 hover:bg-pink-500/25 text-pink-300 border border-pink-500/30 text-[11px] transition active:scale-95 cursor-pointer font-medium whitespace-nowrap flex items-center gap-1"
+            title="重新选择玩法模式与分类"
+          >
+            <Home className="size-3" />
+            <span>模式/分类</span>
+          </button>
+        </div>
+
+        {/* Two compact dropdowns side-by-side inside the Nav Bar */}
+        <div className="flex-1 flex items-center gap-1.5 max-w-xs sm:max-w-md min-w-0">
+          {/* Mode Selector */}
+          <div className="flex-1 flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded-lg border border-white/5 min-w-0">
+            <span className="text-[9px] text-stone-400 shrink-0">模式:</span>
+            <select
+              value={round}
+              onChange={(e) => {
+                const val = e.target.value as GameRound;
+                setRound(val);
+                if (val === 'round_ai_draw') {
+                  startTopicNegotiation();
+                } else {
+                  startPlayerDrawingRound();
+                }
+              }}
+              className="bg-transparent text-pink-300 text-[10.5px] font-bold outline-none cursor-pointer w-full truncate border-0 p-0"
+            >
+              <option value="round_ai_draw" className="bg-stone-900 text-white">我猜 (AI出题)</option>
+              <option value="round_player_draw" className="bg-stone-900 text-white">我画 (AI来猜)</option>
+            </select>
+          </div>
+
+          {/* Character Selector */}
+          <div className="flex-1 flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded-lg border border-white/5 min-w-0">
+            <span className="text-[9px] text-stone-400 shrink-0">画伴:</span>
+            <select
+              value={selectedCharId}
+              onChange={(e) => {
+                const newId = e.target.value;
+                setSelectedCharId(newId);
+                const artist = getAiArtistById(newId);
+                addChatMessage('ai', `你好呀，接下来由我「${artist.name}」来陪你玩你画我猜！`, artist.name, artist.avatar);
+              }}
+              className="bg-transparent text-amber-300 text-[10.5px] font-bold outline-none cursor-pointer w-full truncate border-0 p-0"
+            >
+              {playableArtists.map((a) => (
+                <option key={a.id} value={a.id} className="bg-stone-900 text-white">
+                  {a.avatar} {a.name}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
-        {/* Action Controls in Top Bar */}
-        <div className="flex items-center gap-2">
-          {/* Sound Toggle */}
+        {/* Score & Sound controls */}
+        <div className="flex items-center gap-1.5 shrink-0">
           <button
             onClick={() => setSoundEnabled((v) => !v)}
-            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-stone-300 border border-white/10 transition cursor-pointer"
+            className="p-1 rounded-lg bg-white/5 hover:bg-white/10 text-stone-300 border border-white/10 transition cursor-pointer"
             title={soundEnabled ? '音效开启' : '音效静音'}
           >
-            {soundEnabled ? <Volume2 className="size-3.5 text-emerald-400" /> : <VolumeX className="size-3.5 text-stone-500" />}
+            {soundEnabled ? <Volume2 className="size-3 text-emerald-400" /> : <VolumeX className="size-3 text-stone-500" />}
           </button>
 
-          {/* Score Counter */}
-          <div className="flex items-center gap-2 bg-black/40 px-2.5 py-1 rounded-full border border-white/10 font-mono text-[10.5px]">
-            <span className="text-amber-300">你: {scores.playerWins}</span>
-            <span className="text-white/30">|</span>
-            <span className="text-pink-300">{currentArtist.name}: {scores.aiWins}</span>
+          <div className="flex items-center gap-1 bg-black/40 px-1.5 py-0.5 rounded-full border border-white/10 font-mono text-[9px] whitespace-nowrap">
+            <span className="text-amber-300">我:{scores.playerWins}</span>
+            <span className="text-pink-300">{currentArtist.name}:{scores.aiWins}</span>
           </div>
         </div>
       </div>
 
       {/* ================= MAIN TWO-COLUMN BODY ================= */}
-      <div className="flex-1 flex flex-col md:flex-row overflow-y-auto md:overflow-hidden p-2 sm:p-2.5 gap-2.5 min-h-0">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden p-1.5 sm:p-2 gap-2 min-h-0 w-full">
         
         {/* ================= LEFT MAIN CANVAS & CONTROLS ================= */}
-        <div className="flex-1 flex flex-col bg-stone-900/80 border border-white/10 rounded-2xl p-2.5 shadow-xl backdrop-blur-md gap-2 shrink-0 md:shrink md:overflow-y-auto">
-          
-          {/* Top Control Bar: Mode Switcher & Opponent Selector */}
-          <div className="flex flex-wrap items-center justify-between gap-1.5 pb-2 border-b border-white/10 shrink-0">
-            {/* Mode Switcher Buttons */}
-            <div className="flex items-center bg-black/60 p-1 rounded-xl border border-white/10 gap-1">
-              <button
-                onClick={() => {
-                  setRound('round_ai_draw');
-                  startTopicNegotiation();
-                }}
-                className={`px-3 py-1 rounded-lg font-bold text-[11px] transition cursor-pointer flex items-center gap-1.5 ${
-                  round === 'round_ai_draw'
-                    ? 'bg-gradient-to-r from-pink-500 to-rose-500 text-white shadow-md ring-1 ring-pink-300'
-                    : 'text-stone-400 hover:text-white'
-                }`}
-              >
-                <Bot className="size-3.5" />
-                <span>AI出题（我来猜）</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  setRound('round_player_draw');
-                  startPlayerDrawingRound();
-                }}
-                className={`px-3 py-1 rounded-lg font-bold text-[11px] transition cursor-pointer flex items-center gap-1.5 ${
-                  round === 'round_player_draw'
-                    ? 'bg-gradient-to-r from-amber-500 to-orange-500 text-stone-950 shadow-md ring-1 ring-amber-300'
-                    : 'text-stone-400 hover:text-white'
-                }`}
-              >
-                <User className="size-3.5" />
-                <span>我来画（AI来猜）</span>
-              </button>
-            </div>
-
-            {/* Character Selector Pill with Full Support for Custom Characters */}
-            <div className="flex items-center gap-1.5 bg-black/40 px-2.5 py-1 rounded-xl border border-white/10">
-              <span className="text-[10px] text-stone-400">画伴:</span>
-              <select
-                value={selectedCharId}
-                onChange={(e) => {
-                  const newId = e.target.value;
-                  setSelectedCharId(newId);
-                  const artist = getAiArtistById(newId);
-                  addChatMessage('ai', `你好呀，接下来由我「${artist.name}」来陪你玩你画我猜！`, artist.name, artist.avatar);
-                }}
-                className="bg-transparent text-amber-300 text-[11px] font-bold outline-none cursor-pointer max-w-[150px] truncate"
-              >
-                {playableArtists.map((a) => (
-                  <option key={a.id} value={a.id} className="bg-stone-900 text-white">
-                    {a.avatar} {a.name} ({a.tag || '专属'})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
+        <div className="shrink-0 md:flex-1 flex flex-col bg-stone-900/80 border border-white/10 rounded-xl p-2 shadow-lg backdrop-blur-md gap-1.5 w-full min-h-0">
 
           {/* Secret / Topic Status Strip */}
           {round === 'round_ai_draw' ? (
@@ -1345,7 +1485,7 @@ export default function DrawAndGuessApp({
 
               <div className="flex items-center gap-2">
                 <button
-                  onClick={startTopicNegotiation}
+                  onClick={() => startTopicNegotiation()}
                   className="px-2 py-1 bg-white/10 hover:bg-white/15 text-pink-300 rounded-lg border border-white/10 text-[10.5px] flex items-center gap-1 transition cursor-pointer active:scale-95"
                   title="重新商量题目"
                 >
@@ -1406,9 +1546,26 @@ export default function DrawAndGuessApp({
             </div>
           )}
 
+          {/* Status Bar - Concise & neat */}
+          <div className="px-2 py-1 rounded-lg bg-black/40 border border-white/5 flex items-center justify-between text-[10px] shrink-0 font-medium text-stone-300">
+            <span className="flex items-center gap-1">
+              <span className="size-1.5 rounded-full bg-pink-400 animate-pulse" />
+              <span>画板状态:</span>
+            </span>
+            <span className="font-bold text-amber-300">
+              {phase === 'topic_negotiation' && `商定分类`}
+              {phase === 'ai_generating' && `AI 构思中...`}
+              {phase === 'ai_drawing' && `AI 实时画画 (${drawingRoundNumber}/3)`}
+              {phase === 'guessing' && `开始猜词！`}
+              {phase === 'player_drawing' && `我画 AI猜`}
+              {phase === 'player_finished' && `AI 猜词中...`}
+              {phase === 'player_replaying' && `重播画迹`}
+            </span>
+          </div>
+
           {/* ================= CANVAS DRAWING BOARD ================= */}
           {/* Note: touch-action: none & select-none guarantee zero scroll interference on the canvas itself */}
-          <div className="relative w-full h-[250px] sm:h-[290px] md:h-[340px] bg-white rounded-2xl shadow-xl overflow-hidden border-2 border-stone-800 cursor-crosshair shrink-0 flex-shrink-0 touch-none select-none">
+          <div className="relative w-full h-[180px] xs:h-[200px] sm:h-[230px] md:h-[320px] bg-white rounded-xl shadow-md overflow-hidden border border-stone-800 cursor-crosshair shrink-0 flex-shrink-0 touch-none select-none">
             <canvas
               ref={canvasRef}
               width={CANVAS_WIDTH}
@@ -1428,46 +1585,6 @@ export default function DrawAndGuessApp({
               onPointerLeave={handlePointerUp}
             />
 
-            {/* Status Overlay Ribbon */}
-            <div className="absolute top-2 left-2 z-10 pointer-events-none flex flex-col gap-1.5">
-              {phase === 'topic_negotiation' && (
-                <div className="px-2.5 py-1 rounded-full bg-black/85 text-pink-300 font-bold text-[10.5px] backdrop-blur-sm border border-pink-400/40 flex items-center gap-1.5 shadow">
-                  <MessageCircle className="size-3.5 text-pink-400" />
-                  <span>与 {currentArtist.name} 商量出题分类中...</span>
-                </div>
-              )}
-
-              {phase === 'ai_generating' && (
-                <div className="px-2.5 py-1 rounded-full bg-black/85 text-amber-300 font-bold text-[10.5px] backdrop-blur-sm border border-amber-400/40 flex items-center gap-1.5 shadow animate-pulse">
-                  <Sparkles className="size-3.5 text-amber-400 animate-spin" />
-                  <span>{currentArtist.name} 构思运笔中...</span>
-                </div>
-              )}
-
-              {phase === 'ai_drawing' && (
-                <div className="px-2.5 py-1 rounded-full bg-black/80 text-pink-300 font-bold text-[10.5px] backdrop-blur-sm border border-pink-400/30 flex items-center gap-1.5 shadow">
-                  <Bot className="size-3.5 text-pink-400 animate-spin" />
-                  <span>
-                    第 {drawingRoundNumber}/3 轮实时作画（{drawingRoundNumber === 1 ? '基础骨架' : drawingRoundNumber === 2 ? '细节添笔' : '画龙点睛'}）
-                  </span>
-                </div>
-              )}
-
-              {phase === 'guessing' && (
-                <div className="px-2.5 py-1 rounded-full bg-emerald-950/85 text-emerald-300 font-bold text-[10.5px] backdrop-blur-sm border border-emerald-400/40 flex items-center gap-1.5 shadow animate-pulse">
-                  <HelpCircle className="size-3.5 text-emerald-400" />
-                  <span>第 {drawingRoundNumber} 轮绘画完毕！请在下方输入猜词</span>
-                </div>
-              )}
-
-              {phase === 'player_drawing' && (
-                <div className="px-2.5 py-1 rounded-full bg-amber-950/85 text-amber-200 font-bold text-[10.5px] backdrop-blur-sm border border-amber-400/40 flex items-center gap-1.5 shadow">
-                  <User className="size-3.5 text-amber-400" />
-                  <span>请在画板自由作画（画笔已锁定无滚动冲突）</span>
-                </div>
-              )}
-            </div>
-
             {/* In-Game Drawing Quip Bubble (AI 作画随口小词) */}
             {activeQuip && (
               <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-bounce">
@@ -1479,25 +1596,25 @@ export default function DrawAndGuessApp({
             )}
           </div>
 
-          {/* ================= FIXED INPUT & TOOLBAR DIRECTLY UNDER CANVAS ================= */}
-          {/* This area is anchored directly under the canvas and NEVER scrolls away */}
-          <div className="shrink-0 pt-1 space-y-2">
+          {/* ================= COMPACT CONTROLS DIRECTLY UNDER CANVAS ================= */}
+          {/* Under canvas we ONLY render category chips or drawing controls/tools or success state action triggers */}
+          <div className="shrink-0 pt-0.5 space-y-1.5">
             {round === 'round_ai_draw' ? (
               phase === 'topic_negotiation' ? (
                 /* Topic Negotiation Bar */
-                <div className="space-y-2 bg-stone-950/80 p-2.5 rounded-xl border border-pink-500/20">
-                  <div className="flex items-center gap-1.5 text-pink-300 font-bold text-[11px] flex-wrap">
-                    <Sparkles className="size-3.5 shrink-0" />
-                    <span>选择想猜的题目分类或告诉 {currentArtist.name}：</span>
+                <div className="space-y-1 bg-stone-950/60 p-2 rounded-xl border border-pink-500/10">
+                  <div className="flex items-center gap-1 text-pink-300 font-bold text-[10px]">
+                    <Sparkles className="size-3 shrink-0" />
+                    <span>选择想猜的题目分类，或在右侧输入想画什么：</span>
                   </div>
                   {/* Category Chips */}
-                  <div className="flex items-center gap-1.5 flex-wrap">
+                  <div className="flex items-center gap-1 flex-wrap">
                     {suggestedCategories.map((cat) => (
                       <button
                         key={cat}
                         onClick={() => confirmTopicAndStartDrawing(cat)}
                         disabled={isNegotiating}
-                        className="px-2.5 py-1 bg-pink-500/15 hover:bg-pink-500/30 border border-pink-400/30 text-pink-200 rounded-lg font-bold text-[10.5px] transition active:scale-95 cursor-pointer disabled:opacity-50"
+                        className="px-2 py-0.5 bg-pink-500/10 hover:bg-pink-500/20 border border-pink-500/20 text-pink-200 rounded-md font-bold text-[10px] transition cursor-pointer disabled:opacity-50"
                       >
                         {cat}
                       </button>
@@ -1505,67 +1622,32 @@ export default function DrawAndGuessApp({
                     <button
                       onClick={() => confirmTopicAndStartDrawing('随心出题，直接画吧！')}
                       disabled={isNegotiating}
-                      className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/35 border border-amber-400/40 text-amber-200 rounded-lg font-bold text-[10.5px] transition active:scale-95 cursor-pointer ml-auto disabled:opacity-50"
+                      className="px-2 py-0.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/20 text-amber-200 rounded-md font-bold text-[10px] transition cursor-pointer disabled:opacity-50"
                     >
-                      🎲 直接开画！
+                      🎲 直接画！
                     </button>
                   </div>
-
-                  {/* Free text custom negotiation */}
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      if (negotiationInput.trim()) {
-                        confirmTopicAndStartDrawing(negotiationInput.trim());
-                      }
-                    }}
-                    className="flex gap-1.5"
-                  >
-                    <input
-                      type="text"
-                      value={negotiationInput}
-                      onChange={(e) => setNegotiationInput(e.target.value)}
-                      placeholder={`对 ${currentArtist.name} 说：比如“给我来个难的成语”或“画个可爱的生灵”...`}
-                      disabled={isNegotiating}
-                      className="flex-1 bg-stone-800/90 border border-white/15 rounded-xl px-3 py-2 text-stone-100 placeholder-stone-500 outline-none focus:border-pink-400 text-xs shadow-inner disabled:opacity-50"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!negotiationInput.trim() || isNegotiating}
-                      className="px-4 py-2 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 disabled:opacity-40 text-white font-bold rounded-xl shadow-md border border-pink-300 text-xs flex items-center gap-1 transition active:scale-95 cursor-pointer shrink-0"
-                    >
-                      <Send className="size-3.5" />
-                      <span>商定开画</span>
-                    </button>
-                  </form>
                 </div>
               ) : phase === 'guessing' ? (
-                /* Guessing Input Bar */
-                <form onSubmit={handleGuessSubmit} className="flex gap-1.5">
-                  <input
-                    type="text"
-                    value={guessInput}
-                    onChange={(e) => setGuessInput(e.target.value)}
-                    placeholder={`输入你猜的词语（${aiSecret.word.length}个字 · ${aiSecret.category}）...`}
-                    className="flex-1 bg-stone-800/90 border border-white/15 rounded-xl px-3 py-2 text-stone-100 placeholder-stone-500 outline-none focus:border-pink-400 text-xs shadow-inner"
-                    autoFocus
-                  />
-                  <button
-                    type="submit"
-                    disabled={!guessInput.trim()}
-                    className="px-5 py-2 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 disabled:opacity-40 text-white font-bold rounded-xl shadow-md border border-pink-300 text-xs flex items-center gap-1.5 transition active:scale-95 cursor-pointer shrink-0"
-                  >
-                    <Send className="size-3.5" />
-                    <span>提交猜词</span>
-                  </button>
-                </form>
+                /* Guessing stage quick action */
+                <div className="flex items-center justify-between gap-1 px-1 py-0.5">
+                  <span className="text-[10px] text-stone-400">请在右下方对话框提交您的猜词噢</span>
+                  {!aiSecretRevealed && (
+                    <button
+                      onClick={handleGiveUpAndReveal}
+                      className="px-2.5 py-1 bg-white/5 hover:bg-white/10 text-stone-300 rounded-lg text-[10px] transition cursor-pointer border border-white/5"
+                    >
+                      🏳️ 我猜不出，揭晓答案
+                    </button>
+                  )}
+                </div>
               ) : phase === 'roundA_success' ? (
-                <div className="flex gap-2">
+                <div className="flex gap-1.5">
                   <button
-                    onClick={startTopicNegotiation}
-                    className="flex-1 py-2 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white font-bold rounded-xl shadow-md text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
+                    onClick={() => startTopicNegotiation()}
+                    className="flex-1 py-1.5 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 text-white font-bold rounded-xl shadow-md text-xs flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
                   >
-                    <RefreshCw className="size-3.5" />
+                    <RefreshCw className="size-3" />
                     <span>再来一局 (商量出题)</span>
                   </button>
                   <button
@@ -1573,13 +1655,13 @@ export default function DrawAndGuessApp({
                       setRound('round_player_draw');
                       startPlayerDrawingRound();
                     }}
-                    className="py-2 px-4 bg-white/10 hover:bg-white/15 text-stone-200 font-bold rounded-xl border border-white/10 text-xs flex items-center gap-1 transition cursor-pointer"
+                    className="py-1.5 px-3 bg-white/5 hover:bg-white/10 text-stone-200 font-bold rounded-xl border border-white/10 text-xs flex items-center gap-1 transition cursor-pointer"
                   >
                     <span>换我来画 →</span>
                   </button>
                 </div>
               ) : (
-                <div className="py-2 px-3 bg-black/40 rounded-xl border border-white/10 text-stone-400 text-[11px] text-center">
+                <div className="py-1 px-2.5 bg-black/30 rounded-xl border border-white/5 text-stone-400 text-[10.5px] text-center">
                   {phase === 'ai_generating'
                     ? `AI 正在构思作画第 ${drawingRoundNumber} 轮，请稍候...`
                     : `AI 正在逐笔作画中，请仔细观察画面...`}
@@ -1588,11 +1670,11 @@ export default function DrawAndGuessApp({
             ) : (
               /* Player Drawing Round Controls */
               phase === 'player_drawing' ? (
-                <div className="flex flex-wrap items-center justify-between gap-2 p-2 bg-black/60 rounded-xl border border-white/10 shrink-0">
+                <div className="flex flex-col gap-1.5 p-2 bg-black/40 rounded-xl border border-white/5 shrink-0">
                   {/* Color Palette */}
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] text-stone-400">颜色:</span>
-                    <div className="flex items-center gap-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-[10px] text-stone-400 shrink-0">颜色:</span>
+                    <div className="flex items-center gap-1 overflow-x-auto no-scrollbar py-0.5">
                       {PALETTE_COLORS.map((c) => (
                         <button
                           key={c.value}
@@ -1600,10 +1682,10 @@ export default function DrawAndGuessApp({
                             setBrushColor(c.value);
                             setIsEraser(false);
                           }}
-                          className={`size-5 rounded-full border transition cursor-pointer ${
+                          className={`size-4.5 rounded-full border transition cursor-pointer ${
                             !isEraser && brushColor === c.value
-                              ? 'border-white scale-110 shadow-md ring-2 ring-amber-400'
-                              : 'border-transparent hover:scale-105 opacity-80 hover:opacity-100'
+                              ? 'border-white scale-110 shadow-md ring-1 ring-amber-400'
+                              : 'border-transparent hover:scale-105 opacity-85'
                           }`}
                           style={{ backgroundColor: c.value }}
                           title={c.name}
@@ -1613,8 +1695,8 @@ export default function DrawAndGuessApp({
                   </div>
 
                   {/* Brush Tools */}
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <div className="flex items-center gap-1 bg-white/5 px-2 py-0.5 rounded-lg border border-white/10">
+                  <div className="flex items-center justify-between gap-1 flex-wrap">
+                    <div className="flex items-center gap-1.5 bg-white/5 px-2 py-0.5 rounded-lg border border-white/10">
                       <span className="text-[10px] text-stone-400">粗细:</span>
                       <input
                         type="range"
@@ -1622,134 +1704,72 @@ export default function DrawAndGuessApp({
                         max="24"
                         value={brushSize}
                         onChange={(e) => setBrushSize(Number(e.target.value))}
-                        className="w-16 h-1 accent-amber-400 cursor-pointer"
+                        className="w-12 h-1 accent-amber-400 cursor-pointer"
                       />
-                      <span className="text-[10px] font-mono text-amber-300 w-4">{brushSize}</span>
+                      <span className="text-[9.5px] font-mono text-amber-300 w-3.5">{brushSize}</span>
                     </div>
 
-                    <button
-                      onClick={() => setIsEraser((v) => !v)}
-                      className={`p-1.5 rounded-lg border text-[11px] transition cursor-pointer flex items-center gap-1 ${
-                        isEraser
-                          ? 'bg-amber-500 text-stone-950 font-bold border-amber-400 shadow-md'
-                          : 'bg-white/5 hover:bg-white/10 text-stone-300 border-white/10'
-                      }`}
-                      title="橡皮擦"
-                    >
-                      <Eraser className="size-3.5" />
-                      <span>橡皮</span>
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setIsEraser((v) => !v)}
+                        className={`px-2 py-0.5 rounded-md border text-[10px] transition cursor-pointer flex items-center gap-1 ${
+                          isEraser
+                            ? 'bg-amber-500 text-stone-950 font-bold border-amber-400 shadow-sm'
+                            : 'bg-white/5 hover:bg-white/10 text-stone-300 border-white/10'
+                        }`}
+                      >
+                        <Eraser className="size-3" />
+                        <span>橡皮</span>
+                      </button>
 
-                    <button
-                      onClick={handleUndo}
-                      disabled={playerStrokes.length === 0}
-                      className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 disabled:opacity-40 text-stone-300 border border-white/10 text-[11px] transition cursor-pointer flex items-center gap-1"
-                      title="撤回上一笔"
-                    >
-                      <RotateCcw className="size-3.5" />
-                      <span>撤回</span>
-                    </button>
+                      <button
+                        onClick={handleUndo}
+                        disabled={playerStrokes.length === 0}
+                        className="px-2 py-0.5 rounded-md bg-white/5 hover:bg-white/10 disabled:opacity-40 text-stone-300 border border-white/10 text-[10px] transition cursor-pointer flex items-center gap-1"
+                      >
+                        <RotateCcw className="size-3" />
+                        <span>撤回</span>
+                      </button>
 
-                    <button
-                      onClick={handleClearPlayerBoard}
-                      className="p-1.5 rounded-lg bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/20 text-[11px] transition cursor-pointer"
-                      title="清空画板"
-                    >
-                      清空
-                    </button>
+                      <button
+                        onClick={handleClearPlayerBoard}
+                        className="px-2 py-0.5 rounded-md bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/20 text-[10px] transition cursor-pointer"
+                      >
+                        清空
+                      </button>
 
-                    <button
-                      onClick={handleFinishPlayerDrawing}
-                      disabled={playerStrokes.length === 0}
-                      className="px-3.5 py-1.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:opacity-40 text-stone-950 font-bold rounded-lg shadow-lg border border-emerald-300 text-[11px] flex items-center gap-1.5 transition active:scale-95 cursor-pointer ml-1"
-                    >
-                      <Sparkles className="size-3.5" />
-                      <span>画好啦，让AI来猜！</span>
-                    </button>
+                      <button
+                        onClick={() => handlePlayerSendInteractiveMessage()}
+                        disabled={playerStrokes.length === 0 || aiIsThinking}
+                        className="px-3 py-1 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-40 text-stone-950 font-bold rounded-lg shadow-md text-[10px] flex items-center gap-1 transition active:scale-95 cursor-pointer ml-1"
+                      >
+                        <Sparkles className="size-3" />
+                        <span>🤖 让AI猜猜看</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               ) : (
-                /* Player Finished & Chatting with AI */
-                <div className="space-y-2 bg-stone-950/80 p-2.5 rounded-xl border border-amber-500/20">
-                  <div className="flex items-center gap-1.5 flex-wrap">
+                /* Player Finished / Success Actions */
+                <div className="space-y-1.5">
+                  <div className="flex gap-1.5">
                     <button
-                      onClick={handleSendQuickHint}
-                      disabled={aiIsThinking || aiGuessStage >= 3}
-                      className="px-2 py-1 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 rounded-lg text-[10px] flex items-center gap-1 transition cursor-pointer disabled:opacity-40"
+                      onClick={handleRerollPlayerWord}
+                      className="flex-1 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-stone-950 font-bold rounded-xl shadow-md text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer"
                     >
-                      <Lightbulb className="size-3 text-amber-400" />
-                      <span>给点提示</span>
+                      <RefreshCw className="size-3" />
+                      <span>再画一题</span>
                     </button>
                     <button
-                      onClick={handleSendWrongFeedback}
-                      disabled={aiIsThinking || aiGuessStage >= 3}
-                      className="px-2 py-1 bg-white/5 hover:bg-white/10 border border-white/10 text-stone-300 rounded-lg text-[10px] flex items-center gap-1 transition cursor-pointer disabled:opacity-40"
+                      onClick={() => {
+                        setRound('round_ai_draw');
+                        startTopicNegotiation();
+                      }}
+                      className="py-1.5 px-3 bg-white/5 hover:bg-white/10 text-stone-200 font-bold rounded-xl border border-white/10 text-xs flex items-center gap-1 transition cursor-pointer"
                     >
-                      <span>提示猜偏了</span>
-                    </button>
-                    <button
-                      onClick={handleRevealAndPraise}
-                      disabled={aiIsThinking || aiGuessStage >= 3}
-                      className="px-2 py-1 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 rounded-lg text-[10px] flex items-center gap-1 transition cursor-pointer disabled:opacity-40"
-                    >
-                      <Award className="size-3 text-emerald-400" />
-                      <span>直接公布答案</span>
-                    </button>
-                    <button
-                      onClick={handleReplayPlayerDrawing}
-                      className="px-2 py-1 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 rounded-lg text-[10px] flex items-center gap-1 transition cursor-pointer ml-auto"
-                    >
-                      <Play className="size-3 text-purple-400" />
-                      <span>重播我的画作</span>
+                      <span>换AI画 →</span>
                     </button>
                   </div>
-
-                  {/* Free text interaction */}
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      handlePlayerSendInteractiveMessage();
-                    }}
-                    className="flex gap-1.5"
-                  >
-                    <input
-                      type="text"
-                      value={playerInteractiveInput}
-                      onChange={(e) => setPlayerInteractiveInput(e.target.value)}
-                      placeholder="和AI对话或给更多提示..."
-                      disabled={aiIsThinking}
-                      className="flex-1 bg-stone-800/90 border border-white/15 rounded-xl px-3 py-1.5 text-stone-100 placeholder-stone-500 outline-none focus:border-amber-400 text-xs shadow-inner disabled:opacity-50"
-                    />
-                    <button
-                      type="submit"
-                      disabled={!playerInteractiveInput.trim() || aiIsThinking}
-                      className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-stone-950 font-bold rounded-xl shadow-md text-xs flex items-center gap-1 transition active:scale-95 cursor-pointer shrink-0"
-                    >
-                      <Send className="size-3.5" />
-                      <span>发送</span>
-                    </button>
-                  </form>
-
-                  {aiGuessStage >= 3 && (
-                    <div className="pt-1 flex gap-2">
-                      <button
-                        onClick={handleRerollPlayerWord}
-                        className="flex-1 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-stone-950 font-bold rounded-xl shadow-md text-xs flex items-center justify-center gap-1 transition active:scale-95 cursor-pointer"
-                      >
-                        <RefreshCw className="size-3" />
-                        <span>再画一题</span>
-                      </button>
-                      <button
-                        onClick={() => {
-                          setRound('round_ai_draw');
-                          startTopicNegotiation();
-                        }}
-                        className="py-1.5 px-3 bg-white/10 hover:bg-white/15 text-stone-200 font-bold rounded-xl border border-white/10 text-xs flex items-center gap-1 transition cursor-pointer"
-                      >
-                        <span>换AI画 →</span>
-                      </button>
-                    </div>
-                  )}
                 </div>
               )
             )}
@@ -1757,8 +1777,8 @@ export default function DrawAndGuessApp({
         </div>
 
         {/* ================= RIGHT CONVERSATION & GUESSING PANEL ================= */}
-        {/* Dedicated scrollable chat stream with independent scrolling */}
-        <div className="w-full md:w-80 lg:w-96 flex flex-col bg-stone-900/80 border border-white/10 rounded-2xl p-2.5 shadow-xl backdrop-blur-md shrink-0 h-[190px] sm:h-[230px] md:h-auto md:flex-1 min-h-[150px] overflow-hidden">
+        {/* Dedicated scrollable chat stream with independent scrolling and fixed bottom input send bar */}
+        <div className="w-full md:w-80 lg:w-96 flex flex-col bg-stone-900/80 border border-white/10 rounded-xl p-2 shadow-lg backdrop-blur-md flex-1 md:flex-initial min-h-0 overflow-hidden">
           
           {/* Header of Chat Panel */}
           <div className="flex items-center justify-between pb-2 border-b border-white/10 shrink-0">
@@ -1823,7 +1843,7 @@ export default function DrawAndGuessApp({
           {/* Feedback banner if any */}
           {guessFeedback && (
             <div
-              className={`p-2 rounded-xl border mt-2 text-[10.5px] flex items-center gap-1.5 shrink-0 ${
+              className={`p-2 rounded-xl border my-1 text-[10.5px] flex items-center gap-1.5 shrink-0 ${
                 guessFeedback.correct
                   ? 'bg-emerald-950/80 border-emerald-400/50 text-emerald-200'
                   : 'bg-rose-950/80 border-rose-400/50 text-rose-200'
@@ -1837,6 +1857,126 @@ export default function DrawAndGuessApp({
               <span>{guessFeedback.text}</span>
             </div>
           )}
+
+          {/* ================= FIXED BOTTOM INPUT BAR ================= */}
+          {/* This input bar stays fixed at the bottom of the right panel and never scrolls away */}
+          <div className="shrink-0 pt-2 border-t border-white/10 mt-1 space-y-1.5">
+            {round === 'round_ai_draw' ? (
+              phase === 'topic_negotiation' ? (
+                /* Topic Negotiation Input Bar */
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (negotiationInput.trim()) {
+                      confirmTopicAndStartDrawing(negotiationInput.trim());
+                    }
+                  }}
+                  className="flex gap-1.5"
+                >
+                  <input
+                    type="text"
+                    value={negotiationInput}
+                    onChange={(e) => setNegotiationInput(e.target.value)}
+                    placeholder={`告诉 ${currentArtist.name} 想画什么类别/题目...`}
+                    disabled={isNegotiating}
+                    className="flex-1 bg-stone-800/90 border border-white/15 rounded-xl px-3 py-1.5 text-stone-100 placeholder-stone-500 outline-none focus:border-pink-400 text-xs shadow-inner disabled:opacity-50 min-w-0"
+                  />
+                  <button
+                    type="submit"
+                    disabled={!negotiationInput.trim() || isNegotiating}
+                    className="px-3 py-1.5 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 disabled:opacity-40 text-white font-bold rounded-xl shadow-md border border-pink-300 text-xs flex items-center gap-1 transition active:scale-95 cursor-pointer shrink-0"
+                  >
+                    <Send className="size-3.5" />
+                    <span>商定</span>
+                  </button>
+                </form>
+              ) : phase === 'guessing' ? (
+                /* Guessing Input Bar */
+                <form onSubmit={handleGuessSubmit} className="flex gap-1.5">
+                  <input
+                    type="text"
+                    value={guessInput}
+                    onChange={(e) => setGuessInput(e.target.value)}
+                    placeholder={`输入猜词（${aiSecret.word.length}字 · ${aiSecret.category}）...`}
+                    className="flex-1 bg-stone-800/90 border border-white/15 rounded-xl px-3 py-1.5 text-stone-100 placeholder-stone-500 outline-none focus:border-pink-400 text-xs shadow-inner min-w-0"
+                    autoFocus
+                  />
+                  <button
+                    type="submit"
+                    disabled={!guessInput.trim()}
+                    className="px-3.5 py-1.5 bg-gradient-to-r from-pink-500 to-rose-500 hover:from-pink-400 hover:to-rose-400 disabled:opacity-40 text-white font-bold rounded-xl shadow-md border border-pink-300 text-xs flex items-center gap-1 transition active:scale-95 cursor-pointer shrink-0"
+                  >
+                    <Send className="size-3.5" />
+                    <span>提交</span>
+                  </button>
+                </form>
+              ) : null
+            ) : (
+              /* Player Drawing Round Controls */
+              <div className="space-y-1.5">
+                {/* Quick Interaction Helper Buttons */}
+                <div className="flex flex-wrap items-center gap-1 bg-black/40 p-1 rounded-xl border border-white/5">
+                  <button
+                    onClick={() => handlePlayerSendInteractiveMessage()}
+                    disabled={aiIsThinking}
+                    className="px-2 py-0.5 bg-pink-500/20 hover:bg-pink-500/30 border border-pink-500/40 text-pink-300 rounded-md text-[9.5px] flex items-center gap-1 transition cursor-pointer disabled:opacity-40 font-bold"
+                  >
+                    <Sparkles className="size-2.5 text-pink-400" />
+                    <span>让AI猜猜看</span>
+                  </button>
+                  <button
+                    onClick={handleSendQuickHint}
+                    disabled={aiIsThinking}
+                    className="px-2 py-0.5 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-300 rounded-md text-[9.5px] flex items-center gap-1 transition cursor-pointer disabled:opacity-40"
+                  >
+                    <Lightbulb className="size-2.5 text-amber-400" />
+                    <span>给提示</span>
+                  </button>
+                  <button
+                    onClick={handleRevealAndPraise}
+                    disabled={aiIsThinking}
+                    className="px-2 py-0.5 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 rounded-md text-[9.5px] flex items-center gap-1 transition cursor-pointer disabled:opacity-40"
+                  >
+                    <Award className="size-2.5 text-emerald-400" />
+                    <span>公布答案</span>
+                  </button>
+                  <button
+                    onClick={handleReplayPlayerDrawing}
+                    className="px-2 py-0.5 bg-purple-500/15 hover:bg-purple-500/25 border border-purple-500/30 text-purple-300 rounded-md text-[9.5px] flex items-center gap-1 transition cursor-pointer ml-auto"
+                  >
+                    <Play className="size-2.5 text-purple-400" />
+                    <span>重播轨迹</span>
+                  </button>
+                </div>
+
+                {/* Free text interaction */}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    handlePlayerSendInteractiveMessage();
+                  }}
+                  className="flex gap-1.5"
+                >
+                  <input
+                    type="text"
+                    value={playerInteractiveInput}
+                    onChange={(e) => setPlayerInteractiveInput(e.target.value)}
+                    placeholder="和AI说话、给线索或让他猜词..."
+                    disabled={aiIsThinking}
+                    className="flex-1 bg-stone-800/90 border border-white/15 rounded-xl px-3 py-1.5 text-stone-100 placeholder-stone-500 outline-none focus:border-amber-400 text-xs shadow-inner disabled:opacity-50 min-w-0"
+                  />
+                  <button
+                    type="submit"
+                    disabled={aiIsThinking}
+                    className="px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 disabled:opacity-40 text-stone-950 font-bold rounded-xl shadow-md text-xs flex items-center gap-1 transition active:scale-95 cursor-pointer shrink-0"
+                  >
+                    <Send className="size-3.5" />
+                    <span>发送</span>
+                  </button>
+                </form>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -2504,41 +2504,33 @@ export async function generateDrawAndGuessRevealEnding(
 export async function generateDrawAndGuessAiGuessReaction(
   config: LlmConfig,
   character: Character,
-  stage: 1 | 2 | 3,
+  stage: number,
   category: string,
   drawnSummary: string,
   playerMessage?: string,
-  revealedWord?: string
-): Promise<{ speech: string; guessWord?: string; gameTotalDelta?: Partial<EmotionVector> }> {
-  let stageInstruction = '';
+  targetWord?: string
+): Promise<{ speech: string; guessWord?: string; isCorrect?: boolean; gameTotalDelta?: Partial<EmotionVector> }> {
+  const prompt = `【风铃·你画我猜·AI智能实时猜词】
+你是角色「${character.name}」。主控在画板上作画让你猜。
+- 题目分类：${category}
+- 真实秘密题目：【${targetWord || '未知'}】
+- 画布线条与形态语义分析：${drawnSummary}
+- 玩家对你说的提示/对话：“${playerMessage || '你猜这是什么？'}”
+- 角色性格与口吻：${character.core.values.join('、')}，${character.core.speech_filter}
 
-  if (stage === 1) {
-    stageInstruction = `【阶段 1：第一轮猜测（必须猜错并试探）】
-画布语义描述：${drawnSummary}
-你完全不知道具体答案。请结合画布上的线条形态，【故意猜错】一个有趣、形似或好玩的词，并向主控询问线索。严禁直接猜对！`;
-  } else if (stage === 2) {
-    stageInstruction = `【阶段 2：第二轮猜测（越来越接近，给鼓励）】
-画布语义描述：${drawnSummary}
-玩家刚才对你说：“${playerMessage || '你再仔细瞧瞧呀！'}”。
-你此时恍然大悟，感觉马上就要猜中了，给出一个【非常接近但还差一点点】的猜测，并表达兴奋与期待！`;
-  } else {
-    stageInstruction = `【阶段 3：第三轮猜测（灵光一闪猜对！）】
-画布语义描述：${drawnSummary}
-正确答案就是【${revealedWord || '画作本身'}】！
-你灵光一闪彻底看破，兴奋骄傲地宣布猜对，并深情夸奖主控画技传神、心有灵犀！`;
-  }
-
-  const prompt = `【风铃·你画我猜·玩家作画 AI 猜词】
-你是角色「${character.name}」。主控在画板上作画让你猜（题目分类：${category}）。
-- 角色性格特质：${character.core.values.join('、')}，${character.core.speech_filter}
-${stageInstruction}
+【智能判断规则】：
+1. 评估主控目前的画作笔画和提示：
+   - 如果画布已有关键特征轮廓、或者玩家提示非常明显、或者你从形态上能判断出符合【${targetWord}】，请【立刻猜对】！设置 "isCorrect": true, "guessWord": "${targetWord}", 并用非常惊喜、夸奖和开心的口吻宣布猜对！
+   - 如果目前笔画较少或难以确切辨认，请给出 1 个形态相近的试探性猜测（"isCorrect": false），并用符合人设的语气鼓励玩家再多画几笔或给点线索。
+2. 绝对不要刻意拖延，只要觉得画得有神韵或看懂了就立刻猜中！
 
 【输出纯JSON】：
 \`\`\`json
 {
-  "speech": "...",
-  "guessWord": "猜的词语",
-  "gameTotalDelta": { "joy": 0.25, "warmth": 0.2 }
+  "isCorrect": true,
+  "guessWord": "${targetWord || '答案'}",
+  "speech": "我一眼就看出来了！这绝对是【${targetWord || '答案'}】！画得也太传神了吧～",
+  "gameTotalDelta": { "joy": 0.3, "warmth": 0.2 }
 }
 \`\`\``;
 
@@ -2550,9 +2542,11 @@ ${stageInstruction}
     const match = raw.match(/\{[\s\S]*\}/);
     if (match) {
       const parsed = JSON.parse(match[0]);
+      const isCorrect = Boolean(parsed.isCorrect);
       return {
-        speech: String(parsed.speech || (stage === 3 ? `我猜到了，是【${revealedWord || '答案'}】！` : '让我想想……')),
-        guessWord: parsed.guessWord ? String(parsed.guessWord) : undefined,
+        speech: String(parsed.speech || (isCorrect ? `我猜到了！是【${targetWord}】！` : '让我想想……再加几笔试试？')),
+        guessWord: parsed.guessWord ? String(parsed.guessWord) : (isCorrect ? targetWord : undefined),
+        isCorrect,
         gameTotalDelta: parsed.gameTotalDelta,
       };
     }
@@ -2560,13 +2554,24 @@ ${stageInstruction}
     console.warn('generateDrawAndGuessAiGuessReaction failed:', err);
   }
 
-  if (stage === 1) {
-    return { speech: '“唔……这几笔画得很有气势，看起来圆滚滚的……难道是一个大包子？快给我一点点线索嘛～”', guessWord: '大包子' };
-  } else if (stage === 2) {
-    return { speech: '“等等！听你这么一说，我感觉答案呼之欲出了！是不是某种生活里超常见的东西？我快猜到了！”', guessWord: '生活用品' };
-  } else {
-    return { speech: `“我知道了！这绝对是【${revealedWord || '答案'}】！哈哈，画得太传神了，完全难不倒我们之间的默契！”`, guessWord: revealedWord, gameTotalDelta: { joy: 0.3, warmth: 0.2 } };
+  // Fallback heuristic if LLM call fails
+  const hasSubstantialStrokes = drawnSummary.includes('Stroke count:') && parseInt(drawnSummary.split('Stroke count:')[1] || '0') > 2;
+  const isTargetMentioned = playerMessage && targetWord && playerMessage.includes(targetWord);
+  
+  if (isTargetMentioned || (hasSubstantialStrokes && Math.random() > 0.4)) {
+    return {
+      speech: `“我知道啦！这绝对是【${targetWord || '答案'}】！画得真形象，完全逃不过我的火眼金睛！”`,
+      guessWord: targetWord,
+      isCorrect: true,
+      gameTotalDelta: { joy: 0.3, warmth: 0.2 },
+    };
   }
+
+  return {
+    speech: `“唔……看起来有灵动的线条轮廓了，再多画几笔细节或者给我一点线索，我肯定能猜出来！”`,
+    guessWord: '形态构思中',
+    isCorrect: false,
+  };
 }
 
 
