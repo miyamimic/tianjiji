@@ -129,12 +129,19 @@ export default function GachaApp({
   const [behaviorLogs, setBehaviorLogs] = useState<string[]>([]);
   const [isAgentThinking, setIsAgentThinking] = useState<boolean>(false);
 
-  // References for async loops & safety
+  // References for async loops & concurrency safety
   const containerRef = useRef<HTMLDivElement>(null);
   const bubbleTimerRef = useRef<any>(null);
   const llmPendingProfileRef = useRef<any>(null);
   const abortCurrentActionRef = useRef<boolean>(false);
   const waitingUserReplyResolverRef = useRef<(() => void) | null>(null);
+
+  // Critical State Machine Locks & Timers (Fix for Stuck State & Animation Race Conditions)
+  const isPullingInProgressRef = useRef<boolean>(false);
+  const pullSessionIdRef = useRef<number>(0);
+  const decisionTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const modalAutoCloseTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isAgentActingRef = useRef<boolean>(false);
 
   const fallbackCharacter: Character = character || {
     id: currentCharacterId || 'char_001',
@@ -198,6 +205,30 @@ export default function GachaApp({
     await new Promise((r) => setTimeout(r, 150));
   }, [soundEnabled]);
 
+  // Forward declarations for mutual recursion
+  const triggerAgentDecisionLoopRef = useRef<(() => Promise<void>) | undefined>(undefined);
+  const executePullFlowRef = useRef<((count: number) => Promise<void>) | undefined>(undefined);
+
+  // Button Click Handler
+  const handleButtonClick = useCallback((buttonId: string) => {
+    if (buttonId === 'pull_once') {
+      if (executePullFlowRef.current) executePullFlowRef.current(1);
+    } else if (buttonId === 'pull_ten') {
+      if (executePullFlowRef.current) executePullFlowRef.current(10);
+    } else if (buttonId === 'pool_detail') {
+      setShowDetailModal(true);
+      setCurrentScreen('pool_detail');
+    } else if (buttonId === 'rate_info') {
+      setShowRateModal(true);
+      setCurrentScreen('rate_info');
+    } else if (buttonId === 'pull_history') {
+      setShowHistoryModal(true);
+      setCurrentScreen('pull_history');
+    } else if (buttonId === 'custom') {
+      setShowEditorModal(true);
+    }
+  }, []);
+
   // Execute Agent Action from Endpoint ② or ①
   const executeAgentDecisionAction = useCallback(async (
     target: GachaClickTarget,
@@ -246,6 +277,8 @@ export default function GachaApp({
       showBubble(bubbleUser, 'bubble_to_user', 4000);
     }
 
+    const isPullAction = targetButton && (targetButton.id === 'pull_once' || targetButton.id === 'pull_ten');
+
     // 6. Click trigger
     await triggerCursorClick(() => {
       if (targetButton) {
@@ -254,11 +287,53 @@ export default function GachaApp({
     });
 
     if (onComplete) onComplete();
-  }, [poolConfig.buttons, moveCursorTo, triggerCursorClick, showBubble]);
+
+    // 7. Auto-continue state machine if not pulling (prevents agent getting stuck!)
+    if (!isPullAction && !isPullingInProgressRef.current) {
+      if (targetButton && (targetButton.id === 'pool_detail' || targetButton.id === 'rate_info' || targetButton.id === 'pull_history')) {
+        // Modal viewing auto-resume after 2.8s
+        if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
+        modalAutoCloseTimerRef.current = setTimeout(() => {
+          setShowDetailModal(false);
+          setShowRateModal(false);
+          setShowHistoryModal(false);
+          setCurrentScreen('pool_main');
+          if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
+          decisionTimerRef.current = setTimeout(() => {
+            if (triggerAgentDecisionLoopRef.current) {
+              triggerAgentDecisionLoopRef.current();
+            }
+          }, 1200);
+        }, 2800);
+      } else {
+        if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
+        decisionTimerRef.current = setTimeout(() => {
+          if (triggerAgentDecisionLoopRef.current) {
+            triggerAgentDecisionLoopRef.current();
+          }
+        }, 2500);
+      }
+    }
+  }, [poolConfig.buttons, moveCursorTo, triggerCursorClick, showBubble, handleButtonClick]);
 
   // Start Gacha Pull Execution (1-pull or 10-pull)
   const executePullFlow = useCallback(async (pullCount: number) => {
+    // ⚠️ Critical Safety: Ignore duplicate/concurrent pull calls while already pulling
+    if (isPullingInProgressRef.current) {
+      return;
+    }
+
+    isPullingInProgressRef.current = true;
+    const currentSessionId = ++pullSessionIdRef.current;
     abortCurrentActionRef.current = false;
+
+    // Clear pending decision & modal timers
+    if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
+    if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
+    setShowDetailModal(false);
+    setShowRateModal(false);
+    setShowHistoryModal(false);
+
     setIsAgentThinking(true);
 
     // 1. Generate Pull Results (Mechanical Layer)
@@ -306,8 +381,9 @@ export default function GachaApp({
     llmPendingProfileRef.current = resultProfilePromise;
 
     // 4. Play Summon Animation (with Agent Skip Click)
-    const animDurationMs = 3000;
+    const animDurationMs = 2600;
     await new Promise((r) => setTimeout(r, animDurationMs));
+    if (pullSessionIdRef.current !== currentSessionId) return;
 
     // Agent awaits LLM reaction profile
     let profileResult: any;
@@ -324,14 +400,14 @@ export default function GachaApp({
       profileResult = {
         click_habit_profile: {
           skip_click_position: { x: 0.85, y: 0.12 },
-          click_rhythm: '正常',
+          click_rhythm: '利落迅速',
           random_tap: false,
           wait_for_user_reply: false,
           tap_while_talking: true,
-          evaluation_timing: 'on_flip',
+          evaluation_timing: 'after_all',
         },
         evaluations: [],
-        summary_bubble: '共鸣完成，让我们一张张揭开卡面！',
+        summary_bubble: newSsrNames.length > 0 ? '哇！金光降临！限定SSR拿下！' : '共鸣完成，让我们揭晓这次的成果！',
       };
     }
 
@@ -339,16 +415,17 @@ export default function GachaApp({
     const skipX = (profileResult.click_habit_profile?.skip_click_position?.x || 0.85) * 100;
     const skipY = (profileResult.click_habit_profile?.skip_click_position?.y || 0.12) * 100;
 
-    moveCursorTo(skipX, skipY, 0.35);
-    await new Promise((r) => setTimeout(r, 400));
+    moveCursorTo(skipX, skipY, 0.3);
+    await new Promise((r) => setTimeout(r, 350));
+    if (pullSessionIdRef.current !== currentSessionId) return;
     await triggerCursorClick();
 
-    // 5. Transition to Card Flipping Screen (v2 core)
+    // 5. Transition to Card Flipping Screen (v4: clean flipping without individual card evaluations)
     setCurrentScreen('result_flipping');
     setIsAgentThinking(false);
 
-    // 6. Execute v2 Card Flipping Driver via Agent Virtual Cursor with LLM reactions
-    await runAgentCardFlippingSequence(pullResult.items, profileResult);
+    // 6. Execute Card Flipping Driver via Agent Virtual Cursor
+    await runAgentCardFlippingSequence(pullResult.items, profileResult, currentSessionId);
   }, [
     poolConfig,
     sparkCount,
@@ -359,22 +436,24 @@ export default function GachaApp({
     triggerCursorClick,
   ]);
 
-  // v2 Core: Agent Virtual Cursor Card Flipping Sequence
+  executePullFlowRef.current = executePullFlow;
+
+  // Agent Virtual Cursor Card Flipping Sequence (Streamlined, No Individual Card Bubble Spam)
   const runAgentCardFlippingSequence = async (
     items: GachaPullItem[],
-    profileResult: any
+    profileResult: any,
+    sessionId: number
   ) => {
     const habit: ClickHabitProfile = profileResult.click_habit_profile || {
       skip_click_position: { x: 0.85, y: 0.12 },
-      click_rhythm: '正常',
+      click_rhythm: '利落迅速',
       random_tap: false,
       wait_for_user_reply: false,
       tap_while_talking: true,
-      evaluation_timing: 'on_flip',
+      evaluation_timing: 'after_all',
     };
 
     const rhythm = parseClickRhythm(habit.click_rhythm);
-    const evaluations = profileResult.evaluations || [];
 
     // Calculate grid positions for 10 cards (2 rows x 5 columns) or 1 card
     const cardPositions: Array<{ x: number; y: number }> = [];
@@ -391,34 +470,31 @@ export default function GachaApp({
       }
     }
 
-    // Agent flips cards one by one
+    // Agent flips cards cleanly one by one
     for (let i = 0; i < items.length; i++) {
-      if (abortCurrentActionRef.current) break;
+      if (pullSessionIdRef.current !== sessionId || abortCurrentActionRef.current) break;
       setCurrentFlipIdx(i);
 
       const targetPos = cardPositions[i] || { x: 50, y: 50 };
       const currentCardItem = items[i];
 
-      // a. Random Tap feature
-      if (habit.random_tap && Math.random() < 0.25) {
-        const randX = Math.max(10, Math.min(90, targetPos.x + (Math.random() * 20 - 10)));
-        const randY = Math.max(15, Math.min(85, targetPos.y + (Math.random() * 20 - 10)));
-        moveCursorTo(randX, randY, 0.3);
-        await new Promise((r) => setTimeout(r, 320));
+      // a. Random Tap feature (occasional tap)
+      if (habit.random_tap && Math.random() < 0.2) {
+        const randX = Math.max(10, Math.min(90, targetPos.x + (Math.random() * 16 - 8)));
+        const randY = Math.max(15, Math.min(85, targetPos.y + (Math.random() * 16 - 8)));
+        moveCursorTo(randX, randY, 0.2);
+        await new Promise((r) => setTimeout(r, 220));
+        if (pullSessionIdRef.current !== sessionId) break;
         await triggerCursorClick();
       }
 
       // b. Move cursor to card center
-      moveCursorTo(targetPos.x, targetPos.y, rhythm.moveDurationSec);
-      await new Promise((r) => setTimeout(r, rhythm.moveDurationSec * 1000));
+      const moveSec = Math.min(0.26, Math.max(0.16, rhythm.moveDurationSec * 0.6));
+      moveCursorTo(targetPos.x, targetPos.y, moveSec);
+      await new Promise((r) => setTimeout(r, moveSec * 1000 + 30));
+      if (pullSessionIdRef.current !== sessionId) break;
 
-      // c. Hesitation / pause on card
-      const intervalPause = rhythm.isVariable
-        ? Math.floor(Math.random() * 1500) + 400
-        : rhythm.clickIntervalMs;
-      await new Promise((r) => setTimeout(r, Math.max(200, intervalPause * 0.6)));
-
-      // d. Click card -> 3D flip
+      // c. Click card -> 3D flip
       await triggerCursorClick(() => {
         setCurrentBatchPulls((prev) =>
           prev.map((item, idx) => (idx === i ? { ...item, flipped: true } : item))
@@ -426,72 +502,45 @@ export default function GachaApp({
         if (soundEnabled) playCardFlipSound(currentCardItem.card.rarity);
       });
 
-      // e. SSR special burst FX
+      // d. SSR special burst FX
       if (currentCardItem.card.rarity === 'SSR') {
         setIsSsrFlashActive(true);
         if (soundEnabled) playSsrSparkleSound();
         setTimeout(() => setIsSsrFlashActive(false), 900);
-      }
-
-      // f. Show evaluation bubble (v4: generated live by LLM from card characteristics)
-      const matchingEval = evaluations.find((e: any) => e.card_index === i);
-      let evalText = matchingEval?.text;
-      if (!evalText) {
-        if (currentCardItem.card.rarity === 'SSR') {
-          evalText = `金光闪耀！是SSR【${currentCardItem.card.name}】！太幸运了～`;
-        } else if (currentCardItem.card.rarity === 'SR') {
-          evalText = `紫光微耀，入手了SR【${currentCardItem.card.name}】～`;
-        } else {
-          evalText = `翻开一张【${currentCardItem.card.name}】，继续稳步向前～`;
-        }
-      }
-
-      if (evalText) {
-        showBubble(evalText, 'bubble_evaluation', 3500, currentCardItem.card.card_image);
-      }
-
-      // g. Wait for User Reply if enabled
-      if (habit.wait_for_user_reply && currentCardItem.card.rarity === 'SSR') {
-        setIsWaitingUserReply(true);
-        await new Promise<void>((resolve) => {
-          waitingUserReplyResolverRef.current = resolve;
-          // auto timeout 8s if user doesn't speak
-          setTimeout(() => {
-            if (waitingUserReplyResolverRef.current) {
-              waitingUserReplyResolverRef.current();
-              waitingUserReplyResolverRef.current = null;
-            }
-          }, 8000);
-        });
-        setIsWaitingUserReply(false);
-      }
-
-      // h. If tap_while_talking is false, wait for bubble to finish
-      if (!habit.tap_while_talking && evalText) {
-        await new Promise((r) => setTimeout(r, 1800));
+        await new Promise((r) => setTimeout(r, 450));
       } else {
-        await new Promise((r) => setTimeout(r, Math.max(250, intervalPause * 0.4)));
+        await new Promise((r) => setTimeout(r, 120));
       }
     }
 
-    // Summary bubble after all 10 cards are flipped
+    if (pullSessionIdRef.current !== sessionId) return;
+
+    // Summary bubble after all cards are flipped (One single overall evaluation!)
     if (profileResult.summary_bubble) {
       showBubble(profileResult.summary_bubble, 'bubble_to_user', 5000);
     }
 
     setCurrentScreen('result_done');
     setCurrentFlipIdx(-1);
+    isPullingInProgressRef.current = false;
 
-    // Trigger next Agent Decision Cycle (Endpoint ②) after 3s
-    setTimeout(() => {
-      triggerAgentDecisionLoop();
+    // Trigger next Agent Decision Cycle (Endpoint ②) after 3.2s
+    if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
+    decisionTimerRef.current = setTimeout(() => {
+      if (triggerAgentDecisionLoopRef.current) {
+        triggerAgentDecisionLoopRef.current();
+      }
     }, 3200);
   };
 
   // Trigger Endpoint ②: Decision Loop
   const triggerAgentDecisionLoop = useCallback(async () => {
+    if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
+    if (isPullingInProgressRef.current) return;
     if (showSettlementModal || showEditorModal) return;
+
     setIsAgentThinking(true);
+    isAgentActingRef.current = true;
 
     const availableBtns = poolConfig.buttons;
     const llmConfig = loadLlmConfig();
@@ -513,6 +562,7 @@ export default function GachaApp({
       setIsAgentThinking(false);
 
       if (decision.action === 'stop') {
+        isAgentActingRef.current = false;
         handleEndGachaSession();
         return;
       }
@@ -527,6 +577,8 @@ export default function GachaApp({
     } catch (err) {
       console.warn('Agent decision loop error:', err);
       setIsAgentThinking(false);
+    } finally {
+      isAgentActingRef.current = false;
     }
   }, [
     showSettlementModal,
@@ -544,25 +596,7 @@ export default function GachaApp({
     executeAgentDecisionAction,
   ]);
 
-  // Button Click Handler
-  const handleButtonClick = (buttonId: string) => {
-    if (buttonId === 'pull_once') {
-      executePullFlow(1);
-    } else if (buttonId === 'pull_ten') {
-      executePullFlow(10);
-    } else if (buttonId === 'pool_detail') {
-      setShowDetailModal(true);
-      setCurrentScreen('pool_detail');
-    } else if (buttonId === 'rate_info') {
-      setShowRateModal(true);
-      setCurrentScreen('rate_info');
-    } else if (buttonId === 'pull_history') {
-      setShowHistoryModal(true);
-      setCurrentScreen('pull_history');
-    } else if (buttonId === 'custom') {
-      setShowEditorModal(true);
-    }
-  };
+  triggerAgentDecisionLoopRef.current = triggerAgentDecisionLoop;
 
   // User In-Game Chat Submission (Endpoint ④)
   const handleSendUserChatMessage = async (customText?: string) => {
@@ -579,7 +613,15 @@ export default function GachaApp({
       setIsWaitingUserReply(false);
     }
 
-    // If we were on result done or modal screen and user commands a pull, close modals
+    // If currently actively pulling/flipping, reply with a quick reaction without aborting the batch
+    if (isPullingInProgressRef.current) {
+      showBubble(`正在揭晓这一轮卡牌呢，马上就好！`, 'bubble_to_user', 3000);
+      return;
+    }
+
+    // Clear timers & close modals
+    if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
+    if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
     if (showDetailModal) setShowDetailModal(false);
     if (showRateModal) setShowRateModal(false);
     if (showHistoryModal) setShowHistoryModal(false);
@@ -628,6 +670,13 @@ export default function GachaApp({
         await triggerCursorClick();
         setShowDetailModal(true);
         setCurrentScreen('pool_detail');
+        if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
+        modalAutoCloseTimerRef.current = setTimeout(() => {
+          setShowDetailModal(false);
+          setCurrentScreen('pool_main');
+          if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
+          decisionTimerRef.current = setTimeout(() => triggerAgentDecisionLoop(), 1200);
+        }, 2800);
       } else if (resp.action === 'rate_info') {
         const btn = poolConfig.buttons.find((b) => b.id === 'rate_info');
         const targetX = btn ? btn.position.x : 50;
@@ -637,6 +686,13 @@ export default function GachaApp({
         await triggerCursorClick();
         setShowRateModal(true);
         setCurrentScreen('rate_info');
+        if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
+        modalAutoCloseTimerRef.current = setTimeout(() => {
+          setShowRateModal(false);
+          setCurrentScreen('pool_main');
+          if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
+          decisionTimerRef.current = setTimeout(() => triggerAgentDecisionLoop(), 1200);
+        }, 2800);
       } else if (resp.action === 'pull_history') {
         const btn = poolConfig.buttons.find((b) => b.id === 'pull_history');
         const targetX = btn ? btn.position.x : 80;
@@ -646,8 +702,19 @@ export default function GachaApp({
         await triggerCursorClick();
         setShowHistoryModal(true);
         setCurrentScreen('pull_history');
+        if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
+        modalAutoCloseTimerRef.current = setTimeout(() => {
+          setShowHistoryModal(false);
+          setCurrentScreen('pool_main');
+          if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
+          decisionTimerRef.current = setTimeout(() => triggerAgentDecisionLoop(), 1200);
+        }, 2800);
       } else if (resp.action === 'stop') {
         setTimeout(() => handleEndGachaSession(), 1500);
+      } else {
+        // Chat only: schedule decision loop after chatting
+        if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
+        decisionTimerRef.current = setTimeout(() => triggerAgentDecisionLoop(), 2500);
       }
     } catch (err) {
       console.warn('User chat response failed:', err);
@@ -799,6 +866,8 @@ export default function GachaApp({
     return () => {
       isMounted = false;
       if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current);
+      if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
+      if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
     };
   }, []);
 
@@ -806,12 +875,12 @@ export default function GachaApp({
     <div className="w-full h-full flex flex-col bg-stone-950 text-white relative select-none overflow-hidden font-sans">
       
       {/* 1. TOP STATUS BAR & CONTROLS */}
-      <div className="flex items-center justify-between px-3 py-2 bg-stone-950/90 border-b border-stone-800/80 shrink-0 z-30">
+      <div className="flex items-center justify-between px-3 py-2 bg-stone-950/90 border-b border-stone-800/80 shrink-0 z-40 relative">
         <div className="flex items-center gap-2">
           {onExit && (
             <button
               onClick={handleEndGachaSession}
-              className="flex items-center gap-1 text-xs font-semibold text-amber-400 hover:text-amber-300 py-1 px-2 rounded-xl bg-white/5 hover:bg-white/10 transition cursor-pointer"
+              className="flex items-center gap-1 text-xs font-semibold text-amber-400 hover:text-amber-300 py-1 px-2 rounded-xl bg-white/5 hover:bg-white/10 transition cursor-pointer pointer-events-auto"
             >
               <ChevronLeft className="size-4" />
               <span>退出/结算</span>
@@ -837,7 +906,7 @@ export default function GachaApp({
           {/* Sound Toggle */}
           <button
             onClick={() => setSoundEnabled(!soundEnabled)}
-            className="p-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 transition cursor-pointer"
+            className="p-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 transition cursor-pointer pointer-events-auto"
             title={soundEnabled ? '音效开启' : '音效静音'}
           >
             {soundEnabled ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
@@ -846,7 +915,7 @@ export default function GachaApp({
           {/* Rules Button */}
           <button
             onClick={() => setShowRulesModal(true)}
-            className="p-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 transition cursor-pointer"
+            className="p-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 transition cursor-pointer pointer-events-auto"
             title="查看玩法说明"
           >
             <HelpCircle className="size-3.5" />
@@ -855,7 +924,7 @@ export default function GachaApp({
           {/* Visual Editor Button */}
           <button
             onClick={() => setShowEditorModal(true)}
-            className="p-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 transition cursor-pointer"
+            className="p-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 transition cursor-pointer pointer-events-auto"
             title="打开卡池可视化编辑器"
           >
             <Sliders className="size-3.5" />
@@ -914,15 +983,17 @@ export default function GachaApp({
                 const isTen = btn.id === 'pull_ten';
                 const isOnce = btn.id === 'pull_once';
                 return (
-                  <div
+                  <button
                     key={btn.id}
+                    type="button"
+                    onClick={() => handleButtonClick(btn.id)}
                     style={{ left: `${btn.position.x}%`, top: `${btn.position.y}%` }}
-                    className={`absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center justify-center transition-all ${
+                    className={`absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center justify-center transition-all pointer-events-auto cursor-pointer select-none active:scale-95 ${
                       isTen
-                        ? 'px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-stone-950 font-black text-xs shadow-lg shadow-amber-500/30 border border-amber-300'
+                        ? 'px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-stone-950 font-black text-xs shadow-lg shadow-amber-500/30 border border-amber-300 hover:brightness-110'
                         : isOnce
-                        ? 'px-3.5 py-1.5 rounded-2xl bg-gradient-to-r from-stone-800 to-stone-900 text-amber-300 font-bold text-xs shadow border border-amber-500/40'
-                        : 'px-2 py-1 rounded-xl bg-black/60 backdrop-blur-sm text-stone-300 font-medium text-[10px] border border-white/10 hover:border-amber-400/40'
+                        ? 'px-3.5 py-1.5 rounded-2xl bg-gradient-to-r from-stone-800 to-stone-900 text-amber-300 font-bold text-xs shadow border border-amber-500/40 hover:border-amber-400'
+                        : 'px-2.5 py-1 rounded-xl bg-black/70 backdrop-blur-sm text-stone-200 font-medium text-[10px] border border-white/20 hover:border-amber-400/60 hover:text-amber-300'
                     }`}
                   >
                     <span>{btn.label}</span>
@@ -931,7 +1002,7 @@ export default function GachaApp({
                         {btn.cost} 抽共鸣
                       </span>
                     )}
-                  </div>
+                  </button>
                 );
               })}
             </div>
@@ -941,30 +1012,30 @@ export default function GachaApp({
           {currentScreen === 'summon_anim' && (
             <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/90 animate-fadeIn">
               {/* Magical Portal & Particles */}
-              <div className="relative size-64 flex items-center justify-center">
+              <div className="relative size-64 flex items-center justify-center pointer-events-none">
                 <div className="absolute inset-0 rounded-full border-4 border-dashed border-amber-400/60 animate-spin" style={{ animationDuration: '6s' }} />
                 <div className="absolute inset-4 rounded-full border-2 border-dotted border-purple-400/80 animate-spin" style={{ animationDuration: '4s', animationDirection: 'reverse' }} />
                 <div className="absolute inset-10 rounded-full bg-gradient-to-tr from-amber-500/40 via-purple-600/40 to-pink-500/40 blur-xl animate-pulse" />
                 <div className="text-4xl animate-bounce">✨</div>
               </div>
 
-              <div className="mt-4 text-center space-y-1 z-10">
+              <div className="mt-4 text-center space-y-1 z-10 pointer-events-none">
                 <div className="text-sm font-bold text-amber-300 tracking-widest animate-pulse">
                   ✦ 星轨共鸣召唤中 ✦
                 </div>
                 <div className="text-[10px] text-stone-400">
-                  {fallbackCharacter.name} 正在感知天命之牌……（光标点击任意处跳过）
+                  {fallbackCharacter.name} 正在感知天命之牌……（光标点击跳过）
                 </div>
               </div>
 
               {/* Skip Badge Indicator */}
-              <div className="absolute top-4 right-4 px-2.5 py-1 rounded-full bg-stone-900/80 border border-white/20 text-[10px] text-stone-300">
+              <div className="absolute top-4 right-4 px-2.5 py-1 rounded-full bg-stone-900/80 border border-white/20 text-[10px] text-stone-300 pointer-events-none">
                 <span>跳过 ⏭</span>
               </div>
             </div>
           )}
 
-          {/* D. RESULT CARDS FLIPPING LAYER (v2 core) */}
+          {/* D. RESULT CARDS FLIPPING LAYER */}
           {(currentScreen === 'result_flipping' || currentScreen === 'result_done') && (
             <div className="absolute inset-0 z-20 bg-stone-950/95 backdrop-blur-md p-3 flex flex-col justify-between animate-fadeIn">
               
@@ -1118,7 +1189,7 @@ export default function GachaApp({
                   </span>
                   <button
                     onClick={() => setCurrentScreen('pool_main')}
-                    className="px-3 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs shadow transition cursor-pointer"
+                    className="px-3 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs shadow transition cursor-pointer pointer-events-auto"
                   >
                     返回卡池
                   </button>
@@ -1132,9 +1203,9 @@ export default function GachaApp({
             <div className="absolute inset-0 z-35 bg-gradient-to-r from-amber-400/40 via-yellow-200/50 to-amber-500/40 pointer-events-none animate-ping" />
           )}
 
-          {/* F. VIRTUAL CURSOR & FLOATING SPEECH BUBBLE LAYER */}
+          {/* F. VIRTUAL CURSOR & FLOATING SPEECH BUBBLE LAYER (Pure visual, 100% pointer-events-none) */}
           <div
-            className="absolute z-40 pointer-events-none"
+            className="absolute z-40 pointer-events-none select-none"
             style={{
               left: `${cursorPos.x}%`,
               top: `${cursorPos.y}%`,
@@ -1143,7 +1214,7 @@ export default function GachaApp({
           >
             {/* Virtual Cursor Icon */}
             <div
-              className={`-translate-x-1/2 -translate-y-1/2 transition-transform duration-150 ${
+              className={`-translate-x-1/2 -translate-y-1/2 pointer-events-none transition-transform duration-150 ${
                 isClicking ? 'scale-75' : 'scale-100 animate-bounce'
               }`}
               style={{
@@ -1151,13 +1222,13 @@ export default function GachaApp({
               }}
             >
               {poolConfig.cursor?.style === 'pointer' ? (
-                <span className="text-2xl filter drop-shadow">👆</span>
+                <span className="text-2xl filter drop-shadow pointer-events-none">👆</span>
               ) : poolConfig.cursor?.style === 'wand' ? (
-                <span className="text-2xl filter drop-shadow">🪄</span>
+                <span className="text-2xl filter drop-shadow pointer-events-none">🪄</span>
               ) : poolConfig.cursor?.style === 'star' ? (
-                <span className="text-2xl filter drop-shadow">✨</span>
+                <span className="text-2xl filter drop-shadow pointer-events-none">✨</span>
               ) : poolConfig.cursor?.style === 'crosshair' ? (
-                <span className="text-xl font-mono text-amber-400 filter drop-shadow">✛</span>
+                <span className="text-xl font-mono text-amber-400 filter drop-shadow pointer-events-none">✛</span>
               ) : (
                 /* Classic Pointer Cursor */
                 <svg
@@ -1167,7 +1238,7 @@ export default function GachaApp({
                   fill={poolConfig.cursor?.color || '#F59E0B'}
                   stroke="#000"
                   strokeWidth="1.5"
-                  className="filter drop-shadow-md"
+                  className="filter drop-shadow-md pointer-events-none"
                 >
                   <path d="M3 3l7 18 3-7 7-3L3 3z" />
                 </svg>
@@ -1177,7 +1248,7 @@ export default function GachaApp({
             {/* Attached Speech Bubble */}
             {activeBubble && (
               <div
-                className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 min-w-[140px] max-w-[220px] p-2.5 rounded-2xl text-xs shadow-2xl animate-fadeIn ${
+                className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 min-w-[140px] max-w-[220px] p-2.5 rounded-2xl text-xs shadow-2xl animate-fadeIn pointer-events-none select-none ${
                   activeBubble.type === 'bubble_self'
                     ? 'bg-black/75 backdrop-blur-md border border-white/20 text-stone-300 italic text-[11px]'
                     : activeBubble.type === 'bubble_evaluation'
@@ -1186,7 +1257,7 @@ export default function GachaApp({
                 }`}
               >
                 {/* Header label */}
-                <div className="flex items-center gap-1 text-[9px] text-amber-400 font-bold mb-0.5">
+                <div className="flex items-center gap-1 text-[9px] text-amber-400 font-bold mb-0.5 pointer-events-none">
                   <Sparkle className="size-2.5" />
                   <span>
                     {activeBubble.type === 'bubble_self'
@@ -1195,11 +1266,11 @@ export default function GachaApp({
                   </span>
                 </div>
                 
-                <div className="leading-snug">{activeBubble.text}</div>
+                <div className="leading-snug pointer-events-none">{activeBubble.text}</div>
 
                 {/* Speech Arrow for user bubbles */}
                 {activeBubble.type !== 'bubble_self' && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-stone-900" />
+                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-stone-900 pointer-events-none" />
                 )}
               </div>
             )}
@@ -1207,7 +1278,7 @@ export default function GachaApp({
 
           {/* G. Waiting for User Reply Badge */}
           {isWaitingUserReply && (
-            <div className="absolute top-12 left-1/2 -translate-x-1/2 z-30 px-3 py-1 rounded-full bg-amber-500 text-stone-950 font-bold text-xs shadow-lg animate-pulse border border-white">
+            <div className="absolute top-12 left-1/2 -translate-x-1/2 z-30 px-3 py-1 rounded-full bg-amber-500 text-stone-950 font-bold text-xs shadow-lg animate-pulse border border-white pointer-events-none">
               <span>等待主控发言互动中……（在下方输入框说话）</span>
             </div>
           )}

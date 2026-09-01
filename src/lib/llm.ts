@@ -2814,7 +2814,7 @@ export async function generateGachaDecision(
 
 /**
  * ③ 抽卡结果返回（动画播放期间的 LLM 思考与点击习惯画像设定）
- * v2 核心：Agent 像真人一样用光标逐张点击卡牌翻面
+ * v4 升级：光标利落翻卡，不再需要单张零碎评价，全部翻完后针对本次整体出货进行一次生动总结
  */
 export async function generateGachaResultProfile(
   config: LlmConfig,
@@ -2826,63 +2826,56 @@ export async function generateGachaResultProfile(
   sparkCount: number,
   poolConfig: GachaPoolConfig
 ): Promise<GachaResultProfileOutput> {
-  const currentEmotion = character.emotion?.current || { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 };
+  const ssrCount = pullResults.filter((p) => p.card.rarity === 'SSR').length;
+  const srCount = pullResults.filter((p) => p.card.rarity === 'SR').length;
+  const rCount = pullResults.filter((p) => p.card.rarity === 'R').length;
+  const ssrNames = pullResults.filter((p) => p.card.rarity === 'SSR').map((p) => p.card.name);
 
   const resultsSummary = pullResults.map((p, idx) => {
-    return `第 ${idx + 1} 张 (index: ${idx}): 【${p.card.rarity}】${p.card.name} (${p.card.description})${p.is_spark ? ' [井保底获得!]' : ''}`;
-  }).join('\n');
+    return `第 ${idx + 1} 张: 【${p.card.rarity}】${p.card.name}${p.is_spark ? ' [井保底获得!]' : ''}`;
+  }).join('、');
 
-  const prompt = `你是角色「${character.name}」，性格：${character.core.values.join('、')}，口吻：${character.core.speech_filter}。
-刚才你为玩家执行了抽卡，本次抽到了 ${pullResults.length} 张卡牌，结果如下：
-
+  const prompt = `你是角色「${character.name}」，性格：${character.core.values.join('、')}，口吻风格：${character.core.speech_filter}。
+刚才你为玩家执行了抽卡，本次抽到了 ${pullResults.length} 发，结果如下：
 ${resultsSummary}
+（本次收获：SSR × ${ssrCount} ${ssrNames.length > 0 ? `(${ssrNames.join('、')})` : ''}，SR × ${srCount}，R × ${rCount}）
 
 【大局状态】：
-- 截止当前总抽数：${totalPulls} 发
+- 累计总抽数：${totalPulls} 发
 - 累计已出SSR：${allSsrList.length > 0 ? allSsrList.join('、') : '暂无'}
 - 当前井进度：${sparkCurrent}/${sparkCount}
 
-【任务要求（v2点击习惯画像）】：
-抽卡动画结束后，卡牌将全部背面朝上排列在结果区。你将像一个真人一样，用虚拟光标一张一张去点击卡牌进行翻面！
-请根据你的性格与本次抽卡出的货（出了SSR会激动！全是R卡会郁闷/吐槽），设定你的【点击习惯画像 click_habit_profile】与【每张卡翻开时的即时评价 evaluations】：
-
-1. skip_click_position：你在动画期间习惯点击哪个空白坐标跳过动画（0.0~1.0的x/y，比如右上方 {x: 0.85, y: 0.15} 或屏幕中央）
-2. click_rhythm：翻卡节奏描述（如："急不可耐，连续点击" / "磨磨蹭蹭，屏息以待" / "忽快忽慢，带着试探" / "从容翻阅"）
-3. random_tap：翻卡途中是否会因为紧张/兴奋偶尔乱点一下屏幕空白处（true/false）
+【任务要求】：
+1. skip_click_position：你在动画期间习惯点击哪个坐标跳过动画（0.0~1.0的x/y，比如右上 {x: 0.85, y: 0.12} 或中央）
+2. click_rhythm：翻卡动作节奏（如："利落迅速" / "紧张试探，忽快忽慢" / "稳健从容"）
+3. random_tap：翻卡途中是否偶尔乱点（true/false）
 4. wait_for_user_reply：翻完关键卡（如SSR）后是否想停下来等主控说话（true/false）
-5. tap_while_talking：是否边说话边点下一张（true）还是等气泡说完再点下一张（false）
-6. evaluations：对关键卡牌（尤其是SSR、SR或特色R卡）翻开时的简短评价（跟随光标气泡显示，5~20字，生动鲜活）
-7. summary_bubble：10张全部翻完后的最终总结发言
+5. summary_bubble：翻完所有卡牌后，针对【本次整批抽卡结果】的整体评价发言（15~35字，出了SSR激动狂喜，全蓝吐槽玄学或安慰主控）
 
 输出纯合法JSON：
 \`\`\`json
 {
   "click_habit_profile": {
     "skip_click_position": { "x": 0.85, "y": 0.12 },
-    "click_rhythm": "急不可耐，快速翻卡",
+    "click_rhythm": "利落迅速",
     "random_tap": false,
     "wait_for_user_reply": false,
     "tap_while_talking": true,
-    "evaluation_timing": "on_flip"
+    "evaluation_timing": "after_all"
   },
-  "evaluations": [
-    { "card_index": 0, "text": "第一张……唔，普通的小学徒。" },
-    { "card_index": 4, "text": "等等！紫光出现了！" },
-    { "card_index": 9, "text": "哇啊啊啊！！出了！！金光SSR！！" }
-  ],
-  "summary_bubble": "这波手气绝了！限定UP成功拿下！"
+  "evaluations": [],
+  "summary_bubble": "${ssrCount > 0 ? '哇啊啊！真的出金了！这手气简直太绝了～' : '呼……这波虽然没出金，但垫了不少保底，下一发肯定稳！'}"
 }
 \`\`\``;
 
   try {
     const raw = await callLlm(config, [
-      { role: 'system', content: `你是「${character.name}」，严格遵守抽卡点击画像协议，输出纯净JSON。` },
+      { role: 'system', content: `你是「${character.name}」，严格遵守抽卡结果综合评价协议，输出纯净JSON。` },
       { role: 'user', content: prompt },
     ]);
     const match = raw.match(/\{[\s\S]*\}/);
     if (match) {
       const parsed = JSON.parse(match[0]);
-
       const habit = parsed.click_habit_profile || {};
       const skipPos = habit.skip_click_position || { x: 0.85, y: 0.12 };
 
@@ -2891,62 +2884,39 @@ ${resultsSummary}
           x: typeof skipPos.x === 'number' ? Math.max(0.05, Math.min(0.95, skipPos.x)) : 0.85,
           y: typeof skipPos.y === 'number' ? Math.max(0.05, Math.min(0.95, skipPos.y)) : 0.12,
         },
-        click_rhythm: String(habit.click_rhythm || '正常翻卡'),
+        click_rhythm: String(habit.click_rhythm || '利落迅速'),
         random_tap: Boolean(habit.random_tap),
         wait_for_user_reply: Boolean(habit.wait_for_user_reply),
-        tap_while_talking: habit.tap_while_talking !== false,
-        evaluation_timing: 'on_flip',
+        tap_while_talking: true,
+        evaluation_timing: 'after_all',
       };
-
-      const evaluations: Array<{ card_index: number; text: string }> = [];
-      if (Array.isArray(parsed.evaluations)) {
-        parsed.evaluations.forEach((item: any) => {
-          if (typeof item.card_index === 'number' && item.text) {
-            evaluations.push({
-              card_index: item.card_index,
-              text: String(item.text),
-            });
-          }
-        });
-      }
 
       return {
         click_habit_profile: safeProfile,
-        evaluations,
-        summary_bubble: String(parsed.summary_bubble || '呼……这次的结果全在这啦！'),
+        evaluations: [],
+        summary_bubble: String(parsed.summary_bubble || (ssrCount > 0 ? '金光降临！这波太赚啦～' : '结果全在这里了，稳住心态下一发继续！')),
       };
     }
   } catch (err) {
     console.warn('generateGachaResultProfile failed:', err);
   }
 
-  // Robust Default Fallback
-  const defaultEvaluations: Array<{ card_index: number; text: string }> = [];
-  pullResults.forEach((item, idx) => {
-    if (item.card.rarity === 'SSR') {
-      defaultEvaluations.push({
-        card_index: idx,
-        text: `金光绽放！是SSR【${item.card.name}】！！`,
-      });
-    } else if (item.card.rarity === 'SR') {
-      defaultEvaluations.push({
-        card_index: idx,
-        text: `紫光！拿到SR【${item.card.name}】啦～`,
-      });
-    }
-  });
-
+  // Fallback
   return {
     click_habit_profile: {
       skip_click_position: { x: 0.85, y: 0.12 },
-      click_rhythm: '正常',
+      click_rhythm: '利落迅速',
       random_tap: false,
       wait_for_user_reply: false,
       tap_while_talking: true,
-      evaluation_timing: 'on_flip',
+      evaluation_timing: 'after_all',
     },
-    evaluations: defaultEvaluations,
-    summary_bubble: '这次的抽卡结果全部揭晓了，看看收获吧～',
+    evaluations: [],
+    summary_bubble: ssrCount > 0
+      ? `哇！金光大绽！成功拿下SSR【${ssrNames.join('、')}】！`
+      : srCount > 0
+      ? `抽到了${srCount}张紫卡SR，手感正在升温中～`
+      : '这轮都是蓝天白云垫刀，下次一定爆金光！',
   };
 }
 
