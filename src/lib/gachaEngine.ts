@@ -1,302 +1,453 @@
-import type {
-  GachaPoolConfig,
-  GachaCard,
-  GachaButton,
-  ClickTarget,
-  ClickHabitProfile,
-  PulledCardInstance,
-  GachaHistoryRecord
-} from './gachaTypes';
-import { DEFAULT_GACHA_POOL } from './defaultGachaPool';
+// Fengling AI Gacha Simulator Engine (v4)
+// JS Mechanical Layer: Probability, Spark Pity, Click Rhythm Parser, Sound FX, Configuration Manager
 
-const GACHA_POOL_STORAGE_KEY = '__rp_gacha_pool_config_v4';
-const GACHA_HISTORY_STORAGE_KEY = '__rp_gacha_history_v4';
+export type GachaRarity = 'SSR' | 'SR' | 'R';
 
-// -------------------------------------------------------------
-// 1. Config Persistence & Storage
-// -------------------------------------------------------------
+export interface GachaCard {
+  id: string;
+  name: string;
+  rarity: GachaRarity;
+  card_image: string;
+  description: string;
+  featured?: boolean;
+}
+
+export interface GachaButton {
+  id: string;
+  label: string;
+  cost?: number;
+  position: { x: number; y: number }; // 0-100 percentage coordinates
+}
+
+export interface CursorConfig {
+  style: 'default' | 'pointer' | 'wand' | 'star' | 'crosshair' | 'custom';
+  custom_image?: string;
+  size: number;
+  color?: string;
+}
+
+export interface GachaRates {
+  SSR: number;
+  SR: number;
+  R: number;
+}
+
+export interface SparkReward {
+  card_id: string;
+  description: string;
+}
+
+export interface GachaPoolConfig {
+  pool_id: string;
+  pool_name: string;
+  banner_image: string;
+  frame_overlay?: string;
+  spark_count: number;
+  spark_reward: SparkReward;
+  rates: GachaRates;
+  cards: GachaCard[];
+  buttons: GachaButton[];
+  cursor?: CursorConfig;
+}
+
+export interface ClickHabitProfile {
+  skip_click_position: { x: number; y: number }; // Normalized 0-1
+  click_rhythm: string;
+  random_tap: boolean;
+  wait_for_user_reply: boolean;
+  tap_while_talking: boolean;
+  evaluation_timing: 'on_flip' | 'after_all';
+}
+
+export interface GachaPullItem {
+  id: string;
+  card: GachaCard;
+  pull_number: number;
+  is_spark: boolean;
+  timestamp: number;
+  flipped: boolean;
+  evaluation?: string;
+}
+
+export interface ParsedRhythm {
+  moveDurationSec: number;
+  clickIntervalMs: number;
+  isVariable: boolean;
+}
+
+export const GACHA_CONFIG_STORAGE_KEY = 'fengling_gacha_config';
+export const GACHA_HISTORY_STORAGE_KEY = 'fengling_gacha_history';
+
+// ============================================================================
+// Default Pool Configuration (Clean mechanical cards without preset templates)
+// ============================================================================
+
+export const DEFAULT_GACHA_POOL: GachaPoolConfig = {
+  pool_id: 'limited_2026_fengling',
+  pool_name: '幻境共鸣 · 星辉之誓',
+  banner_image: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=1000&auto=format&fit=crop',
+  frame_overlay: '',
+  spark_count: 200,
+  spark_reward: {
+    card_id: 'card_ssr_01',
+    description: '200抽内必得限定UP角色【夜蔷薇·莉莉丝】（井机制）',
+  },
+  rates: {
+    SSR: 0.03,
+    SR: 0.15,
+    R: 0.82,
+  },
+  cursor: {
+    style: 'default',
+    size: 24,
+    color: '#F59E0B',
+  },
+  cards: [
+    {
+      id: 'card_ssr_01',
+      name: '夜蔷薇 · 莉莉丝',
+      rarity: 'SSR',
+      card_image: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=800&auto=format&fit=crop',
+      description: '暗黑系玫瑰女王，限定UP专属角色',
+      featured: true,
+    },
+    {
+      id: 'card_ssr_02',
+      name: '星辰咏者 · 塞莱斯蒂',
+      rarity: 'SSR',
+      card_image: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=800&auto=format&fit=crop',
+      description: '游历星海的古老歌姬，常驻SSR',
+      featured: false,
+    },
+    {
+      id: 'card_sr_01',
+      name: '绯红之刃 · 艾伦',
+      rarity: 'SR',
+      card_image: 'https://images.unsplash.com/photo-1563089145-599997674d42?q=80&w=800&auto=format&fit=crop',
+      description: '敏捷的炎之剑士，SR核心输出',
+      featured: false,
+    },
+    {
+      id: 'card_sr_02',
+      name: '银月神官 · 菲娜',
+      rarity: 'SR',
+      card_image: 'https://images.unsplash.com/photo-1509114397022-ed747cca3f65?q=80&w=800&auto=format&fit=crop',
+      description: '纯洁的月之守护者，SR辅助',
+      featured: false,
+    },
+    {
+      id: 'card_r_01',
+      name: '见习骑士 · 罗伊',
+      rarity: 'R',
+      card_image: 'https://images.unsplash.com/photo-1514539079130-25950c84af65?q=80&w=800&auto=format&fit=crop',
+      description: '充满干劲的王国见习骑士',
+      featured: false,
+    },
+    {
+      id: 'card_r_02',
+      name: '森林射手 · 罗宾',
+      rarity: 'R',
+      card_image: 'https://images.unsplash.com/photo-1511447333015-45b65e60f6d5?q=80&w=800&auto=format&fit=crop',
+      description: '穿梭于林木间的年轻游侠',
+      featured: false,
+    },
+    {
+      id: 'card_r_03',
+      name: '学徒法师 · 露露',
+      rarity: 'R',
+      card_image: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=800&auto=format&fit=crop',
+      description: '偶尔会炸膛的俏皮魔法学徒',
+      featured: false,
+    },
+  ],
+  buttons: [
+    { id: 'pool_detail', label: '卡池详情', position: { x: 14, y: 94 } },
+    { id: 'pull_once', label: '共鸣一次', cost: 1, position: { x: 34, y: 86 } },
+    { id: 'pull_ten', label: '共鸣十次', cost: 10, position: { x: 66, y: 86 } },
+    { id: 'pull_history', label: '抽卡记录', position: { x: 50, y: 94 } },
+    { id: 'rate_info', label: '概率说明', position: { x: 74, y: 94 } },
+    { id: 'custom', label: '自定义', position: { x: 89, y: 94 } },
+  ],
+};
+
+// ============================================================================
+// Configuration Store & Persistence
+// ============================================================================
 
 export function loadGachaPoolConfig(): GachaPoolConfig {
   try {
-    const raw = localStorage.getItem(GACHA_POOL_STORAGE_KEY);
+    const raw = localStorage.getItem(GACHA_CONFIG_STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed.pool_name === 'string' && Array.isArray(parsed.cards)) {
-        return sanitizeGachaPoolConfig(parsed);
+      if (parsed && parsed.cards && parsed.rates && parsed.buttons) {
+        const sparkCount = parsed.spark_count === 13 ? 200 : (parsed.spark_count || 200);
+        return {
+          ...DEFAULT_GACHA_POOL,
+          ...parsed,
+          spark_count: sparkCount,
+          cursor: { ...DEFAULT_GACHA_POOL.cursor, ...parsed.cursor },
+        };
       }
     }
   } catch (err) {
-    console.warn('[GachaEngine] Load pool config failed, using default:', err);
+    console.warn('Failed to load gacha pool config from localStorage, using default:', err);
   }
   return DEFAULT_GACHA_POOL;
 }
 
 export function saveGachaPoolConfig(config: GachaPoolConfig): void {
   try {
-    const sanitized = sanitizeGachaPoolConfig(config);
-    localStorage.setItem(GACHA_POOL_STORAGE_KEY, JSON.stringify(sanitized));
+    localStorage.setItem(GACHA_CONFIG_STORAGE_KEY, JSON.stringify(config));
   } catch (err) {
-    console.error('[GachaEngine] Save pool config failed:', err);
+    console.error('Failed to save gacha pool config to localStorage:', err);
   }
 }
 
 export function resetGachaPoolConfig(): GachaPoolConfig {
   try {
-    localStorage.removeItem(GACHA_POOL_STORAGE_KEY);
-  } catch {}
+    localStorage.removeItem(GACHA_CONFIG_STORAGE_KEY);
+  } catch (e) {
+    // ignore
+  }
   return DEFAULT_GACHA_POOL;
 }
 
-export function sanitizeGachaPoolConfig(raw: any): GachaPoolConfig {
-  const fallback = DEFAULT_GACHA_POOL;
-  const rates = raw?.rates || fallback.rates;
-  const ssrRate = typeof rates.SSR === 'number' && !isNaN(rates.SSR) ? Math.max(0.001, Math.min(0.5, rates.SSR)) : 0.018;
-  const srRate = typeof rates.SR === 'number' && !isNaN(rates.SR) ? Math.max(0.01, Math.min(0.8, rates.SR)) : 0.132;
-  const rRate = Math.max(0.01, +(1 - ssrRate - srRate).toFixed(4));
-
-  const rawCards = Array.isArray(raw?.cards) && raw.cards.length > 0 ? raw.cards : fallback.cards;
-  const cards: GachaCard[] = rawCards.map((c: any, idx: number) => ({
-    id: String(c.id || `card_${idx}_${Date.now()}`),
-    name: String(c.name || `神秘卡牌 #${idx + 1}`),
-    rarity: (c.rarity === 'SSR' || c.rarity === 'SR' || c.rarity === 'R' ? c.rarity : 'R') as any,
-    card_image: String(c.card_image || fallback.cards[0].card_image),
-    description: String(c.description || '一张充满未知光彩的卡牌。'),
-    featured: Boolean(c.featured),
-  }));
-
-  const rawButtons = Array.isArray(raw?.buttons) && raw.buttons.length > 0 ? raw.buttons : fallback.buttons;
-  const buttons: GachaButton[] = rawButtons.map((b: any, idx: number) => ({
-    id: String(b.id || `btn_${idx}`),
-    label: String(b.label || `操作 ${idx + 1}`),
-    type: b.type || 'custom',
-    pullCount: typeof b.pullCount === 'number' ? b.pullCount : (b.id?.includes('10') ? 10 : 1),
-    position: {
-      x: typeof b.position?.x === 'number' ? Math.max(0, Math.min(1, b.position.x)) : 0.5,
-      y: typeof b.position?.y === 'number' ? Math.max(0, Math.min(1, b.position.y)) : 0.5,
-    },
-    styleVariant: b.styleVariant || 'primary',
-  }));
-
-  return {
-    pool_id: String(raw?.pool_id || fallback.pool_id),
-    pool_name: String(raw?.pool_name || fallback.pool_name),
-    banner_image: String(raw?.banner_image || fallback.banner_image),
-    frame_overlay: String(raw?.frame_overlay || ''),
-    spark_count: typeof raw?.spark_count === 'number' && raw.spark_count > 0 ? Math.round(raw.spark_count) : fallback.spark_count,
-    spark_reward: {
-      card_id: String(raw?.spark_reward?.card_id || fallback.spark_reward.card_id),
-      description: String(raw?.spark_reward?.description || fallback.spark_reward.description),
-    },
-    rates: {
-      SSR: ssrRate,
-      SR: srRate,
-      R: rRate,
-    },
-    cards,
-    buttons,
-    cursor_style: {
-      type: raw?.cursor_style?.type || 'arrow',
-      color: raw?.cursor_style?.color || '#F59E0B',
-      size: typeof raw?.cursor_style?.size === 'number' ? raw.cursor_style.size : 24,
-    },
-  };
-}
-
-// -------------------------------------------------------------
-// 2. Gacha Execution Engine (JS Mechanical Layer)
-// -------------------------------------------------------------
-
-export interface ExecutePullResult {
-  pulledCards: PulledCardInstance[];
-  newSparkCount: number;
-  isSparkTriggered: boolean;
-  totalSsrCountInPull: number;
-}
+// ============================================================================
+// Probability & Pull Engine (Pure JS mechanical layer)
+// ============================================================================
 
 export function executeGachaPull(
-  poolConfig: GachaPoolConfig,
-  pullCount: number,
-  currentSparkCount: number
-): ExecutePullResult {
-  const ssrCards = poolConfig.cards.filter((c) => c.rarity === 'SSR');
-  const srCards = poolConfig.cards.filter((c) => c.rarity === 'SR');
-  const rCards = poolConfig.cards.filter((c) => c.rarity === 'R');
+  pool: GachaPoolConfig,
+  count: number,
+  currentSpark: number,
+  totalPullsSoFar: number
+): {
+  items: GachaPullItem[];
+  newSparkCount: number;
+  sparkTriggered: boolean;
+  featuredObtained: boolean;
+} {
+  const items: GachaPullItem[] = [];
+  let spark = currentSpark;
+  let sparkTriggered = false;
+  let featuredObtained = false;
 
-  // Fallback safe arrays if some rarities have 0 cards
-  const safeSsr = ssrCards.length > 0 ? ssrCards : poolConfig.cards;
-  const safeSr = srCards.length > 0 ? srCards : poolConfig.cards;
-  const safeR = rCards.length > 0 ? rCards : poolConfig.cards;
+  const ssrCards = pool.cards.filter((c) => c.rarity === 'SSR');
+  const srCards = pool.cards.filter((c) => c.rarity === 'SR');
+  const rCards = pool.cards.filter((c) => c.rarity === 'R');
 
-  const pulledCards: PulledCardInstance[] = [];
-  let newSparkCount = currentSparkCount;
-  let isSparkTriggered = false;
-  let totalSsrCountInPull = 0;
+  const featuredSsr = ssrCards.find((c) => c.featured) || ssrCards[0] || pool.cards[0];
 
-  for (let i = 0; i < pullCount; i++) {
-    newSparkCount += 1;
-    let chosenCard: GachaCard;
-    let isSparkReward = false;
+  for (let i = 0; i < count; i++) {
+    const pullNumber = totalPullsSoFar + i + 1;
+    spark += 1;
 
-    // Check spark threshold (井计数)
-    if (newSparkCount >= poolConfig.spark_count) {
-      isSparkTriggered = true;
-      isSparkReward = true;
-      newSparkCount = 0; // reset spark count
-      const rewardCard = poolConfig.cards.find((c) => c.id === poolConfig.spark_reward.card_id) || safeSsr[0];
-      chosenCard = rewardCard;
-      totalSsrCountInPull++;
+    let pickedCard: GachaCard;
+    let isSparkPull = false;
+
+    // Check Spark (井机制)
+    if (spark >= pool.spark_count) {
+      pickedCard = featuredSsr;
+      isSparkPull = true;
+      sparkTriggered = true;
+      spark = 0; // Reset spark after spark reward
     } else {
+      // Standard Weighted Pull
       const rand = Math.random();
-      if (rand < poolConfig.rates.SSR) {
-        // Roll SSR
-        chosenCard = pickWeightedCard(safeSsr);
-        totalSsrCountInPull++;
-      } else if (rand < poolConfig.rates.SSR + poolConfig.rates.SR) {
-        // Roll SR
-        chosenCard = pickWeightedCard(safeSr);
+      const ssrThreshold = pool.rates.SSR;
+      const srThreshold = ssrThreshold + pool.rates.SR;
+
+      if (rand < ssrThreshold && ssrCards.length > 0) {
+        // Roll SSR: 50% rate-up for featured if exists
+        if (featuredSsr && Math.random() < 0.5) {
+          pickedCard = featuredSsr;
+        } else {
+          pickedCard = ssrCards[Math.floor(Math.random() * ssrCards.length)];
+        }
+        spark = 0; // SSR resets spark counter!
+      } else if (rand < srThreshold && srCards.length > 0) {
+        pickedCard = srCards[Math.floor(Math.random() * srCards.length)];
+      } else if (rCards.length > 0) {
+        pickedCard = rCards[Math.floor(Math.random() * rCards.length)];
       } else {
-        // Roll R
-        chosenCard = pickWeightedCard(safeR);
+        pickedCard = pool.cards[Math.floor(Math.random() * pool.cards.length)];
       }
     }
 
-    pulledCards.push({
-      instanceId: `card_inst_${Date.now()}_${i}_${Math.random().toString(36).slice(2, 6)}`,
-      card: chosenCard,
-      pullIndex: i,
-      isSparkReward,
-      isFlipped: false,
+    if (pickedCard.rarity === 'SSR' && pickedCard.featured) {
+      featuredObtained = true;
+    }
+
+    items.push({
+      id: `pull_${Date.now()}_${pullNumber}_${Math.random().toString(36).slice(2, 6)}`,
+      card: pickedCard,
+      pull_number: pullNumber,
+      is_spark: isSparkPull,
+      timestamp: Date.now(),
+      flipped: false,
     });
   }
 
   return {
-    pulledCards,
-    newSparkCount,
-    isSparkTriggered,
-    totalSsrCountInPull,
+    items,
+    newSparkCount: spark,
+    sparkTriggered,
+    featuredObtained,
   };
 }
 
-function pickWeightedCard(cards: GachaCard[]): GachaCard {
-  if (cards.length === 1) return cards[0];
-  const featured = cards.filter((c) => c.featured);
-  // Featured cards have 5x weight
-  if (featured.length > 0 && Math.random() < 0.6) {
-    return featured[Math.floor(Math.random() * featured.length)];
+// ============================================================================
+// Click Rhythm Parser (JS Mechanical Layer)
+// Maps LLM free-text rhythm descriptions to exact interval & duration numbers
+// ============================================================================
+
+export function parseClickRhythm(rhythmText?: string): ParsedRhythm {
+  if (!rhythmText || typeof rhythmText !== 'string') {
+    return { moveDurationSec: 0.6, clickIntervalMs: 800, isVariable: false };
   }
-  return cards[Math.floor(Math.random() * cards.length)];
+
+  const text = rhythmText.toLowerCase();
+
+  // 1. 急不可耐 / 连点 / 急性子
+  if (/急|连点|狂点|飞快|迅速|迫不及待|急迫|急促/.test(text)) {
+    return { moveDurationSec: 0.3, clickIntervalMs: 200, isVariable: false };
+  }
+
+  // 2. 磨磨蹭蹭 / 慢吞吞 / 犹豫 / 慎重
+  if (/慢|磨|犹豫|慎重|缓缓|拖延|端详|沉思|仔细/.test(text)) {
+    return { moveDurationSec: 1.0, clickIntervalMs: 1500, isVariable: false };
+  }
+
+  // 3. 忽快忽慢 / 随性 / 变化
+  if (/忽快忽慢|随性|无常|时快时慢|变奏|捉摸不透/.test(text)) {
+    return {
+      moveDurationSec: 0.5,
+      clickIntervalMs: Math.floor(Math.random() * (2000 - 300 + 1)) + 300,
+      isVariable: true,
+    };
+  }
+
+  // 4. 正常 / 普通 / 稳健
+  return { moveDurationSec: 0.6, clickIntervalMs: 800, isVariable: false };
 }
 
-// -------------------------------------------------------------
-// 3. Rhythm & Hesitation Text Parsers
-// -------------------------------------------------------------
+// ============================================================================
+// Web Audio Sound Synthesizers (Rich immersive audio FX)
+// ============================================================================
 
-export function parseClickRhythmMs(rhythmText: string): number {
-  if (!rhythmText) return 800;
-  const t = rhythmText.toLowerCase();
-
-  if (t.includes('急') || t.includes('狂') || t.includes('暴') || t.includes('极快') || t.includes('闪电') || t.includes('连点')) {
-    return 220;
-  }
-  if (t.includes('快') || t.includes('利落') || t.includes('迫不及待') || t.includes('迅速')) {
-    return 400;
-  }
-  if (t.includes('慢') || t.includes('迟疑') || t.includes('沉重') || t.includes('紧张') || t.includes('龟速')) {
-    return 1500;
-  }
-  if (t.includes('从容') || t.includes('优雅') || t.includes('稳') || t.includes('平缓')) {
-    return 950;
-  }
-  if (t.includes('犹豫') || t.includes('纠结') || t.includes('深呼吸')) {
-    return 1800;
-  }
-
-  const numMatch = rhythmText.match(/\d+/);
-  if (numMatch) {
-    const parsed = parseInt(numMatch[0], 10);
-    if (!isNaN(parsed) && parsed >= 100 && parsed <= 5000) {
-      return parsed;
-    }
-  }
-
-  return 800;
-}
-
-// -------------------------------------------------------------
-// 4. Anti-Hallucination Target Validation
-// -------------------------------------------------------------
-
-export function validateAndSanitizeClickTarget(
-  target: any,
-  poolConfig: GachaPoolConfig
-): ClickTarget {
-  if (!target || typeof target !== 'object') {
-    // Default safe blank position
-    return { type: 'blank', position: { x: 0.5, y: 0.5 } };
-  }
-
-  if (target.type === 'button') {
-    const buttonId = String(target.button_id || '');
-    const exists = poolConfig.buttons.some((b) => b.id === buttonId);
-    if (exists) {
-      return { type: 'button', button_id: buttonId };
-    }
-    // If button does not exist, check if first button is available
-    if (poolConfig.buttons.length > 0) {
-      return { type: 'button', button_id: poolConfig.buttons[0].id };
-    }
-    return { type: 'blank', position: { x: 0.5, y: 0.5 } };
-  }
-
-  if (target.type === 'blank') {
-    const rawPos = target.position;
-    const x = typeof rawPos?.x === 'number' && !isNaN(rawPos.x) ? Math.max(0, Math.min(1, rawPos.x)) : 0.5;
-    const y = typeof rawPos?.y === 'number' && !isNaN(rawPos.y) ? Math.max(0, Math.min(1, rawPos.y)) : 0.5;
-    return { type: 'blank', position: { x, y } };
-  }
-
-  return { type: 'blank', position: { x: 0.5, y: 0.5 } };
-}
-
-export function getDefaultClickHabitProfile(): ClickHabitProfile {
-  return {
-    skip_click_position: { x: 0.88, y: 0.08 },
-    click_rhythm: '正常',
-    random_tap: false,
-    wait_for_user_reply: false,
-    tap_while_talking: true,
-    evaluation_timing: 'on_flip',
-  };
-}
-
-// -------------------------------------------------------------
-// 5. Pull History Storage
-// -------------------------------------------------------------
-
-export function loadGachaHistory(): GachaHistoryRecord[] {
+export function playGachaButtonSound() {
   try {
-    const raw = localStorage.getItem(GACHA_HISTORY_STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed;
-    }
-  } catch {}
-  return [];
-}
-
-export function appendGachaHistory(record: GachaHistoryRecord): void {
-  try {
-    const list = loadGachaHistory();
-    list.unshift(record);
-    // Keep max 100 pull history records
-    localStorage.setItem(GACHA_HISTORY_STORAGE_KEY, JSON.stringify(list.slice(0, 100)));
-  } catch (err) {
-    console.warn('[GachaEngine] Append history failed:', err);
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(480, now);
+    osc.frequency.exponentialRampToValueAtTime(720, now + 0.08);
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.12);
+  } catch (e) {
+    // ignore
   }
 }
 
-export function clearGachaHistory(): void {
+export function playCardFlipSound(rarity: GachaRarity = 'R') {
   try {
-    localStorage.removeItem(GACHA_HISTORY_STORAGE_KEY);
-  } catch {}
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    if (rarity === 'SSR') {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(523.25, now); // C5
+      osc.frequency.setValueAtTime(659.25, now + 0.08); // E5
+      osc.frequency.setValueAtTime(783.99, now + 0.16); // G5
+      osc.frequency.setValueAtTime(1046.5, now + 0.24); // C6
+      gain.gain.setValueAtTime(0.35, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.5);
+    } else if (rarity === 'SR') {
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(440, now); // A4
+      osc.frequency.setValueAtTime(554.37, now + 0.1); // C#5
+      gain.gain.setValueAtTime(0.25, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.3);
+    } else {
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(320, now);
+      osc.frequency.exponentialRampToValueAtTime(480, now + 0.06);
+      gain.gain.setValueAtTime(0.15, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.15);
+    }
+  } catch (e) {
+    // ignore
+  }
+}
+
+export function playSsrSparkleSound() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+
+    const chords = [523.25, 659.25, 783.99, 1046.5, 1318.51];
+    chords.forEach((freq, idx) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now + idx * 0.06);
+      gain.gain.setValueAtTime(0.15, now + idx * 0.06);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.06 + 0.6);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now + idx * 0.06);
+      osc.stop(now + idx * 0.06 + 0.6);
+    });
+  } catch (e) {
+    // ignore
+  }
+}
+
+export function playBubblePopSound() {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(600, now);
+    osc.frequency.exponentialRampToValueAtTime(900, now + 0.05);
+    gain.gain.setValueAtTime(0.1, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.08);
+  } catch (e) {
+    // ignore
+  }
 }

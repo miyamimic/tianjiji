@@ -2576,6 +2576,556 @@ export async function generateDrawAndGuessAiGuessReaction(
   };
 }
 
+// ============================================================================
+// 风铃 · AI 抽卡模拟器 (Gacha Simulator v2) LLM 决策层
+// ============================================================================
+
+import type {
+  GachaPoolConfig,
+  GachaPullItem,
+  ClickHabitProfile,
+  GachaButton,
+} from './gachaEngine';
+
+export interface GachaClickTarget {
+  type: 'button' | 'blank';
+  button_id?: string | null;
+  position?: { x: number; y: number }; // 0-1 normalized
+}
+
+export interface GachaOpeningOutput {
+  first_action: 'move_to_button' | 'move_to_blank' | 'idle';
+  click_target: GachaClickTarget;
+  opening_bubble: string;
+  bubble_to_user: string;
+}
+
+export interface GachaDecisionOutput {
+  action: 'move_to' | 'click' | 'idle' | 'stop';
+  click_target: GachaClickTarget;
+  click_rhythm: string;
+  bubble_to_user: string;
+  bubble_self: string;
+  hesitation_ms: number;
+}
+
+export interface GachaResultProfileOutput {
+  click_habit_profile: ClickHabitProfile;
+  evaluations: Array<{ card_index: number; text: string }>;
+  summary_bubble: string;
+}
+
+export interface GachaUserResponseOutput {
+  action: 'pull_ten' | 'pull_once' | 'pool_detail' | 'rate_info' | 'pull_history' | 'stop' | 'chat_only';
+  response_bubble: string;
+  bubble_self?: string;
+  click_rhythm?: string;
+  hesitation_ms?: number;
+}
+
+export interface GachaEndingOutput {
+  ending_bubble: string;
+  gameTotalDelta?: Partial<EmotionVector>;
+}
+
+/**
+ * ① 进入界面 (OPENING_CALL)
+ */
+export async function generateGachaOpening(
+  config: LlmConfig,
+  character: Character,
+  poolConfig: GachaPoolConfig,
+  userInstruction: string
+): Promise<GachaOpeningOutput> {
+  const currentEmotion = character.emotion?.current || { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 };
+  const buttonsList = poolConfig.buttons.map((b) => `[id: "${b.id}", label: "${b.label}"]`).join(', ');
+
+  const prompt = `你是角色「${character.name}」。
+核心人设：${character.core.values.join('、')}，说话口吻：${character.core.speech_filter}
+当前六维情绪快照：温情${(currentEmotion.warmth * 100).toFixed(0)}%、喜悦${(currentEmotion.joy * 100).toFixed(0)}%、期待/欲望${(currentEmotion.desire * 100).toFixed(0)}%
+
+现在你要像真人一样用虚拟光标帮主控操作抽卡。
+当前卡池：${poolConfig.pool_name}（井上限：${poolConfig.spark_count}抽）
+可用操作按钮：${buttonsList}
+主控进入时对你说："${userInstruction || '帮我抽几发看看手气！'}"
+
+请决定你的第一步动作：
+- 如果主控明确要求单抽，可直接点 pull_once；
+- 如果主控明确要求十连或抽卡，可直接点 pull_ten；
+- 或先点 pool_detail 查看卡池详情；
+- 对主控说什么？（opening_bubble：第一句自言自语/入场反应；bubble_to_user：对主控说的话）
+
+输出纯合法JSON：
+\`\`\`json
+{
+  "first_action": "move_to_button",
+  "click_target": { "type": "button", "button_id": "pool_detail" },
+  "opening_bubble": "让我先看看这个卡池有哪些角色……",
+  "bubble_to_user": "既然交给我，看我今天给你露一手！"
+}
+\`\`\``;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，严格遵守抽卡模拟器开场协议，输出纯净JSON。` },
+      { role: 'user', content: prompt },
+    ]);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      let target: GachaClickTarget = { type: 'button', button_id: 'pool_detail' };
+      if (parsed.click_target && typeof parsed.click_target === 'object') {
+        target = {
+          type: parsed.click_target.type === 'blank' ? 'blank' : 'button',
+          button_id: parsed.click_target.button_id || 'pool_detail',
+          position: parsed.click_target.position,
+        };
+      }
+      return {
+        first_action: parsed.first_action || 'move_to_button',
+        click_target: target,
+        opening_bubble: String(parsed.opening_bubble || '让我看看这次的卡池……'),
+        bubble_to_user: String(parsed.bubble_to_user || '看我的吧，这就帮你试试手气！'),
+      };
+    }
+  } catch (err) {
+    console.warn('generateGachaOpening failed:', err);
+  }
+
+  return {
+    first_action: 'move_to_button',
+    click_target: { type: 'button', button_id: 'pool_detail' },
+    opening_bubble: '让我先看看卡池详情和当期UP……',
+    bubble_to_user: '既然你相信我，那我可要好好挑选一下时机了！',
+  };
+}
+
+/**
+ * ② 核心决策循环 (DECISION_LOOP)
+ */
+export async function generateGachaDecision(
+  config: LlmConfig,
+  character: Character,
+  poolConfig: GachaPoolConfig,
+  state: {
+    currentScreen: string;
+    cursorPosition: { x: number; y: number };
+    availableButtons: GachaButton[];
+    sparkCurrent: number;
+    sparkCount: number;
+    totalPulls: number;
+    ssrList: string[];
+    userInstruction: string;
+    userLatestMessage?: string;
+    behaviorSummary: string;
+  }
+): Promise<GachaDecisionOutput> {
+  const currentEmotion = character.emotion?.current || { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 };
+  const buttonsList = state.availableButtons.map((b) => `[id: "${b.id}", label: "${b.label}"]`).join(', ');
+
+  const prompt = `你是角色「${character.name}」，核心性格：${character.core.values.join('、')}，口吻：${character.core.speech_filter}。
+你正在像真人一样，用虚拟光标帮主控操作抽卡界面。
+
+【当前状态】：
+- 当前界面：${state.currentScreen}
+- 光标当前位置：(x: ${state.cursorPosition.x.toFixed(2)}, y: ${state.cursorPosition.y.toFixed(2)})
+- 当前可用按钮：${buttonsList}
+- 井计数（保底进度）：${state.sparkCurrent}/${state.sparkCount}
+- 累计已抽：${state.totalPulls} 发
+- 累计已出SSR：${state.ssrList.length > 0 ? state.ssrList.join('、') : '暂无'}
+- 主控目标/指令："${state.userInstruction || '无特别指令'}"
+- 主控最新说话："${state.userLatestMessage || '（主控正在专注观战）'}"
+- 历史行为摘要：${state.behaviorSummary}
+
+【决策要求】：
+1. 像真人一样决定下一步动作：
+   - 移动并点击按钮（如 pull_ten 共鸣十次、pull_once 共鸣一次、pool_detail 查看详情、rate_info 查看概率、pull_history 查看记录）
+   - 或点击空白处（如关闭弹窗、晃动光标）
+   - 或暂停/结束抽卡（如果满足了主控抽数目标或主控喊停）
+2. click_rhythm：用自由生动的词语描述你此时点击/移动的节奏（如："急不可耐，连点"、"磨磨蹭蹭，小心翼翼"、"忽快忽慢"、"稳健从容"）
+3. bubble_to_user：对主控说的话（可带调侃、自信、紧张或玄学发言）
+4. bubble_self：内心独白（可带心理暗示、祈祷）
+5. hesitation_ms：悬停犹豫时间（500~3000ms）
+
+输出纯合法JSON：
+\`\`\`json
+{
+  "action": "click",
+  "click_target": {
+    "type": "button",
+    "button_id": "pull_ten"
+  },
+  "click_rhythm": "急不可耐，连点",
+  "bubble_to_user": "深吸一口气……十连共鸣，启动！",
+  "bubble_self": "金光快出来吧，千万别沉……",
+  "hesitation_ms": 1200
+}
+\`\`\``;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，严格遵守抽卡模拟器决策协议，输出纯净JSON。` },
+      { role: 'user', content: prompt },
+    ]);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+
+      let target: GachaClickTarget = { type: 'button', button_id: 'pull_ten' };
+      if (parsed.click_target && typeof parsed.click_target === 'object') {
+        const isBlank = parsed.click_target.type === 'blank';
+        target = {
+          type: isBlank ? 'blank' : 'button',
+          button_id: parsed.click_target.button_id || 'pull_ten',
+          position: parsed.click_target.position || { x: 0.5, y: 0.5 },
+        };
+      }
+
+      // Fallback valid button check
+      if (target.type === 'button') {
+        const isValidBtn = state.availableButtons.some((b) => b.id === target.button_id);
+        if (!isValidBtn) {
+          target = { type: 'button', button_id: state.availableButtons[0]?.id || 'pull_ten' };
+        }
+      }
+
+      return {
+        action: parsed.action || 'click',
+        click_target: target,
+        click_rhythm: String(parsed.click_rhythm || '稳健从容'),
+        bubble_to_user: String(parsed.bubble_to_user || '看我的！'),
+        bubble_self: String(parsed.bubble_self || ''),
+        hesitation_ms: typeof parsed.hesitation_ms === 'number' ? Math.max(300, Math.min(4000, parsed.hesitation_ms)) : 1000,
+      };
+    }
+  } catch (err) {
+    console.warn('generateGachaDecision failed:', err);
+  }
+
+  return {
+    action: 'click',
+    click_target: { type: 'button', button_id: 'pull_ten' },
+    click_rhythm: '稳健从容',
+    bubble_to_user: '来一发十连试试手气！',
+    bubble_self: '希望这次能出金……',
+    hesitation_ms: 1000,
+  };
+}
+
+/**
+ * ③ 抽卡结果返回（动画播放期间的 LLM 思考与点击习惯画像设定）
+ * v2 核心：Agent 像真人一样用光标逐张点击卡牌翻面
+ */
+export async function generateGachaResultProfile(
+  config: LlmConfig,
+  character: Character,
+  pullResults: GachaPullItem[],
+  totalPulls: number,
+  allSsrList: string[],
+  sparkCurrent: number,
+  sparkCount: number,
+  poolConfig: GachaPoolConfig
+): Promise<GachaResultProfileOutput> {
+  const currentEmotion = character.emotion?.current || { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 };
+
+  const resultsSummary = pullResults.map((p, idx) => {
+    return `第 ${idx + 1} 张 (index: ${idx}): 【${p.card.rarity}】${p.card.name} (${p.card.description})${p.is_spark ? ' [井保底获得!]' : ''}`;
+  }).join('\n');
+
+  const prompt = `你是角色「${character.name}」，性格：${character.core.values.join('、')}，口吻：${character.core.speech_filter}。
+刚才你为玩家执行了抽卡，本次抽到了 ${pullResults.length} 张卡牌，结果如下：
+
+${resultsSummary}
+
+【大局状态】：
+- 截止当前总抽数：${totalPulls} 发
+- 累计已出SSR：${allSsrList.length > 0 ? allSsrList.join('、') : '暂无'}
+- 当前井进度：${sparkCurrent}/${sparkCount}
+
+【任务要求（v2点击习惯画像）】：
+抽卡动画结束后，卡牌将全部背面朝上排列在结果区。你将像一个真人一样，用虚拟光标一张一张去点击卡牌进行翻面！
+请根据你的性格与本次抽卡出的货（出了SSR会激动！全是R卡会郁闷/吐槽），设定你的【点击习惯画像 click_habit_profile】与【每张卡翻开时的即时评价 evaluations】：
+
+1. skip_click_position：你在动画期间习惯点击哪个空白坐标跳过动画（0.0~1.0的x/y，比如右上方 {x: 0.85, y: 0.15} 或屏幕中央）
+2. click_rhythm：翻卡节奏描述（如："急不可耐，连续点击" / "磨磨蹭蹭，屏息以待" / "忽快忽慢，带着试探" / "从容翻阅"）
+3. random_tap：翻卡途中是否会因为紧张/兴奋偶尔乱点一下屏幕空白处（true/false）
+4. wait_for_user_reply：翻完关键卡（如SSR）后是否想停下来等主控说话（true/false）
+5. tap_while_talking：是否边说话边点下一张（true）还是等气泡说完再点下一张（false）
+6. evaluations：对关键卡牌（尤其是SSR、SR或特色R卡）翻开时的简短评价（跟随光标气泡显示，5~20字，生动鲜活）
+7. summary_bubble：10张全部翻完后的最终总结发言
+
+输出纯合法JSON：
+\`\`\`json
+{
+  "click_habit_profile": {
+    "skip_click_position": { "x": 0.85, "y": 0.12 },
+    "click_rhythm": "急不可耐，快速翻卡",
+    "random_tap": false,
+    "wait_for_user_reply": false,
+    "tap_while_talking": true,
+    "evaluation_timing": "on_flip"
+  },
+  "evaluations": [
+    { "card_index": 0, "text": "第一张……唔，普通的小学徒。" },
+    { "card_index": 4, "text": "等等！紫光出现了！" },
+    { "card_index": 9, "text": "哇啊啊啊！！出了！！金光SSR！！" }
+  ],
+  "summary_bubble": "这波手气绝了！限定UP成功拿下！"
+}
+\`\`\``;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，严格遵守抽卡点击画像协议，输出纯净JSON。` },
+      { role: 'user', content: prompt },
+    ]);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+
+      const habit = parsed.click_habit_profile || {};
+      const skipPos = habit.skip_click_position || { x: 0.85, y: 0.12 };
+
+      const safeProfile: ClickHabitProfile = {
+        skip_click_position: {
+          x: typeof skipPos.x === 'number' ? Math.max(0.05, Math.min(0.95, skipPos.x)) : 0.85,
+          y: typeof skipPos.y === 'number' ? Math.max(0.05, Math.min(0.95, skipPos.y)) : 0.12,
+        },
+        click_rhythm: String(habit.click_rhythm || '正常翻卡'),
+        random_tap: Boolean(habit.random_tap),
+        wait_for_user_reply: Boolean(habit.wait_for_user_reply),
+        tap_while_talking: habit.tap_while_talking !== false,
+        evaluation_timing: 'on_flip',
+      };
+
+      const evaluations: Array<{ card_index: number; text: string }> = [];
+      if (Array.isArray(parsed.evaluations)) {
+        parsed.evaluations.forEach((item: any) => {
+          if (typeof item.card_index === 'number' && item.text) {
+            evaluations.push({
+              card_index: item.card_index,
+              text: String(item.text),
+            });
+          }
+        });
+      }
+
+      return {
+        click_habit_profile: safeProfile,
+        evaluations,
+        summary_bubble: String(parsed.summary_bubble || '呼……这次的结果全在这啦！'),
+      };
+    }
+  } catch (err) {
+    console.warn('generateGachaResultProfile failed:', err);
+  }
+
+  // Robust Default Fallback
+  const defaultEvaluations: Array<{ card_index: number; text: string }> = [];
+  pullResults.forEach((item, idx) => {
+    if (item.card.rarity === 'SSR') {
+      defaultEvaluations.push({
+        card_index: idx,
+        text: `金光绽放！是SSR【${item.card.name}】！！`,
+      });
+    } else if (item.card.rarity === 'SR') {
+      defaultEvaluations.push({
+        card_index: idx,
+        text: `紫光！拿到SR【${item.card.name}】啦～`,
+      });
+    }
+  });
+
+  return {
+    click_habit_profile: {
+      skip_click_position: { x: 0.85, y: 0.12 },
+      click_rhythm: '正常',
+      random_tap: false,
+      wait_for_user_reply: false,
+      tap_while_talking: true,
+      evaluation_timing: 'on_flip',
+    },
+    evaluations: defaultEvaluations,
+    summary_bubble: '这次的抽卡结果全部揭晓了，看看收获吧～',
+  };
+}
+
+/**
+ * ④ 用户局内发消息或下达抽卡指令 (USER_MESSAGE_RESPONSE)
+ * 严格遵从主控意图与LLM决策，决定具体抽卡或交互动作
+ */
+export async function generateGachaUserResponse(
+  config: LlmConfig,
+  character: Character,
+  progress: string,
+  userMessage: string,
+  poolConfig?: GachaPoolConfig
+): Promise<GachaUserResponseOutput> {
+  const currentEmotion = character.emotion?.current || { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 };
+
+  const prompt = `你是角色「${character.name}」，性格：${character.core.values.join('、')}，口吻风格：${character.core.speech_filter}。
+你正在像真人一样，用虚拟光标帮主控操作抽卡界面。
+
+【当前抽卡状态】：${progress}
+【主控对你说】：“${userMessage}”
+
+【任务指令与动作决策要求】：
+请根据主控的话语意图和你的人设性格进行决策，从以下动作中严格选择一个：
+- pull_ten：执行十连共鸣（主控让抽十连、来个十连、冲十发、抽十次等）
+- pull_once：执行单抽共鸣（主控让单抽、抽一次、抽一发、来一发、试试手气等）
+- pool_detail：查看卡池详情（主控询问卡池角色、想看UP是谁、看图鉴等）
+- rate_info：查看概率说明（主控询问抽卡概率、出货率等）
+- pull_history：查看抽卡战绩记录（主控询问刚才出了什么、看历史等）
+- stop：暂停/结束抽卡并结算（主控要求停手、收手、别抽了、退出等）
+- chat_only：纯聊天对话回复（主控日常闲聊，不执行具体界面按钮点击）
+
+字段要求：
+1. action: 必填上述枚举之一
+2. response_bubble: 你对主控说的话（贴合性格、生动鲜活，10-30字）
+3. bubble_self: 你的内心自言自语（可选）
+4. click_rhythm: 动作节奏描述（如："急不可耐，快速点击" / "稳健从容" / "小心翼翼"）
+5. hesitation_ms: 悬停犹豫时间（400~2000毫秒）
+
+输出纯合法JSON：
+\`\`\`json
+{
+  "action": "pull_ten",
+  "response_bubble": "收到！既然你发话了，十连共鸣这就启动！",
+  "bubble_self": "金光一定要争气啊……",
+  "click_rhythm": "急不可耐，快速点击",
+  "hesitation_ms": 600
+}
+\`\`\``;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，严格遵守抽卡互动与指令决策协议，输出纯净JSON。` },
+      { role: 'user', content: prompt },
+    ]);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      let action: any = parsed.action;
+      const validActions = ['pull_ten', 'pull_once', 'pool_detail', 'rate_info', 'pull_history', 'stop', 'chat_only'];
+      if (!validActions.includes(action)) {
+        // Simple heuristic fallback if action was unstructured
+        const lowerMsg = userMessage.toLowerCase();
+        if (lowerMsg.includes('十连') || lowerMsg.includes('10') || lowerMsg.includes('十发')) {
+          action = 'pull_ten';
+        } else if (lowerMsg.includes('单抽') || lowerMsg.includes('单发') || lowerMsg.includes('一次') || lowerMsg.includes('一发')) {
+          action = 'pull_once';
+        } else if (lowerMsg.includes('停') || lowerMsg.includes('别抽') || lowerMsg.includes('收手') || lowerMsg.includes('退出') || lowerMsg.includes('算了')) {
+          action = 'stop';
+        } else {
+          action = 'chat_only';
+        }
+      }
+
+      return {
+        action,
+        response_bubble: String(parsed.response_bubble || '好，听你的！'),
+        bubble_self: parsed.bubble_self ? String(parsed.bubble_self) : undefined,
+        click_rhythm: parsed.click_rhythm ? String(parsed.click_rhythm) : '稳健从容',
+        hesitation_ms: typeof parsed.hesitation_ms === 'number' ? Math.max(300, Math.min(3000, parsed.hesitation_ms)) : 600,
+      };
+    }
+  } catch (err) {
+    console.warn('generateGachaUserResponse failed:', err);
+  }
+
+  // Fallback heuristic based on user message
+  const lowerMsg = userMessage.toLowerCase();
+  if (lowerMsg.includes('十连') || lowerMsg.includes('10') || lowerMsg.includes('十发')) {
+    return {
+      action: 'pull_ten',
+      response_bubble: '收到！十连共鸣马上来！',
+      click_rhythm: '急不可耐，快速点击',
+      hesitation_ms: 500,
+    };
+  } else if (lowerMsg.includes('单抽') || lowerMsg.includes('单发') || lowerMsg.includes('一次') || lowerMsg.includes('一发') || lowerMsg.includes('试')) {
+    return {
+      action: 'pull_once',
+      response_bubble: '好嘞，单抽一发试试手气！',
+      click_rhythm: '稳健从容',
+      hesitation_ms: 600,
+    };
+  } else if (lowerMsg.includes('停') || lowerMsg.includes('别抽') || lowerMsg.includes('收手') || lowerMsg.includes('退出') || lowerMsg.includes('算了')) {
+    return {
+      action: 'stop',
+      response_bubble: '好，那我们今天就先收手！',
+      hesitation_ms: 400,
+    };
+  }
+
+  return {
+    action: 'chat_only',
+    response_bubble: '收到！我都听你的安排～',
+    hesitation_ms: 400,
+  };
+}
+
+/**
+ * ⑤ 抽卡结束结算 (ENDING_CALL)
+ */
+export async function generateGachaEnding(
+  config: LlmConfig,
+  character: Character,
+  stats: {
+    totalPulls: number;
+    userInstruction: string;
+    goalAchieved: boolean;
+    ssrList: string[];
+    sparkUsed: boolean;
+  }
+): Promise<GachaEndingOutput> {
+  const currentEmotion = character.emotion?.current || { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 };
+
+  const prompt = `你是角色「${character.name}」，性格：${character.core.values.join('、')}，口吻：${character.core.speech_filter}。
+抽卡模拟器本轮体验已全部结束。
+
+【本次抽卡完整战报】：
+- 累计总抽数：${stats.totalPulls} 发
+- 主控最初目标："${stats.userInstruction}"
+- 目标是否达成：${stats.goalAchieved ? '是（成功出货/达成）' : '未完全达成'}
+- 获得SSR列表：${stats.ssrList.length > 0 ? stats.ssrList.join('、') : '无SSR'}
+- 井保底是否触发：${stats.sparkUsed ? '是（吃井拿到了保底）' : '否'}
+
+【任务要求】：
+1. ending_bubble：总结这次抽卡，真诚或俏皮地对主控说一段收官台词（30-60字左右）。
+2. gameTotalDelta：输出本局抽卡对你六维情绪的微小扰动（joy, warmth, desire, sadness 等，范围 -0.4 ~ +0.4，需隔离确认）。
+
+输出纯合法JSON：
+\`\`\`json
+{
+  "ending_bubble": "总共抽了${stats.totalPulls}发，${stats.ssrList.length > 0 ? '拿到了' + stats.ssrList.join('和') + '，手气真不错！' : '虽然有点小波折，但下次我肯定能帮你抽到！'}",
+  "gameTotalDelta": { "joy": 0.3, "warmth": 0.25 }
+}
+\`\`\``;
+
+  try {
+    const raw = await callLlm(config, [
+      { role: 'system', content: `你是「${character.name}」，严格遵守抽卡结束结算协议，输出纯净JSON。` },
+      { role: 'user', content: prompt },
+    ]);
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      return {
+        ending_bubble: String(parsed.ending_bubble || '这次抽卡就告一段落啦，感谢你的信任！'),
+        gameTotalDelta: parsed.gameTotalDelta || { joy: 0.2, warmth: 0.2 },
+      };
+    }
+  } catch (err) {
+    console.warn('generateGachaEnding failed:', err);
+  }
+
+  return {
+    ending_bubble: `总共抽了 ${stats.totalPulls} 发，${stats.ssrList.length > 0 ? '限定角色稳稳到手！' : '手感已经预热好了，下次必定大爆！'}`,
+    gameTotalDelta: { joy: 0.2, warmth: 0.2 },
+  };
+}
+
+
 
 
 
