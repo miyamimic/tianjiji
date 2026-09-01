@@ -2190,7 +2190,7 @@ export async function generateDrawAndGuessTopicAgreement(
   playerMessage: string,
   selectedCategoryName: string,
   candidateWords: string[]
-): Promise<{ speech: string; chosenWord: string; chosenCategory: string }> {
+): Promise<{ speech: string; chosenWord: string; chosenCategory: string; hints: string[] }> {
   const prompt = `【风铃·你画我猜·秘密出题与落笔准备】
 你是角色「${character.name}」。
 - 你的核心人设：${character.core.values.join('、')}，语言风格：${character.core.speech_filter}
@@ -2207,6 +2207,7 @@ export async function generateDrawAndGuessTopicAgreement(
   - 如果是「成语典故」：可以想“亡羊补牢”、“画龙点睛”、“守株待兔”等。
 - 想好这个秘密题目（限2-5字，具体名词为主）并作为【chosenWord】。
 - 绝对不要在speech台词中直接说出或暗示这个词！
+- 请你针对这个秘密词语，生成3个从难到易、层层递进的提示语作为提示库【hints】。
 - speech：回应主控1句话，表示胸有成竹、准备大展画技落笔，语气要极其符合你的人设（极具傲娇/深情/清冷等韵味），绝不索要任何暧昧性身体奖励。
 
 【输出纯JSON】：
@@ -2214,7 +2215,8 @@ export async function generateDrawAndGuessTopicAgreement(
 {
   "chosenWord": "想好的秘密词语",
   "chosenCategory": "${selectedCategoryName}",
-  "speech": "哼，既然选了这个，看好了，我的画技可不一般，第一笔要落下了噢。"
+  "speech": "哼，既然选了这个，看好了，我的画技可不一般，第一笔要落下了噢。",
+  "hints": ["关于这个物体的第一个提示", "关于这个物体的第二个提示", "关于这个物体的第三个提示"]
 }
 \`\`\``;
 
@@ -2227,10 +2229,14 @@ export async function generateDrawAndGuessTopicAgreement(
     if (match) {
       const parsed = JSON.parse(match[0]);
       const word = parsed.chosenWord ? String(parsed.chosenWord).trim() : (candidateWords[Math.floor(Math.random() * candidateWords.length)] || '小猫');
+      const hints = Array.isArray(parsed.hints) && parsed.hints.length > 0 
+        ? parsed.hints.map(String) 
+        : [`是一个适合在 ${selectedCategoryName} 类别中画出来的东西`, '仔细观察我的画笔吧', '猜猜它的名字叫什么呢'];
       return {
         speech: String(parsed.speech || `好，既然选了 ${selectedCategoryName}，看好了，我这就开始落笔。`),
         chosenWord: word,
         chosenCategory: String(parsed.chosenCategory || selectedCategoryName),
+        hints,
       };
     }
   } catch (err) {
@@ -2242,6 +2248,7 @@ export async function generateDrawAndGuessTopicAgreement(
     speech: `“好，既然选了${selectedCategoryName}，看好了，我这就开始落笔。”`,
     chosenWord: fallbackWord,
     chosenCategory: selectedCategoryName,
+    hints: ['代表一种美好的情感', '常在浪漫场合出现', '画出来是个心形符号'],
   };
 }
 

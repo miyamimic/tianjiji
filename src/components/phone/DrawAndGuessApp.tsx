@@ -509,7 +509,9 @@ export default function DrawAndGuessApp({
       
       let textMsg = proposal.speech;
       if (initialCategory && initialCategory !== '自由出题') {
-        textMsg = `“我们来挑战【${initialCategory}】分类吧！我已经想好题目了，看看你能用几笔猜出来～”`;
+        const catObj = WORD_CATEGORIES.find((c) => c.id === initialCategory || c.name === initialCategory);
+        const categoryName = catObj ? catObj.name : initialCategory;
+        textMsg = `“我们来挑战【${categoryName}】分类吧！我已经想好题目了，看看你能用几笔猜出来～”`;
       }
 
       // Cleanly initialize the chat stream with this single opening proposal
@@ -547,8 +549,13 @@ export default function DrawAndGuessApp({
 
       // Find matching category words
       let matchedCat = WORD_CATEGORIES.find(
-        (c) => c.name.includes(userText) || userText.includes(c.name) || userText.includes(c.id)
+        (c) => c.name.includes(userText) || userText.includes(c.name) || userText.includes(c.id) || c.id === userText
       );
+      if (!matchedCat) {
+        matchedCat = WORD_CATEGORIES.find(
+          (c) => c.id === selectedCategory || c.name === selectedCategory
+        );
+      }
       if (!matchedCat) {
         matchedCat = WORD_CATEGORIES[Math.floor(Math.random() * WORD_CATEGORIES.length)];
       }
@@ -558,7 +565,8 @@ export default function DrawAndGuessApp({
 
       setPhase('ai_generating');
 
-      let chosenSecretWord = candidateWords[0];
+      let chosenSecretWord = candidateWords[Math.floor(Math.random() * candidateWords.length)] || '小猫';
+      let chosenHints = matchedCat.words[0]?.hints || [matchedCat.description];
       try {
         const agreement = await generateDrawAndGuessTopicAgreement(
           config,
@@ -569,6 +577,11 @@ export default function DrawAndGuessApp({
         );
         addChatMessage('ai', agreement.speech);
         chosenSecretWord = agreement.chosenWord;
+        if (agreement.hints && agreement.hints.length > 0) {
+          chosenHints = agreement.hints;
+        } else {
+          chosenHints = matchedCat.words.find((w) => w.text === chosenSecretWord)?.hints || [matchedCat.description];
+        }
       } catch (err) {
         console.warn('Agreement error:', err);
       }
@@ -576,7 +589,7 @@ export default function DrawAndGuessApp({
       const activeSecret = {
         word: chosenSecretWord,
         category: matchedCat.name,
-        hints: matchedCat.words.find((w) => w.text === chosenSecretWord)?.hints || [matchedCat.description],
+        hints: chosenHints,
       };
       setAiSecret(activeSecret);
 
@@ -1243,6 +1256,58 @@ export default function DrawAndGuessApp({
       stopAnimation();
     };
   }, [stopAnimation]);
+
+  // Keep canvas in sync with accumulated strokes on any re-render or phase changes
+  useEffect(() => {
+    if (isPlayingRef.current) return; // Do not interrupt running animations
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    if (phase === 'guessing' || phase === 'ai_drawing' || phase === 'ai_generating') {
+      redrawAllStrokes(accumulatedAiStrokes);
+    } else if (phase === 'player_drawing' || phase === 'player_finished' || phase === 'player_replaying') {
+      if (phase !== 'player_replaying') {
+        clearCanvas();
+        playerStrokes.forEach((s) => {
+          const outline = getStrokeOutline(s.points, {
+            thinning: 0.5,
+            smoothing: 0.5,
+            jitter: 0,
+            taperStart: 6,
+            taperEnd: 6,
+            size: s.size,
+          });
+          renderStrokeToCanvas(ctx, outline, s.color, s.color === '__ERASER__');
+        });
+      }
+    }
+  }, [phase, accumulatedAiStrokes, playerStrokes, redrawAllStrokes, clearCanvas, currentArtist]);
+
+  // Prevent touch event scrolling and bubble on canvas
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const preventDefault = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+
+    canvas.addEventListener('touchstart', preventDefault, { passive: false });
+    canvas.addEventListener('touchmove', preventDefault, { passive: false });
+    canvas.addEventListener('touchend', preventDefault, { passive: false });
+    canvas.addEventListener('touchcancel', preventDefault, { passive: false });
+
+    return () => {
+      canvas.removeEventListener('touchstart', preventDefault);
+      canvas.removeEventListener('touchmove', preventDefault);
+      canvas.removeEventListener('touchend', preventDefault);
+      canvas.removeEventListener('touchcancel', preventDefault);
+    };
+  }, []);
 
   // Initial mount: Start on Welcome screen
   useEffect(() => {
@@ -1945,7 +2010,7 @@ export default function DrawAndGuessApp({
                     type="text"
                     value={guessInput}
                     onChange={(e) => setGuessInput(e.target.value)}
-                    placeholder={`输入猜词（${aiSecret.word.length}字 · ${aiSecret.category}）...`}
+                    placeholder="输入你猜的词语..."
                     className="flex-1 bg-stone-800/90 border border-white/15 rounded-xl px-3 py-1.5 text-stone-100 placeholder-stone-500 outline-none focus:border-pink-400 text-base md:text-xs shadow-inner min-w-0"
                     autoFocus
                   />

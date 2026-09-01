@@ -93,6 +93,20 @@ export const WORD_CATEGORIES: WordCategory[] = [
       { text: '招蜂引蝶', hints: ['四个字成语', '形容吸引众人的目光', '在花间飞舞的美丽精灵'] },
     ],
   },
+  {
+    id: 'science',
+    name: '自然科技',
+    emoji: '🚀',
+    description: '神奇的大自然、星空与科技智能探秘',
+    words: [
+      { text: '火箭', hints: ['飞向太空', '底部喷射烈火', '圆锥形头部'] },
+      { text: '机器人', hints: ['金属躯壳', '闪烁电子眼', '身上有齿轮或天线'] },
+      { text: '流星', hints: ['夜空中划过', '带有一道长尾巴', '许愿的象征'] },
+      { text: '电脑', hints: ['用来上网办公', '有显示屏幕和键盘', '科技时代的窗口'] },
+      { text: '火山', hints: ['山顶喷发岩浆', '冒着滚滚浓烟', '三角形的山体'] },
+      { text: '飞碟', hints: ['外星人坐骑', '圆盘碟状造型', '底部散发神秘光芒'] },
+    ],
+  },
 ];
 
 // -------------------------------------------------------------
@@ -227,8 +241,8 @@ export function getRandomAiSecretWord(
   excludeWord?: string
 ): { word: string; category: string; hints: string[] } {
   let catList = WORD_CATEGORIES;
-  if (categoryId && categoryId !== 'all') {
-    const filtered = WORD_CATEGORIES.filter((c) => c.id === categoryId);
+  if (categoryId && categoryId !== 'all' && categoryId !== '自由出题') {
+    const filtered = WORD_CATEGORIES.filter((c) => c.id === categoryId || c.name === categoryId);
     if (filtered.length > 0) catList = filtered;
   }
 
@@ -263,8 +277,8 @@ export function getRandomAiSecretWord(
  */
 export function getRandomWord(categoryId?: string): { word: string; category: string; hints: string[] } {
   let catList = WORD_CATEGORIES;
-  if (categoryId && categoryId !== 'all') {
-    const filtered = WORD_CATEGORIES.filter((c) => c.id === categoryId);
+  if (categoryId && categoryId !== 'all' && categoryId !== '自由出题') {
+    const filtered = WORD_CATEGORIES.filter((c) => c.id === categoryId || c.name === categoryId);
     if (filtered.length > 0) catList = filtered;
   }
   const randomCat = catList[Math.floor(Math.random() * catList.length)];
