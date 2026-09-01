@@ -2056,76 +2056,186 @@ export async function generateGhostCardEnding(
 }
 
 // ============================================================================
-// 风铃 · 你画我猜 (Draw & Guess) v4: LLM 现画 + 渐进补笔 + 极简对话 + 情绪联动
+// 风铃 · 你画我猜 (Draw & Guess): LLM 现画 + 真实笔迹 + 严格JSON协议 + 3次重试
 // ============================================================================
 
-import type { LlmDrawingRoundOutput, LlmStrokeInstruction } from './drawInstructionTranslator';
+export interface LlmDirectStroke {
+  points: [number, number][];
+  size: number;
+  color: string;
+}
+
+export interface LlmDirectDrawingResult {
+  dialogue: string;
+  strokes: LlmDirectStroke[];
+}
+
+export interface DrawingRetryNotice {
+  isRetrying: boolean;
+  retryCount: number;
+  message: string;
+}
 
 /**
- * Fallback procedural strokes generator if LLM call fails
+ * 严格按照指定 System Prompt 与校验逻辑执行 LLM 绘画生成（包含最多3次就地循环重试）
+ * 【硬性禁令】：绝不写入任何硬编码stroke、预制图形兜底，不许伪造绘画数据。
  */
-function getFallbackStrokesForTopic(topic: string, round: number): LlmStrokeInstruction[] {
-  if (round === 1) {
-    return [
-      {
-        type: 'curve',
-        points: [[35, 45], [45, 30], [55, 30], [65, 45], [55, 65], [45, 65], [35, 45]],
-        color: '#475569',
-        thickness: 1.0,
-      },
-      {
-        type: 'curve',
-        points: [[40, 32], [35, 20], [48, 28]],
-        color: '#475569',
-        thickness: 0.9,
-      },
-      {
-        type: 'curve',
-        points: [[60, 32], [65, 20], [52, 28]],
-        color: '#475569',
-        thickness: 0.9,
-      },
-    ];
-  } else if (round === 2) {
-    return [
-      {
-        type: 'circle',
-        center: [45, 44],
-        radius: 2.5,
-        color: '#0F172A',
-        filled: true,
-      },
-      {
-        type: 'circle',
-        center: [55, 44],
-        radius: 2.5,
-        color: '#0F172A',
-        filled: true,
-      },
-      {
-        type: 'curve',
-        points: [[48, 50], [50, 52], [52, 50]],
-        color: '#F43F5E',
-      },
-    ];
-  } else {
-    return [
-      {
-        type: 'line',
-        from: [38, 50],
-        to: [25, 48],
-        color: '#94A3B8',
-        thickness: 0.8,
-      },
-      {
-        type: 'line',
-        from: [62, 50],
-        to: [75, 48],
-        color: '#94A3B8',
-        thickness: 0.8,
-      },
-    ];
+export async function generateDrawAndGuessStrokesWithRetry(
+  config: LlmConfig,
+  characterName: string,
+  topic: string,
+  options?: {
+    roundNumber?: number;
+    extraContext?: string;
+    onRetry?: (notice: DrawingRetryNotice) => void;
   }
+): Promise<LlmDirectDrawingResult> {
+  const roundText = options?.roundNumber && options.roundNumber > 1
+    ? `（第 ${options.roundNumber} 轮补笔，玩家前几轮未猜中，请补充画面的关键细节与特征线条）`
+    : '';
+
+  const systemPrompt = `你扮演 ${characterName}，保持该角色说话风格。
+正在玩双人你画我猜，本局题目：${topic}${roundText}
+画布宽780，高480。X范围0-780，Y范围0-480。
+输出要求：
+只输出合法JSON，禁止JSON以外任何内容，不要markdown标记，不要额外解释。
+所有角色对白放入 dialogue 字段。
+返回格式：
+{
+"dialogue": "角色台词",
+"strokes": [
+{
+"points": [[x,y],[x,y],[x,y]],
+"size": 2-9,
+"color": "#十六进制颜色"
+}
+]
+}
+strokes规则：
+1. 一个stroke为完整一笔：落笔到抬笔；断开线条分成不同stroke。
+2. 绘画顺序：先外轮廓，再结构，最后细节，线条带轻微手绘不规则感。
+3. 全部坐标限制在画布内，禁止越界、坐标扎堆。
+4. JSON语法完整，引号逗号括号不能缺失。`;
+
+  const MAX_RETRIES = 3; // 最多连续重试3次 (共计最多 4 次调用)
+  let lastError: any = null;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      if (attempt > 0 && options?.onRetry) {
+        options.onRetry({
+          isRetrying: true,
+          retryCount: attempt,
+          message: `绘制生成异常，正在重新尝试绘画…`,
+        });
+      }
+
+      const raw = await callLlm(
+        config,
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `请以角色「${characterName}」开始绘制题目【${topic}】，输出纯JSON。` },
+        ],
+        { timeoutMs: 35000, maxRetries: 0 }
+      );
+
+      // 仅做一步预处理：移除 json / 标记，绝不修复JSON内部语法
+      let cleaned = raw.trim();
+      cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '').trim();
+
+      // JSON.parse 解析返回结果
+      const parsed = JSON.parse(cleaned);
+
+      // 校验条件：
+      // • dialogue 为非空字符串
+      // • strokes 是非空数组
+      // • 每个 stroke 的 points 数组长度 >= 3
+      // • 所有 x 在 0-780，y 在 0-480
+      if (typeof parsed.dialogue !== 'string' || parsed.dialogue.trim().length === 0) {
+        throw new Error('校验失败：dialogue 不是非空字符串');
+      }
+
+      if (!Array.isArray(parsed.strokes) || parsed.strokes.length === 0) {
+        throw new Error('校验失败：strokes 不是非空数组');
+      }
+
+      const validStrokes: LlmDirectStroke[] = [];
+
+      for (let i = 0; i < parsed.strokes.length; i++) {
+        const s = parsed.strokes[i];
+        if (!s || !Array.isArray(s.points) || s.points.length < 3) {
+          throw new Error(`校验失败：第 ${i + 1} 笔 points 长度小于 3`);
+        }
+
+        const validPoints: [number, number][] = [];
+        for (let j = 0; j < s.points.length; j++) {
+          const pt = s.points[j];
+          if (!Array.isArray(pt) || pt.length < 2) {
+            throw new Error(`校验失败：第 ${i + 1} 笔第 ${j + 1} 个点坐标无效`);
+          }
+          const x = Number(pt[0]);
+          const y = Number(pt[1]);
+          if (isNaN(x) || isNaN(y) || x < 0 || x > 780 || y < 0 || y > 480) {
+            throw new Error(`校验失败：坐标越界 (${x}, ${y})，超出 0-780 / 0-480 范围`);
+          }
+          validPoints.push([Math.round(x), Math.round(y)]);
+        }
+
+        const size = typeof s.size === 'number' && !isNaN(s.size)
+          ? Math.max(2, Math.min(9, Math.round(s.size)))
+          : 5;
+        const color = typeof s.color === 'string' && /^#[0-9a-fA-F]{3,8}$/.test(s.color.trim())
+          ? s.color.trim()
+          : '#1E293B';
+
+        validStrokes.push({
+          points: validPoints,
+          size,
+          color,
+        });
+      }
+
+      // 校验全部通过
+      if (options?.onRetry) {
+        options.onRetry({
+          isRetrying: false,
+          retryCount: 0,
+          message: '',
+        });
+      }
+
+      return {
+        dialogue: parsed.dialogue.trim(),
+        strokes: validStrokes,
+      };
+    } catch (err: any) {
+      console.warn(`[你画我猜绘画生成第 ${attempt + 1} 次尝试失败]:`, err?.message || err);
+      lastError = err;
+
+      if (attempt < MAX_RETRIES) {
+        if (options?.onRetry) {
+          options.onRetry({
+            isRetrying: true,
+            retryCount: attempt + 1,
+            message: `绘制生成异常，正在重新尝试绘画…`,
+          });
+        }
+        // 短暂延迟后再次请求
+        await new Promise((resolve) => setTimeout(resolve, 500));
+      }
+    }
+  }
+
+  if (options?.onRetry) {
+    options.onRetry({
+      isRetrying: false,
+      retryCount: 0,
+      message: '',
+    });
+  }
+
+  // 绝不输出任何假数据，抛出异常交由前端提示并允许点击重试
+  throw lastError || new Error('绘制生成异常，重试3次仍未成功');
 }
 
 /**
@@ -2249,161 +2359,6 @@ export async function generateDrawAndGuessTopicAgreement(
     chosenWord: fallbackWord,
     chosenCategory: selectedCategoryName,
     hints: ['代表一种美好的情感', '常在浪漫场合出现', '画出来是个心形符号'],
-  };
-}
-
-/**
- * ① 开场与第 1 轮绘画生成 (OPENING & DRAWING_ROUND_1)
- */
-export async function generateDrawAndGuessOpeningAndStrokes(
-  config: LlmConfig,
-  character: Character,
-  topic: string,
-  category: string,
-  paintingPersona: string
-): Promise<LlmDrawingRoundOutput> {
-  const currentEmotion = character.emotion?.current || { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 };
-
-  const prompt = `【风铃·你画我猜·第1轮绘画与开场】
-你是角色「${character.name}」。你正在和主控玩你画我猜。
-- 你的核心人设：${character.core.values.join('、')}，口吻风格：${character.core.speech_filter}
-- 你的绘画人格：${paintingPersona}
-- 当前六维情绪快照：温情${(currentEmotion.warmth * 100).toFixed(0)}%、喜悦${(currentEmotion.joy * 100).toFixed(0)}%、愤怒${(currentEmotion.anger * 100).toFixed(0)}%、悲伤${(currentEmotion.sadness * 100).toFixed(0)}%
-
-【本次你要画的秘密题目】：${topic}（分类：${category}）
-
-【画布参考系（0-100相对坐标系统，严禁超出5-95边距）】：
-- 中心区域：35-65, 35-65
-- 上方区域：y < 35，下方区域：y > 65
-- 左侧区域：x < 35，右侧区域：x > 65
-
-【本轮（第 1 轮 / 共 3 轮）任务】：
-1. 绘制 2-4 笔基础轮廓与核心骨架（让玩家有约30%概率看懂大体轮廓）。
-2. 开场台词 speech：1-2句话，必须暗示题目类别，符合人设，严禁直接泄露答案。
-3. drawing_quips：1-2句极短的画画随口小词（5-10字以内，如"笔锋至此。"、"手抖了一下……"等）。
-
-【输出格式（必须为纯合法JSON，不要包含markdown代码块外的任何文字）】：
-\`\`\`json
-{
-  "strokes": [
-    {
-      "type": "curve",
-      "points": [[50,30],[55,28],[60,30],[62,35],[60,40],[55,42],[50,40]],
-      "color": "#475569",
-      "thickness": 1.0
-    },
-    {
-      "type": "circle",
-      "center": [35, 45],
-      "radius": 3,
-      "color": "#0F172A",
-      "filled": true
-    }
-  ],
-  "speech": "是一道有灵性的生灵。看好了，我只画一遍。",
-  "drawing_quips": ["笔锋至此。"]
-}
-\`\`\``;
-
-  try {
-    const raw = await callLlm(config, [
-      { role: 'system', content: `你是「${character.name}」，严格遵守你画我猜绘画指令协议，输出纯净JSON。` },
-      { role: 'user', content: prompt },
-    ]);
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (match) {
-      const parsed = JSON.parse(match[0]);
-      if (Array.isArray(parsed.strokes) && parsed.strokes.length > 0) {
-        return {
-          strokes: parsed.strokes,
-          speech: String(parsed.speech || '看着我的画笔。'),
-          drawing_quips: Array.isArray(parsed.drawing_quips) ? parsed.drawing_quips : ['运笔需要耐心。'],
-        };
-      }
-    }
-  } catch (err) {
-    console.warn('generateDrawAndGuessOpeningAndStrokes failed:', err);
-  }
-
-  return {
-    strokes: getFallbackStrokesForTopic(topic, 1),
-    speech: '看着我的画笔落下的轨迹。',
-    drawing_quips: ['笔锋至此。'],
-  };
-}
-
-/**
- * ② 渐进补笔 (DRAWING_ROUND_2 / 3: 玩家猜错后角色补笔与短反应)
- */
-export async function generateDrawAndGuessProgressiveStrokes(
-  config: LlmConfig,
-  character: Character,
-  topic: string,
-  category: string,
-  paintingPersona: string,
-  roundNumber: number,
-  drawnSummary: string,
-  guessHistory: string[]
-): Promise<LlmDrawingRoundOutput> {
-  const currentEmotion = character.emotion?.current || { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 };
-
-  const prompt = `【风铃·你画我猜·第${roundNumber}轮渐进补笔】
-你是角色「${character.name}」。你正在为秘密题目【${topic}】（分类：${category}）继续作画。
-- 绘画人格：${paintingPersona}
-- 当前六维情绪：温情${(currentEmotion.warmth * 100).toFixed(0)}%、喜悦${(currentEmotion.joy * 100).toFixed(0)}%、愤怒${(currentEmotion.anger * 100).toFixed(0)}%
-- 【前几轮已画内容语义】：${drawnSummary}
-- 【玩家之前的错误猜测】：${guessHistory.map((g, i) => `第${i + 1}次：“${g}”`).join('，') || '尚未猜中'}
-
-【画布参考系（0-100相对坐标系统）】：
-- 坐标范围必须在 5-95 之间
-
-【本轮（第 ${roundNumber} 轮 / 共 3 轮）补笔要求】：
-- 补充 ${roundNumber === 2 ? '2-3 笔新细节（如眼睛、耳朵、花纹、阴影等）' : '1-2 笔画龙点睛的关键细节与特征'}
-- 严禁重复已画过的基础大轮廓，精准追加新部位！
-- speech：1句极简短的反应台词（如“还没看出来？那我再加几笔……”或微带隐晦小提示）。
-- drawing_quips：1句画画时的微小语气词。
-
-【输出纯JSON格式】：
-\`\`\`json
-{
-  "strokes": [
-    {
-      "type": "circle",
-      "center": [45, 45],
-      "radius": 2.5,
-      "color": "#0F172A",
-      "filled": true
-    }
-  ],
-  "speech": "还没看出来？那我再添上几道细节。",
-  "drawing_quips": ["这里收一笔。"]
-}
-\`\`\``;
-
-  try {
-    const raw = await callLlm(config, [
-      { role: 'system', content: `你是「${character.name}」，严格遵守你画我猜补笔协议，输出纯净JSON。` },
-      { role: 'user', content: prompt },
-    ]);
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (match) {
-      const parsed = JSON.parse(match[0]);
-      if (Array.isArray(parsed.strokes) && parsed.strokes.length > 0) {
-        return {
-          strokes: parsed.strokes,
-          speech: String(parsed.speech || '再仔细看看画面。'),
-          drawing_quips: Array.isArray(parsed.drawing_quips) ? parsed.drawing_quips : ['这一笔是关键。'],
-        };
-      }
-    }
-  } catch (err) {
-    console.warn('generateDrawAndGuessProgressiveStrokes failed:', err);
-  }
-
-  return {
-    strokes: getFallbackStrokesForTopic(topic, roundNumber),
-    speech: '差了一点，再猜猜？',
-    drawing_quips: ['运笔更细致了。'],
   };
 }
 

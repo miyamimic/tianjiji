@@ -69,8 +69,8 @@ import {
   loadLlmConfig,
   generateDrawAndGuessTopicProposal,
   generateDrawAndGuessTopicAgreement,
-  generateDrawAndGuessOpeningAndStrokes,
-  generateDrawAndGuessProgressiveStrokes,
+  generateDrawAndGuessStrokesWithRetry,
+  type DrawingRetryNotice,
   generateDrawAndGuessCorrectEnding,
   generateDrawAndGuessRevealEnding,
   generateDrawAndGuessAiGuessReaction,
@@ -116,9 +116,9 @@ interface PixelStroke {
   duration?: number;
 }
 
-// Canvas default logical coordinate space
-const CANVAS_WIDTH = 520;
-const CANVAS_HEIGHT = 380;
+// Canvas default logical coordinate space (780 x 480)
+const CANVAS_WIDTH = 780;
+const CANVAS_HEIGHT = 480;
 
 const PALETTE_COLORS = [
   { name: '墨黑', value: '#1E293B' },
@@ -198,6 +198,11 @@ export default function DrawAndGuessApp({
     '恋爱主题',
   ]);
   const [isNegotiating, setIsNegotiating] = useState<boolean>(false);
+
+  // Drawing Retry Notice & State
+  const [drawingRetryNotice, setDrawingRetryNotice] = useState<
+    (DrawingRetryNotice & { hasFailed?: boolean }) | null
+  >(null);
 
   // AI Drawing Secret Word & Progressive Drawing State
   const [aiSecret, setAiSecret] = useState<{ word: string; category: string; hints: string[] }>(() =>
@@ -594,39 +599,47 @@ export default function DrawAndGuessApp({
       setAiSecret(activeSecret);
 
       // Now start LLM Round 1 Drawing with the agreed secret word
-      const output = await generateDrawAndGuessOpeningAndStrokes(
-        config,
-        activeChar,
-        activeSecret.word,
-        activeSecret.category,
-        currentArtist.paintingPersona
-      );
+      let output;
+      try {
+        setDrawingRetryNotice(null);
+        output = await generateDrawAndGuessStrokesWithRetry(
+          config,
+          activeChar.name,
+          activeSecret.word,
+          {
+            roundNumber: 1,
+            onRetry: (notice) => setDrawingRetryNotice(notice),
+          }
+        );
+      } catch (err: any) {
+        console.warn('generateDrawAndGuessStrokesWithRetry failed after 3 retries:', err);
+        setDrawingRetryNotice({
+          isRetrying: false,
+          retryCount: 3,
+          message: '绘制生成异常，请点击重试',
+          hasFailed: true,
+        });
+        return;
+      }
 
-      // Add character's spoken opening line to chat
-      addChatMessage('ai', output.speech);
+      // Add character's spoken dialogue to chat
+      addChatMessage('ai', output.dialogue);
 
-      // Convert LLM 0-100 instructions to pixel points
-      const pixelStrokes: PixelStroke[] = [];
-      output.strokes.forEach((instr) => {
-        const res = translateInstructionToPixelPoints(instr, CANVAS_WIDTH, CANVAS_HEIGHT);
-        if (res) {
-          pixelStrokes.push({
-            points: res.points,
-            color: res.color,
-            size: (currentArtist.brushParams.size || 10) * res.sizeMultiplier,
-            isFilled: res.isFilled,
-            duration: 650,
-          });
-        }
-      });
+      // Direct pixel strokes from LLM (0-780 x 0-480)
+      const pixelStrokes: PixelStroke[] = output.strokes.map((s) => ({
+        points: s.points,
+        color: s.color,
+        size: Math.max(2, Math.min(18, (currentArtist.brushParams.size || 10) * (s.size / 5))),
+        duration: 600,
+      }));
 
       setIsNegotiating(false);
       setPhase('ai_drawing');
-      playStrokeBatchAnimation(pixelStrokes, [], output.drawing_quips, () => {
+      playStrokeBatchAnimation(pixelStrokes, [], [], () => {
         setPhase('guessing');
       });
     },
-    [isNegotiating, triggerSound, addChatMessage, activeChar, currentArtist, playStrokeBatchAnimation]
+    [isNegotiating, triggerSound, addChatMessage, activeChar, currentArtist, playStrokeBatchAnimation, selectedCategory]
   );
 
   // -------------------------------------------------------------
@@ -637,43 +650,55 @@ export default function DrawAndGuessApp({
       setDrawingRoundNumber(nextRound);
       setPhase('ai_generating');
 
-      const semanticSummary = generateStrokeSemanticSummary(accumulatedAiStrokes);
       const config = loadLlmConfig();
+      let output;
+      try {
+        setDrawingRetryNotice(null);
+        output = await generateDrawAndGuessStrokesWithRetry(
+          config,
+          activeChar.name,
+          aiSecret.word,
+          {
+            roundNumber: nextRound,
+            onRetry: (notice) => setDrawingRetryNotice(notice),
+          }
+        );
+      } catch (err: any) {
+        console.warn('Progressive drawing failed after 3 retries:', err);
+        setDrawingRetryNotice({
+          isRetrying: false,
+          retryCount: 3,
+          message: '绘制生成异常，请点击重试',
+          hasFailed: true,
+        });
+        return;
+      }
 
-      const output = await generateDrawAndGuessProgressiveStrokes(
-        config,
-        activeChar,
-        aiSecret.word,
-        aiSecret.category,
-        currentArtist.paintingPersona,
-        nextRound,
-        semanticSummary,
-        guessHistory
-      );
+      addChatMessage('ai', output.dialogue);
 
-      addChatMessage('ai', output.speech);
-
-      const newPixelStrokes: PixelStroke[] = [];
-      output.strokes.forEach((instr) => {
-        const res = translateInstructionToPixelPoints(instr, CANVAS_WIDTH, CANVAS_HEIGHT);
-        if (res) {
-          newPixelStrokes.push({
-            points: res.points,
-            color: res.color,
-            size: (currentArtist.brushParams.size || 10) * res.sizeMultiplier,
-            isFilled: res.isFilled,
-            duration: 550,
-          });
-        }
-      });
+      const newPixelStrokes: PixelStroke[] = output.strokes.map((s) => ({
+        points: s.points,
+        color: s.color,
+        size: Math.max(2, Math.min(18, (currentArtist.brushParams.size || 10) * (s.size / 5))),
+        duration: 550,
+      }));
 
       setPhase('ai_drawing');
-      playStrokeBatchAnimation(newPixelStrokes, accumulatedAiStrokes, output.drawing_quips, () => {
+      playStrokeBatchAnimation(newPixelStrokes, accumulatedAiStrokes, [], () => {
         setPhase('guessing');
       });
     },
-    [accumulatedAiStrokes, activeChar, aiSecret, currentArtist, guessHistory, addChatMessage, playStrokeBatchAnimation]
+    [accumulatedAiStrokes, activeChar, aiSecret, currentArtist, addChatMessage, playStrokeBatchAnimation]
   );
+
+  // Manual retry drawing callback (when 3 consecutive retries failed)
+  const handleManualRetryDrawing = useCallback(() => {
+    if (drawingRoundNumber === 2 || drawingRoundNumber === 3) {
+      triggerAiProgressiveDrawing(drawingRoundNumber);
+    } else {
+      confirmTopicAndStartDrawing(aiSecret.category);
+    }
+  }, [drawingRoundNumber, triggerAiProgressiveDrawing, confirmTopicAndStartDrawing, aiSecret.category]);
 
   // Handle Player Guess submission
   const handleGuessSubmit = useCallback(
@@ -1675,6 +1700,28 @@ export default function DrawAndGuessApp({
           {/* ================= CANVAS DRAWING BOARD ================= */}
           {/* Note: touch-action: none & select-none guarantee zero scroll interference on the canvas itself */}
           <div className="relative w-full h-[180px] xs:h-[200px] sm:h-[230px] md:h-[320px] bg-white rounded-xl shadow-md overflow-hidden border border-stone-800 cursor-crosshair shrink-0 flex-shrink-0 touch-none select-none">
+            {/* Drawing Retry Notice Banner (绘制异常就地重试提示) */}
+            {drawingRetryNotice && (
+              <div className="absolute inset-x-2 top-2 z-30 flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-stone-950/90 border border-amber-400/50 text-amber-200 shadow-2xl backdrop-blur-md text-[11px] animate-fadeIn">
+                <div className="flex items-center gap-2 min-w-0">
+                  {drawingRetryNotice.isRetrying ? (
+                    <RefreshCw className="size-3.5 animate-spin text-amber-400 shrink-0" />
+                  ) : (
+                    <AlertCircle className="size-3.5 text-rose-400 shrink-0" />
+                  )}
+                  <span className="font-semibold truncate">{drawingRetryNotice.message}</span>
+                </div>
+                {drawingRetryNotice.hasFailed && (
+                  <button
+                    onClick={handleManualRetryDrawing}
+                    className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-[10.5px] transition shadow cursor-pointer shrink-0"
+                  >
+                    重试绘画
+                  </button>
+                )}
+              </div>
+            )}
+
             <canvas
               ref={canvasRef}
               width={CANVAS_WIDTH}
