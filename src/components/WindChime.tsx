@@ -732,8 +732,8 @@ export default function WindChime({
 
             {/* Smartphone Screen Body */}
             <div
-              className={`flex-1 overflow-y-auto ${
-                activeApp === 'game_lobby' ? 'p-1 sm:p-2' : 'px-4 py-3'
+              className={`flex-1 ${
+                activeApp === 'game_lobby' ? 'overflow-hidden p-0 sm:p-1' : 'overflow-y-auto px-4 py-3'
               } no-scrollbar flex flex-col min-h-0`}
             >
               

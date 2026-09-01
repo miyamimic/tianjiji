@@ -220,6 +220,8 @@ export default function DrawAndGuessApp({
   // Chat conversation
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const isInitiatingProposalRef = useRef<boolean>(false);
+  const hasMountedRef = useRef<boolean>(false);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -230,19 +232,30 @@ export default function DrawAndGuessApp({
 
   const addChatMessage = useCallback(
     (sender: 'ai' | 'player', text: string, senderName?: string, avatar?: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
       const now = new Date();
       const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
-      setChatMessages((prev) => [
-        ...prev,
-        {
-          id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-          sender,
-          name: senderName || (sender === 'ai' ? currentArtist.name : '我'),
-          avatar: avatar || (sender === 'ai' ? currentArtist.avatar : '🎨'),
-          text,
-          time: timeStr,
-        },
-      ]);
+      setChatMessages((prev) => {
+        // Prevent consecutive identical duplicate messages
+        if (prev.length > 0) {
+          const last = prev[prev.length - 1];
+          if (last.sender === sender && last.text.trim() === trimmed) {
+            return prev;
+          }
+        }
+        return [
+          ...prev,
+          {
+            id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            sender,
+            name: senderName || (sender === 'ai' ? currentArtist.name : '我'),
+            avatar: avatar || (sender === 'ai' ? currentArtist.avatar : '🎨'),
+            text: trimmed,
+            time: timeStr,
+          },
+        ];
+      });
     },
     [currentArtist]
   );
@@ -444,6 +457,8 @@ export default function DrawAndGuessApp({
   // ① TOPIC NEGOTIATION START: AI 角色主动向玩家发起出题商量
   // -------------------------------------------------------------
   const startTopicNegotiation = useCallback(async () => {
+    if (isInitiatingProposalRef.current) return;
+    isInitiatingProposalRef.current = true;
     stopAnimation();
     setRound('round_ai_draw');
     setPhase('topic_negotiation');
@@ -461,14 +476,29 @@ export default function DrawAndGuessApp({
     const config = loadLlmConfig();
     try {
       const proposal = await generateDrawAndGuessTopicProposal(config, activeChar);
-      addChatMessage('ai', proposal.speech);
+      const now = new Date();
+      const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      
+      // Cleanly initialize the chat stream with this single opening proposal
+      setChatMessages([
+        {
+          id: `msg_init_${Date.now()}`,
+          sender: 'ai',
+          name: currentArtist.name,
+          avatar: currentArtist.avatar,
+          text: proposal.speech,
+          time: timeStr,
+        },
+      ]);
+
       if (proposal.suggestedCategories && proposal.suggestedCategories.length > 0) {
         setSuggestedCategories(proposal.suggestedCategories);
       }
     } finally {
       setIsNegotiating(false);
+      isInitiatingProposalRef.current = false;
     }
-  }, [stopAnimation, clearCanvas, triggerSound, activeChar, addChatMessage]);
+  }, [stopAnimation, clearCanvas, triggerSound, activeChar, currentArtist]);
 
   // -------------------------------------------------------------
   // ② TOPIC AGREEMENT & START DRAWING: 敲定题目后落笔作画
@@ -745,9 +775,21 @@ export default function DrawAndGuessApp({
         `“来吧，画板已备好，尽情发挥你的画技吧！”`,
       ];
       const randomGreeting = playerTurnGreetings[Math.floor(Math.random() * playerTurnGreetings.length)];
-      addChatMessage('ai', randomGreeting);
+      const now = new Date();
+      const timeStr = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+      
+      setChatMessages([
+        {
+          id: `player_init_${Date.now()}`,
+          sender: 'ai',
+          name: currentArtist.name,
+          avatar: currentArtist.avatar,
+          text: randomGreeting,
+          time: timeStr,
+        },
+      ]);
     },
-    [stopAnimation, clearCanvas, triggerSound, playerTopic, addChatMessage]
+    [stopAnimation, clearCanvas, triggerSound, playerTopic, currentArtist]
   );
 
   // Pick a new random word for player to draw
@@ -1155,7 +1197,10 @@ export default function DrawAndGuessApp({
 
   // Initial mount: Start topic negotiation with AI
   useEffect(() => {
-    startTopicNegotiation();
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true;
+      startTopicNegotiation();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1363,7 +1408,7 @@ export default function DrawAndGuessApp({
 
           {/* ================= CANVAS DRAWING BOARD ================= */}
           {/* Note: touch-action: none & select-none guarantee zero scroll interference on the canvas itself */}
-          <div className="relative w-full h-[220px] sm:h-[260px] md:h-[300px] bg-white rounded-2xl shadow-xl overflow-hidden border-2 border-stone-800 cursor-crosshair shrink-0 touch-none select-none">
+          <div className="relative w-full h-[250px] sm:h-[290px] md:h-[340px] bg-white rounded-2xl shadow-xl overflow-hidden border-2 border-stone-800 cursor-crosshair shrink-0 flex-shrink-0 touch-none select-none">
             <canvas
               ref={canvasRef}
               width={CANVAS_WIDTH}
@@ -1713,7 +1758,7 @@ export default function DrawAndGuessApp({
 
         {/* ================= RIGHT CONVERSATION & GUESSING PANEL ================= */}
         {/* Dedicated scrollable chat stream with independent scrolling */}
-        <div className="w-full md:w-80 lg:w-96 flex flex-col bg-stone-900/80 border border-white/10 rounded-2xl p-2.5 shadow-xl backdrop-blur-md shrink-0 h-[220px] sm:h-[260px] md:h-auto md:flex-1 min-h-[160px] overflow-hidden">
+        <div className="w-full md:w-80 lg:w-96 flex flex-col bg-stone-900/80 border border-white/10 rounded-2xl p-2.5 shadow-xl backdrop-blur-md shrink-0 h-[190px] sm:h-[230px] md:h-auto md:flex-1 min-h-[150px] overflow-hidden">
           
           {/* Header of Chat Panel */}
           <div className="flex items-center justify-between pb-2 border-b border-white/10 shrink-0">
