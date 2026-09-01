@@ -2191,22 +2191,30 @@ export async function generateDrawAndGuessTopicAgreement(
   selectedCategoryName: string,
   candidateWords: string[]
 ): Promise<{ speech: string; chosenWord: string; chosenCategory: string }> {
-  const prompt = `【风铃·你画我猜·敲定题目与准备落笔】
+  const prompt = `【风铃·你画我猜·秘密出题与落笔准备】
 你是角色「${character.name}」。
-- 你的核心性格：${character.core.values.join('、')}，语言风格：${character.core.speech_filter}
-- 主控选择/对你说了：“${playerMessage || selectedCategoryName}”。
-- 候选题目池：${candidateWords.join('、')}
+- 你的核心人设：${character.core.values.join('、')}，语言风格：${character.core.speech_filter}
+- 主控选择或对你说了：“${playerMessage || selectedCategoryName}”。
+- 选定的大类别：【${selectedCategoryName}】
 
-【任务】：
-1. 从候选题目池中秘密挑选一个最符合主控心意/最具表现力的题目【chosenWord】（绝不能在speech里直接透露此词！）。
-2. speech：回应主控1句话，表示胸有成竹/欣然应允并准备落笔，暗示所选大类别，极具人设魅力。
+【任务描述】：
+请在这个大类别【${selectedCategoryName}】中，发挥你的创意，【自己秘密构思并想出一个具体的、适合用画笔画出来的题目】（chosenWord）。
+- 【严禁直接使用死板的题目模板】：不要拘泥于死板的候选列表，充分发挥角色的联想力，想一个大众能看懂、又非常有趣或高雅的词，比如：
+  - 如果是「可爱动物」：可以想“刺猬”、“大熊猫”、“考拉”、“啄木鸟”、“章鱼”、“小仓鼠”等。
+  - 如果是「美味食物」：可以想“甜甜圈”、“冰淇淋”、“章鱼烧”、“珍珠奶茶”、“寿司”、“披萨”、“汉堡”等。
+  - 如果是「日常物品」：可以想“太阳眼镜”、“吉他”、“雨伞”、“照相机”、“沙漏”、“帆船”、“望远镜”等。
+  - 如果是「恋爱主题」：可以想“爱心信封”、“相框”、“牵手”、“红玫瑰”、“誓言烛光”等。
+  - 如果是「成语典故」：可以想“亡羊补牢”、“画龙点睛”、“守株待兔”等。
+- 想好这个秘密题目（限2-5字，具体名词为主）并作为【chosenWord】。
+- 绝对不要在speech台词中直接说出或暗示这个词！
+- speech：回应主控1句话，表示胸有成竹、准备大展画技落笔，语气要极其符合你的人设（极具傲娇/深情/清冷等韵味），绝不索要任何暧昧性身体奖励。
 
 【输出纯JSON】：
 \`\`\`json
 {
-  "chosenWord": "小鱼",
+  "chosenWord": "想好的秘密词语",
   "chosenCategory": "${selectedCategoryName}",
-  "speech": "好，既然你想猜这个，看好了，我的第一笔马上落下。"
+  "speech": "哼，既然选了这个，看好了，我的画技可不一般，第一笔要落下了噢。"
 }
 \`\`\``;
 
@@ -2218,11 +2226,9 @@ export async function generateDrawAndGuessTopicAgreement(
     const match = raw.match(/\{[\s\S]*\}/);
     if (match) {
       const parsed = JSON.parse(match[0]);
-      const word = parsed.chosenWord && candidateWords.includes(parsed.chosenWord)
-        ? parsed.chosenWord
-        : candidateWords[Math.floor(Math.random() * candidateWords.length)] || '爱心';
+      const word = parsed.chosenWord ? String(parsed.chosenWord).trim() : (candidateWords[Math.floor(Math.random() * candidateWords.length)] || '小猫');
       return {
-        speech: String(parsed.speech || `好，那就依你。看好了，我这就下笔。`),
+        speech: String(parsed.speech || `好，既然选了 ${selectedCategoryName}，看好了，我这就开始落笔。`),
         chosenWord: word,
         chosenCategory: String(parsed.chosenCategory || selectedCategoryName),
       };
@@ -2499,7 +2505,7 @@ export async function generateDrawAndGuessRevealEnding(
 }
 
 /**
- * ⑤ 玩家画 AI 猜：AI 根据画布语义描述进行猜词 (PLAYER DRAW AI GUESS)
+ * ⑤ 玩家画 AI 猜：AI 根据画布视觉/图像与语义描述进行盲猜词 (PLAYER DRAW AI GUESS)
  */
 export async function generateDrawAndGuessAiGuessReaction(
   config: LlmConfig,
@@ -2508,32 +2514,82 @@ export async function generateDrawAndGuessAiGuessReaction(
   category: string,
   drawnSummary: string,
   playerMessage?: string,
-  targetWord?: string
-): Promise<{ speech: string; guessWord?: string; isCorrect?: boolean; gameTotalDelta?: Partial<EmotionVector> }> {
-  const prompt = `【风铃·你画我猜·AI智能实时猜词】
-你是角色「${character.name}」。主控在画板上作画让你猜。
-- 题目分类：${category}
-- 真实秘密题目：【${targetWord || '未知'}】
-- 画布线条与形态语义分析：${drawnSummary}
-- 玩家对你说的提示/对话：“${playerMessage || '你猜这是什么？'}”
+  canvasDataUrl?: string
+): Promise<{ speech: string; guessWord?: string; gameTotalDelta?: Partial<EmotionVector> }> {
+  const prompt = `【风铃·你画我猜·AI画作视觉辨识与自主猜词】
+你是角色「${character.name}」。主控（玩家）此时在画板上挥毫作画，请你仔细观察画面并猜出画的是什么。
+- 题目所属分类：${category}
+- 画布笔画与空间结构描述：${drawnSummary}
+- 玩家对你说的提示/对话：“${playerMessage || '你看我画的是什么？快猜猜看～'}”
 - 角色性格与口吻：${character.core.values.join('、')}，${character.core.speech_filter}
 
-【智能判断规则】：
-1. 评估主控目前的画作笔画和提示：
-   - 如果画布已有关键特征轮廓、或者玩家提示非常明显、或者你从形态上能判断出符合【${targetWord}】，请【立刻猜对】！设置 "isCorrect": true, "guessWord": "${targetWord}", 并用非常惊喜、夸奖和开心的口吻宣布猜对！
-   - 如果目前笔画较少或难以确切辨认，请给出 1 个形态相近的试探性猜测（"isCorrect": false），并用符合人设的语气鼓励玩家再多画几笔或给点线索。
-2. 绝对不要刻意拖延，只要觉得画得有神韵或看懂了就立刻猜中！
+【重要规则与态度导向】：
+1. 你【完全不知道】真实答案！绝对禁止凭空索要或假装知道秘密答案，你必须纯粹根据画面视觉图像（或笔画线索）和玩家提示进行【真实盲猜】。
+2. 夸赞画技与审美：
+   - 重点赞美主控的画技表现（例如：线条张力、起笔落笔的节奏感、轮廓形态捕捉得传神优雅、构图有灵气等）。
+   - 【严禁】任何索取实体奖励、过度暧昧、亲吻拥抱、亲密抚摸等偏离游戏本身的角色扮演向索求。你的表达应当是同好间探讨画作的惊喜、敬佩与俏皮互动。
+3. 请在 "guessWord" 中给出你观察后的【具体猜测词语】（必须是1个具体的词语，如 "小猪"、"汉堡"、"赛车"）。
 
-【输出纯JSON】：
+【输出纯JSON格式】：
 \`\`\`json
 {
-  "isCorrect": true,
-  "guessWord": "${targetWord || '答案'}",
-  "speech": "我一眼就看出来了！这绝对是【${targetWord || '答案'}】！画得也太传神了吧～",
-  "gameTotalDelta": { "joy": 0.3, "warmth": 0.2 }
+  "guessWord": "具体的猜测词语",
+  "speech": "这几笔描绘得也太传神了！线条优雅而抓得极准，我猜这绝对是【具体的猜测词语】！对不对呀？",
+  "gameTotalDelta": { "joy": 0.25, "warmth": 0.2 }
 }
 \`\`\``;
 
+  // 1. Try multimodal vision API call with canvas screenshot if available
+  if (canvasDataUrl && canvasDataUrl.startsWith('data:image/') && isLlmConfigured(config)) {
+    try {
+      const url = config.baseUrl.replace(/\/$/, '') + '/chat/completions';
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${config.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: config.model,
+          messages: [
+            { role: 'system', content: `你是「${character.name}」，请观察主控的画作图片并输出纯JSON猜词反应。` },
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: prompt },
+                {
+                  type: 'image_url',
+                  image_url: { url: canvasDataUrl },
+                },
+              ],
+            },
+          ],
+          max_tokens: 300,
+          temperature: 0.7,
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        const raw = data?.choices?.[0]?.message?.content;
+        if (typeof raw === 'string') {
+          const match = raw.match(/\{[\s\S]*\}/);
+          if (match) {
+            const parsed = JSON.parse(match[0]);
+            return {
+              speech: String(parsed.speech || '我仔细看啦，这线条画得真有张力！'),
+              guessWord: parsed.guessWord ? String(parsed.guessWord) : undefined,
+              gameTotalDelta: parsed.gameTotalDelta,
+            };
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Multimodal vision call for Draw & Guess failed, falling back to text prompt:', e);
+    }
+  }
+
+  // 2. Standard LLM call fallback with text prompt
   try {
     const raw = await callLlm(config, [
       { role: 'system', content: `你是「${character.name}」，输出纯JSON格式猜词反应。` },
@@ -2542,11 +2598,9 @@ export async function generateDrawAndGuessAiGuessReaction(
     const match = raw.match(/\{[\s\S]*\}/);
     if (match) {
       const parsed = JSON.parse(match[0]);
-      const isCorrect = Boolean(parsed.isCorrect);
       return {
-        speech: String(parsed.speech || (isCorrect ? `我猜到了！是【${targetWord}】！` : '让我想想……再加几笔试试？')),
-        guessWord: parsed.guessWord ? String(parsed.guessWord) : (isCorrect ? targetWord : undefined),
-        isCorrect,
+        speech: String(parsed.speech || '让我想想……这线条感觉有点意境，再加几笔试试？'),
+        guessWord: parsed.guessWord ? String(parsed.guessWord) : undefined,
         gameTotalDelta: parsed.gameTotalDelta,
       };
     }
@@ -2554,23 +2608,9 @@ export async function generateDrawAndGuessAiGuessReaction(
     console.warn('generateDrawAndGuessAiGuessReaction failed:', err);
   }
 
-  // Fallback heuristic if LLM call fails
-  const hasSubstantialStrokes = drawnSummary.includes('Stroke count:') && parseInt(drawnSummary.split('Stroke count:')[1] || '0') > 2;
-  const isTargetMentioned = playerMessage && targetWord && playerMessage.includes(targetWord);
-  
-  if (isTargetMentioned || (hasSubstantialStrokes && Math.random() > 0.4)) {
-    return {
-      speech: `“我知道啦！这绝对是【${targetWord || '答案'}】！画得真形象，完全逃不过我的火眼金睛！”`,
-      guessWord: targetWord,
-      isCorrect: true,
-      gameTotalDelta: { joy: 0.3, warmth: 0.2 },
-    };
-  }
-
   return {
-    speech: `“唔……看起来有灵动的线条轮廓了，再多画几笔细节或者给我一点线索，我肯定能猜出来！”`,
-    guessWord: '形态构思中',
-    isCorrect: false,
+    speech: `“唔……看这构图和笔画流畅度，真的很讲究！再多画两笔细节或者给我一点小线索，我肯定能猜出来！”`,
+    guessWord: '细致观察中',
   };
 }
 

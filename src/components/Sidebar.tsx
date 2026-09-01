@@ -231,6 +231,9 @@ export default function Sidebar({
     let startTime = 0;
 
     const handleTouchStart = (e: TouchEvent) => {
+      if (document.querySelector('[data-no-swipe="true"]') || document.querySelector('.no-sidebar-swipe')) {
+        return;
+      }
       if (e.touches.length !== 1) return;
       startX = e.touches[0].clientX;
       startY = e.touches[0].clientY;
@@ -238,6 +241,9 @@ export default function Sidebar({
     };
 
     const handleTouchEnd = (e: TouchEvent) => {
+      if (document.querySelector('[data-no-swipe="true"]') || document.querySelector('.no-sidebar-swipe')) {
+        return;
+      }
       if (!startX || !startY) return;
       const endX = e.changedTouches[0].clientX;
       const endY = e.changedTouches[0].clientY;

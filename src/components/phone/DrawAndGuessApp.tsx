@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Palette,
   Eraser,
@@ -39,6 +39,27 @@ import {
   renderStrokeToCanvas,
   playSound,
 } from '../../lib/perfectFreehandHelper';
+
+function getAvatarDisplayEmoji(avatar?: string): string {
+  if (!avatar || avatar.startsWith('data:') || avatar.startsWith('http') || avatar.startsWith('/') || avatar.length > 8) {
+    return '🎨';
+  }
+  return avatar;
+}
+
+function CharAvatar({ avatar, name, className }: { avatar?: string; name?: string; className?: string }) {
+  if (avatar && (avatar.startsWith('data:') || avatar.startsWith('http') || avatar.startsWith('/'))) {
+    return (
+      <img
+        src={avatar}
+        alt={name || '画伴'}
+        referrerPolicy="no-referrer"
+        className={`object-cover rounded-full ${className || 'size-6'}`}
+      />
+    );
+  }
+  return <span className={className || 'text-base'}>{avatar || '🎨'}</span>;
+}
 import {
   translateInstructionToPixelPoints,
   generateStrokeSemanticSummary,
@@ -126,7 +147,9 @@ export default function DrawAndGuessApp({
     return match ? match.id : (all[0]?.id || 'char_001');
   });
 
-  const currentArtist = getAiArtistById(selectedCharId);
+  const currentArtist = useMemo(() => {
+    return getAiArtistById(selectedCharId);
+  }, [selectedCharId]);
 
   // Active full character data for LLM persona & Emotion
   const [activeChar, setActiveChar] = useState<Character>(() => {
@@ -1020,6 +1043,7 @@ export default function DrawAndGuessApp({
       setPlayerInteractiveInput('');
       setAiIsThinking(true);
 
+      const canvasDataUrl = canvasRef.current?.toDataURL('image/png');
       const semanticSummary = generateStrokeSemanticSummary(playerStrokes);
       const config = loadLlmConfig();
       try {
@@ -1030,12 +1054,32 @@ export default function DrawAndGuessApp({
           playerTopic.category,
           semanticSummary,
           sendText,
-          playerTopic.word
+          canvasDataUrl
         );
 
-        addChatMessage('ai', res.speech);
+        // Evaluate if AI guessed correctly locally without revealing targetWord to LLM
+        const guessedWord = (res.guessWord || '').trim();
+        const secretWord = playerTopic.word.trim();
 
-        if (res.isCorrect) {
+        const cleanGuess = guessedWord.replace(/[【】"'\s,，!！?？]/g, '').toLowerCase();
+        const cleanSecret = secretWord.replace(/[【】"'\s,，!！?？]/g, '').toLowerCase();
+
+        const isCorrect =
+          cleanGuess.length > 0 &&
+          (cleanGuess === cleanSecret ||
+            cleanSecret.includes(cleanGuess) ||
+            cleanGuess.includes(cleanSecret));
+
+        let aiSpeech = res.speech;
+        if (isCorrect) {
+          if (!aiSpeech.includes('猜对') && !aiSpeech.includes('绝了') && !aiSpeech.includes('太神了')) {
+            aiSpeech += ` 真的被我猜中了！答案就是【${secretWord}】！主控这线条画技太绝了！`;
+          }
+        }
+
+        addChatMessage('ai', aiSpeech);
+
+        if (isCorrect) {
           triggerSound('correct');
           setScores((prev) => ({ ...prev, aiWins: prev.aiWins + 1 }));
           setPhase('roundB_success');
@@ -1058,7 +1102,7 @@ export default function DrawAndGuessApp({
           }
         } else {
           triggerSound('click');
-          setAiGuessStage((prev) => (prev >= 3 ? 3 : (prev + 1) as 0 | 1 | 2 | 3));
+          setAiGuessStage((prev) => (prev >= 3 ? 3 : ((prev + 1) as 0 | 1 | 2 | 3)));
           // Keep canvas open in 'player_drawing' so player can add more strokes!
           setPhase('player_drawing');
         }
@@ -1206,7 +1250,7 @@ export default function DrawAndGuessApp({
   }, []);
 
   return (
-    <div className="w-full h-full flex flex-col bg-stone-950 text-white select-none overflow-hidden text-xs relative">
+    <div data-no-swipe="true" className="w-full h-full flex flex-col bg-stone-950 text-white select-none overflow-hidden text-xs relative no-sidebar-swipe">
       
       {/* ================= WELCOME / SETUP SCREEN OVERLAY ================= */}
       {phase === 'welcome' && (
@@ -1319,7 +1363,7 @@ export default function DrawAndGuessApp({
                 <span>3. 选择画伴角色</span>
               </div>
               <div className="flex items-center gap-2 bg-black/40 p-2 rounded-xl border border-white/10">
-                <span className="text-xl shrink-0">{currentArtist.avatar}</span>
+                <CharAvatar avatar={currentArtist.avatar} name={currentArtist.name} className="size-8 rounded-full border border-pink-500/30 object-cover shrink-0 flex items-center justify-center bg-stone-800 text-lg" />
                 <div className="flex-1 min-w-0">
                   <select
                     value={selectedCharId}
@@ -1328,7 +1372,7 @@ export default function DrawAndGuessApp({
                   >
                     {playableArtists.map((a) => (
                       <option key={a.id} value={a.id} className="bg-stone-900 text-white">
-                        {a.avatar} {a.name} ({a.tag || '画伴'})
+                        {getAvatarDisplayEmoji(a.avatar)} {a.name} ({a.tag || '画伴'})
                       </option>
                     ))}
                   </select>
@@ -1417,7 +1461,7 @@ export default function DrawAndGuessApp({
             >
               {playableArtists.map((a) => (
                 <option key={a.id} value={a.id} className="bg-stone-900 text-white">
-                  {a.avatar} {a.name}
+                  {getAvatarDisplayEmoji(a.avatar)} {a.name}
                 </option>
               ))}
             </select>
@@ -1534,7 +1578,7 @@ export default function DrawAndGuessApp({
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') handleApplyCustomPlayerWord();
                   }}
-                  className="w-20 sm:w-24 px-2 py-0.5 bg-stone-800/80 border border-white/15 rounded-md text-[10.5px] text-stone-200 placeholder-stone-500 outline-none focus:border-amber-400"
+                  className="w-20 sm:w-24 px-2 py-0.5 bg-stone-800/80 border border-white/15 rounded-md text-base md:text-[10.5px] text-stone-200 placeholder-stone-500 outline-none focus:border-amber-400"
                 />
                 <button
                   onClick={handleApplyCustomPlayerWord}
@@ -1589,7 +1633,7 @@ export default function DrawAndGuessApp({
             {activeQuip && (
               <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 pointer-events-none animate-bounce">
                 <div className="px-3 py-1.5 rounded-2xl bg-black/85 text-amber-200 text-[11px] font-bold border border-amber-400/40 shadow-xl backdrop-blur-md flex items-center gap-1.5">
-                  <span>{currentArtist.avatar}</span>
+                  <CharAvatar avatar={currentArtist.avatar} name={currentArtist.name} className="size-4 rounded-full object-cover shrink-0 flex items-center justify-center text-xs" />
                   <span>“{activeQuip}”</span>
                 </div>
               </div>
@@ -1804,8 +1848,12 @@ export default function DrawAndGuessApp({
                   key={msg.id}
                   className={`flex gap-2 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}
                 >
-                  <div className="size-6 rounded-full bg-stone-800 border border-white/10 flex items-center justify-center shrink-0 text-xs shadow">
-                    {msg.avatar || (isMe ? '🎨' : currentArtist.avatar)}
+                  <div className="size-6 rounded-full bg-stone-800 border border-white/10 flex items-center justify-center shrink-0 text-xs shadow overflow-hidden">
+                    <CharAvatar
+                      avatar={msg.avatar || (isMe ? '🎨' : currentArtist.avatar)}
+                      name={msg.name}
+                      className="size-6 rounded-full object-cover shrink-0 flex items-center justify-center text-xs"
+                    />
                   </div>
                   <div className={`max-w-[78%] flex flex-col ${isMe ? 'items-end' : 'items-start'}`}>
                     <div className="text-[9.5px] text-stone-400 mb-0.5 px-1">
@@ -1827,8 +1875,8 @@ export default function DrawAndGuessApp({
 
             {aiIsThinking && (
               <div className="flex gap-2">
-                <div className="size-6 rounded-full bg-stone-800 border border-white/10 flex items-center justify-center shrink-0 text-xs">
-                  {currentArtist.avatar}
+                <div className="size-6 rounded-full bg-stone-800 border border-white/10 flex items-center justify-center shrink-0 text-xs overflow-hidden">
+                  <CharAvatar avatar={currentArtist.avatar} name={currentArtist.name} className="size-6 rounded-full object-cover shrink-0 flex items-center justify-center text-xs" />
                 </div>
                 <div className="px-3 py-1.5 rounded-2xl bg-stone-800/90 text-stone-400 border border-white/10 rounded-tl-none flex items-center gap-1 text-[10.5px]">
                   <span className="inline-block size-1.5 rounded-full bg-pink-400 animate-bounce" />
@@ -1879,7 +1927,7 @@ export default function DrawAndGuessApp({
                     onChange={(e) => setNegotiationInput(e.target.value)}
                     placeholder={`告诉 ${currentArtist.name} 想画什么类别/题目...`}
                     disabled={isNegotiating}
-                    className="flex-1 bg-stone-800/90 border border-white/15 rounded-xl px-3 py-1.5 text-stone-100 placeholder-stone-500 outline-none focus:border-pink-400 text-xs shadow-inner disabled:opacity-50 min-w-0"
+                    className="flex-1 bg-stone-800/90 border border-white/15 rounded-xl px-3 py-1.5 text-stone-100 placeholder-stone-500 outline-none focus:border-pink-400 text-base md:text-xs shadow-inner disabled:opacity-50 min-w-0"
                   />
                   <button
                     type="submit"
@@ -1898,7 +1946,7 @@ export default function DrawAndGuessApp({
                     value={guessInput}
                     onChange={(e) => setGuessInput(e.target.value)}
                     placeholder={`输入猜词（${aiSecret.word.length}字 · ${aiSecret.category}）...`}
-                    className="flex-1 bg-stone-800/90 border border-white/15 rounded-xl px-3 py-1.5 text-stone-100 placeholder-stone-500 outline-none focus:border-pink-400 text-xs shadow-inner min-w-0"
+                    className="flex-1 bg-stone-800/90 border border-white/15 rounded-xl px-3 py-1.5 text-stone-100 placeholder-stone-500 outline-none focus:border-pink-400 text-base md:text-xs shadow-inner min-w-0"
                     autoFocus
                   />
                   <button
@@ -1963,7 +2011,7 @@ export default function DrawAndGuessApp({
                     onChange={(e) => setPlayerInteractiveInput(e.target.value)}
                     placeholder="和AI说话、给线索或让他猜词..."
                     disabled={aiIsThinking}
-                    className="flex-1 bg-stone-800/90 border border-white/15 rounded-xl px-3 py-1.5 text-stone-100 placeholder-stone-500 outline-none focus:border-amber-400 text-xs shadow-inner disabled:opacity-50 min-w-0"
+                    className="flex-1 bg-stone-800/90 border border-white/15 rounded-xl px-3 py-1.5 text-stone-100 placeholder-stone-500 outline-none focus:border-amber-400 text-base md:text-xs shadow-inner disabled:opacity-50 min-w-0"
                   />
                   <button
                     type="submit"
