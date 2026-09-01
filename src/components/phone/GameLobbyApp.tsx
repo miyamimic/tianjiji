@@ -19,7 +19,7 @@ import GomokuApp from './GomokuApp';
 import { GhostCardApp } from './GhostCardApp';
 import StickersApp from './StickersApp';
 import DrawAndGuessApp from './DrawAndGuessApp';
-import GachaApp from './GachaApp';
+import { GachaApp } from './GachaApp';
 import GameCharacterSelector from './GameCharacterSelector';
 import { 
   getPendingGameInvite, 
@@ -33,7 +33,8 @@ import { getCharacterStickers, getUserStickers } from '../../lib/stickerStore';
 import { getCharacterById, MOCK_CHARACTERS } from '../../data/characters';
 import type { Character, EmotionVector } from '../../data/types';
 
-export type GameLobbySubApp = 'lobby' | 'gomoku' | 'ghost_card' | 'stickers' | 'draw_guess' | 'ai_gacha';
+export type GameLobbySubApp = 'lobby' | 'gomoku' | 'ghost_card' | 'stickers' | 'draw_guess' | 'gacha';
+
 
 interface Props {
   currentCharacterId?: string;
@@ -173,8 +174,8 @@ export default function GameLobbyApp({
         </div>
       )}
 
-      {activeSub === 'ai_gacha' && (
-        <div className="w-full h-full flex-1 flex flex-col min-h-0">
+      {activeSub === 'gacha' && (
+        <div className="w-full h-full">
           <GachaApp
             currentCharacterId={selectedOpponentId}
             characterName={activeCharName}
@@ -188,6 +189,7 @@ export default function GameLobbyApp({
       )}
 
       {/* Main Lobby Home View with Left Vertical Sidebar for Stickers */}
+
       {activeSub === 'lobby' && (
         <div className="flex w-full h-full gap-2.5 animate-in fade-in-0 duration-200">
           
@@ -262,11 +264,12 @@ export default function GameLobbyApp({
                     </div>
                   </div>
                   <span className="text-[9px] text-amber-300 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full font-mono">
-                    3 款对战游戏
+                    4 款互动娱乐
                   </span>
                 </div>
               </div>
             </div>
+
 
             {/* Pending Invite Alert */}
             {pendingInvite && (
@@ -410,6 +413,9 @@ export default function GameLobbyApp({
                         <span className="text-[8.5px] px-1.5 py-0.2 rounded bg-pink-500/30 text-pink-200 border border-pink-400/30 font-medium">
                           画技
                         </span>
+                        <span className="text-[8.5px] px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-200 border border-amber-400/30 font-mono">
+                          NEW
+                        </span>
                       </div>
                       <p className="text-[9.5px] text-white/50">perfect-freehand 笔锋 · 轮流时序回放与猜词对决</p>
                     </div>
@@ -432,48 +438,51 @@ export default function GameLobbyApp({
                 </div>
               </div>
 
-              {/* Game 4: AI 抽卡模拟器 (v2) */}
+              {/* GAME 4: Gacha Simulator (AI 伴侣抽卡模拟器) */}
               <div
-                onClick={() => setActiveSub('ai_gacha')}
-                className="group relative rounded-2xl bg-gradient-to-br from-amber-950/50 via-stone-900/90 to-orange-950/40 border border-amber-500/40 hover:border-amber-400/70 p-3 shadow-lg hover:shadow-amber-900/30 transition-all duration-200 cursor-pointer active:scale-[0.99] flex flex-col justify-between"
+                id="gacha-lobby-card"
+                onClick={() => setActiveSub('gacha')}
+                className="group relative rounded-2xl bg-gradient-to-br from-amber-950/40 via-stone-900/80 to-yellow-950/40 border border-amber-500/30 hover:border-amber-400/60 p-3 shadow-lg hover:shadow-amber-900/20 transition-all duration-200 cursor-pointer active:scale-[0.99] flex flex-col justify-between"
               >
+                {/* Status Badge */}
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex items-center gap-2">
-                    <div className="size-10 rounded-xl bg-gradient-to-br from-amber-400 via-orange-500 to-yellow-600 flex items-center justify-center shadow-md ring-1 ring-white/20 group-hover:scale-105 transition-transform">
-                      <Sparkles className="size-5 text-stone-950" />
+                    <div className="size-10 rounded-xl bg-gradient-to-br from-amber-400 via-yellow-500 to-amber-600 flex items-center justify-center shadow-md ring-1 ring-white/20 group-hover:scale-105 transition-transform">
+                      <Sparkles className="size-5 text-stone-950 font-black" />
                     </div>
                     <div>
                       <div className="flex items-center gap-1.5">
                         <h4 className="text-xs font-bold text-white group-hover:text-amber-300 transition-colors">
-                          AI 抽卡模拟器 · 星轨共鸣 (v2)
+                          风铃 · 抽卡模拟器 (v4)
                         </h4>
-                        <span className="text-[8.5px] px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200 border border-amber-400/40 font-bold">
-                          观战
+                        <span className="text-[8.5px] px-1.5 py-0.2 rounded bg-amber-500/30 text-amber-200 border border-amber-400/30 font-medium">
+                          祈愿
                         </span>
-                        <span className="text-[8.5px] px-1.5 py-0.2 rounded bg-gradient-to-r from-amber-500 to-orange-500 text-stone-950 font-black">
-                          v2 掌机
+                        <span className="text-[8.5px] px-1.5 py-0.2 rounded bg-rose-500/20 text-rose-200 border border-rose-400/30 font-mono">
+                          HOT
                         </span>
                       </div>
-                      <p className="text-[9.5px] text-white/50">看 AI 掌管光标 · 真人化逐张翻卡与保底井玄学</p>
+                      <p className="text-[9.5px] text-white/50">虚拟光标掌舵 · 10-30s 祈愿特效 · 原创即兴点评</p>
                     </div>
                   </div>
 
-                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-400/30">
-                    虚拟光标操控
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-amber-500/30 text-amber-200 border border-amber-400/30">
+                    伴侣代抽
                   </span>
                 </div>
 
                 <div className="flex items-center justify-between pt-2 border-t border-white/5 text-[10px] text-white/60">
                   <span className="flex items-center gap-1 text-stone-300">
                     <Sparkle className="size-3 text-amber-400" />
-                    <span>主掌: {activeCharName} · 沉浸式情绪结算与自定义卡池</span>
+                    <span>主控: {activeCharName} · 井保底与个性翻牌习惯</span>
                   </span>
                   <div className="flex items-center gap-1 text-amber-300 group-hover:translate-x-0.5 transition-transform font-medium">
-                    <span>观战抽卡</span>
+                    <span>开启祈愿</span>
                     <ChevronRight className="size-3.5" />
                   </div>
                 </div>
               </div>
+
 
             </div>
           </div>
