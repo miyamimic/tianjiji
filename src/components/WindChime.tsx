@@ -20,14 +20,8 @@ import {
   ArrowRight,
   Move
 } from 'lucide-react';
-import PersonaApp from './phone/PersonaApp';
-import WallpaperApp from './phone/WallpaperApp';
-import LlmApp from './phone/LlmApp';
-import AmbienceApp from './phone/AmbienceApp';
-import DictionaryApp from './phone/DictionaryApp';
-import CssApp from './phone/CssApp';
-import GameLobbyApp, { type GameLobbySubApp } from './phone/GameLobbyApp';
-import DataBackupModal from './DataBackupModal';
+import RetroComputer from './phone/RetroComputer';
+import type { GameLobbySubApp } from './phone/GameLobbyApp';
 import type { LlmConfig } from '../lib/llm';
 import { 
   subscribeGameInvite, 
@@ -158,6 +152,7 @@ export default function WindChime({
   onEngineReload,
   onConfigChange,
   forceOpenApp,
+  forceOpenSubApp,
   onClearForceOpenApp,
   onGameFinished,
   onApplyGameEmotionDelta,
@@ -647,355 +642,45 @@ export default function WindChime({
           {/* Real-time Stretch Drag Hint */}
           {isDragging && (
             <div className="absolute top-full mt-2.5 whitespace-nowrap bg-black/90 text-[10px] text-pink-200 font-medium px-2.5 py-1 rounded-full border border-pink-400/40 backdrop-blur-md shadow-2xl animate-fade-in pointer-events-none">
-              {cordLength > 80 ? '松开拉开灵犀手机 📱' : '继续向下拉动风铃绳索...'}
+              {cordLength > 80 ? '松开进入终端电脑 🖥️' : '继续向下拉动风铃绳索...'}
             </div>
           )}
         </div>
       </div>
 
-      {/* ================= 2. POP-UP SMARTPHONE / GAME INTERFACE ================= */}
+      {/* ================= 2. POP-UP RETRO DESKTOP COMPUTER INTERFACE ================= */}
       {isOpen && (
         <div
-          className={`fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md animate-in fade-in-0 duration-200 ${
-            activeApp === 'game_lobby' ? 'p-0 sm:p-3' : 'p-3 sm:p-6'
-          }`}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md overflow-y-auto p-2 sm:p-4 animate-in fade-in-0 duration-200"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setIsOpen(false);
+          }}
         >
-          {/* Backdrop click to close */}
-          <div className="absolute inset-0" onClick={() => setIsOpen(false)} />
-
-          {/* Chassis Window */}
-          <div
-            className={`relative w-full transition-all duration-300 ${
-              activeApp === 'game_lobby'
-                ? 'max-w-full sm:max-w-[640px] md:max-w-[800px] h-full sm:h-[94vh] sm:max-h-[880px] sm:rounded-[36px] rounded-none bg-gradient-to-b from-[#1c1917] via-[#141210] to-[#0c0a09] border-0 sm:border-[2px] sm:border-amber-500/30'
-                : 'max-w-[390px] h-[660px] max-h-[92vh] rounded-[42px] bg-gradient-to-b from-[hsl(222_30%_12%)] via-[hsl(222_35%_8%)] to-[hsl(222_40%_5%)] border-[3px] border-white/20'
-            } shadow-[0_25px_60px_-15px_rgba(0,0,0,0.9),0_0_40px_rgba(245,158,11,0.15)] flex flex-col overflow-hidden ring-1 ring-black/80 z-10 animate-in zoom-in-95 duration-200`}
-          >
-            {/* Top Speaker / Dynamic Island Notch & Status Bar */}
-            <div className="relative pt-2.5 px-5 pb-2 flex items-center justify-between text-white/80 select-none shrink-0 border-b border-white/5 bg-black/30">
-              {/* Clock */}
-              <span className="text-[12px] font-semibold tracking-wider text-white">
-                {currentTime}
-              </span>
-
-              {/* Dynamic Island Pill */}
-              <div className="absolute left-1/2 -translate-x-1/2 top-2 w-24 h-5 bg-black rounded-full border border-white/10 flex items-center justify-center gap-1.5 px-2 shadow-inner">
-                <div className="size-2 rounded-full bg-amber-400/90 animate-pulse" />
-                <span className="text-[8px] text-white/60 font-mono tracking-tighter">
-                  {activeApp === 'game_lobby' ? '游戏大厅' : '灵犀 OS'}
-                </span>
-                <div className="size-1.5 rounded-full bg-white/20" />
-              </div>
-
-              {/* Status Icons */}
-              <div className="flex items-center gap-2 text-white/70">
-                <span className="text-[9px] font-bold">5G</span>
-                <Wifi className="size-3" />
-                <div className="flex items-center gap-0.5">
-                  <Battery className="size-3.5" />
-                  <span className="text-[9px]">99%</span>
-                </div>
-              </div>
-            </div>
-
-            {/* In-App Header (If an App is opened) */}
-            {activeApp && (
-              <div className="flex items-center justify-between px-3.5 py-2 bg-black/40 border-b border-white/10 shrink-0">
-                <button
-                  onClick={() => setActiveApp(null)}
-                  className="flex items-center gap-1 text-xs font-semibold text-[hsl(28_85%_62%)] hover:text-amber-300 transition-colors py-1 px-2.5 rounded-xl bg-white/5 hover:bg-white/10 cursor-pointer"
-                >
-                  <ChevronLeft className="size-4" />
-                  <span>{activeApp === 'game_lobby' ? '退出大厅' : '返回桌面'}</span>
-                </button>
-
-                <span className="text-xs font-bold text-white tracking-wide flex items-center gap-1.5">
-                  {activeApp === 'game_lobby' ? (
-                    <>
-                      <Gamepad2 className="size-3.5 text-amber-400" />
-                      <span>游戏大厅 · {characterName}</span>
-                    </>
-                  ) : (
-                    APPS.find((a) => a.id === activeApp)?.name
-                  )}
-                </span>
-
-                <button
-                  onClick={() => setIsOpen(false)}
-                  className="p-1.5 rounded-full text-white/40 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                  title="关闭"
-                >
-                  <X className="size-4" />
-                </button>
-              </div>
-            )}
-
-            {/* Smartphone Screen Body */}
-            <div
-              className={`flex-1 ${
-                activeApp === 'game_lobby' ? 'overflow-hidden p-0 sm:p-1' : 'overflow-y-auto px-4 py-3'
-              } no-scrollbar flex flex-col min-h-0`}
-            >
-              
-              {/* ========== HOME SCREEN (3-COLUMNS APP GRID) ========== */}
-              {!activeApp ? (
-                <div className="space-y-3.5 pt-1 animate-in fade-in-0 duration-200 select-none">
-                  {/* Home Greeting & Status Widget */}
-                  <div className="p-3 rounded-2xl bg-gradient-to-br from-white/[0.08] to-white/[0.02] border border-white/10 shadow-md space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5">
-                        <Sparkles className="size-3.5 text-[hsl(28_85%_62%)]" />
-                        <span className="text-xs font-bold text-white">灵犀控制中心</span>
-                      </div>
-                      <div className="flex items-center gap-1.5">
-                        {/* Arrange Mode Toggle Button */}
-                        <button
-                          onClick={() => {
-                            setIsArranging(!isArranging);
-                            playChimeTinkle(0.6);
-                          }}
-                          className={`px-2 py-0.5 rounded-full text-[9px] font-medium flex items-center gap-1 transition-all ${
-                            isArranging
-                              ? 'bg-amber-400 text-amber-950 font-bold shadow-md shadow-amber-500/20 ring-1 ring-amber-300'
-                              : 'bg-white/10 hover:bg-white/20 text-white/80 border border-white/10'
-                          }`}
-                          title={isArranging ? '完成桌面图标排列' : '自定义调整图标位置'}
-                        >
-                          {isArranging ? (
-                            <>
-                              <Check className="size-2.5" />
-                              <span>完成</span>
-                            </>
-                          ) : (
-                            <>
-                              <Move className="size-2.5 text-amber-300" />
-                              <span>排列图标</span>
-                            </>
-                          )}
-                        </button>
-
-                        {/* Reset App Order Button */}
-                        {isArranging && (
-                          <button
-                            onClick={handleResetAppOrder}
-                            className="p-1 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white transition-colors"
-                            title="恢复默认图标顺序"
-                          >
-                            <RotateCcw className="size-2.5" />
-                          </button>
-                        )}
-
-                        <span className="text-[9px] text-amber-300/80 bg-amber-400/10 border border-amber-400/20 px-2 py-0.5 rounded-full font-mono">
-                          ONLINE
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between text-[10px] text-white/50 leading-tight">
-                      <span>
-                        {isArranging 
-                          ? '✨ 拖拽卡片或点击左右箭头调整桌面顺序' 
-                          : '💡 拖拽卡片或长按图标可自定义排列顺序'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Pending Game Invitation Banner on Home Screen */}
-                  {pendingInvite && (
-                    <button
-                      onClick={() => setActiveApp('game_lobby')}
-                      className="w-full p-2.5 rounded-2xl bg-gradient-to-r from-amber-500/20 via-orange-500/20 to-rose-500/20 border border-amber-400/40 flex items-center justify-between text-left shadow-lg hover:border-amber-400/70 transition-all cursor-pointer group"
-                    >
-                      <div className="flex items-center gap-2">
-                        <div className="p-1.5 rounded-xl bg-[hsl(28_85%_62%)] text-amber-950">
-                          <Gamepad2 className="size-4 animate-bounce" />
-                        </div>
-                        <div className="space-y-0.5">
-                          <p className="text-xs font-bold text-amber-200 group-hover:text-white transition-colors">
-                            {pendingInvite.characterName} 邀你游戏对决
-                          </p>
-                          <p className="text-[9px] text-amber-300/70">
-                            {pendingInvite.gameType === 'ghost_card' ? '🃏 捉鬼牌纸牌对决' : '♟️ 五子棋对弈'} · 点击前往大厅赴约
-                          </p>
-                        </div>
-                      </div>
-                      <span className="text-[10px] font-bold text-amber-950 bg-[hsl(28_85%_62%)] px-2 py-1 rounded-lg shadow-sm">
-                        赴约
-                      </span>
-                    </button>
-                  )}
-
-                  {/* 3-Column Phone App Grid (Draggable & Reorderable) */}
-                  <div className="grid grid-cols-3 gap-2.5 pt-1">
-                    {sortedApps.map((app, index) => {
-                      const Icon = app.icon;
-                      const isGameLobbyWithInvite = app.id === 'game_lobby' && !!pendingInvite;
-                      const activeGomokuSession = app.id === 'game_lobby' ? loadActiveGameSession(currentCharacterId) : null;
-                      const activeGhostSession = app.id === 'game_lobby' ? loadActiveGhostCardSession(currentCharacterId) : null;
-                      const hasPausedGomoku = !!activeGomokuSession && activeGomokuSession.moveHistory.length > 0;
-                      const hasPausedGhost = !!activeGhostSession && (activeGhostSession.userHand.length > 0 || activeGhostSession.charHand.length > 0);
-
-                      const isSelfDragging = draggedAppId === app.id;
-                      const isDropTarget = dragOverAppId === app.id;
-
-                      return (
-                        <div
-                          key={app.id}
-                          draggable
-                          onDragStart={(e) => handleAppDragStart(e, app.id)}
-                          onDragOver={(e) => handleAppDragOver(e, app.id)}
-                          onDrop={(e) => handleAppDrop(e, app.id)}
-                          onDragEnd={handleAppDragEnd}
-                          onTouchStart={handleTouchStart}
-                          onTouchEnd={handleTouchEnd}
-                          onClick={() => {
-                            if (!isArranging && !isDraggingAppRef.current) {
-                              setActiveApp(app.id);
-                            }
-                          }}
-                          className={`group relative flex flex-col items-center p-2.5 rounded-2xl transition-all duration-200 text-center shadow-md cursor-pointer select-none ${
-                            isSelfDragging
-                              ? 'opacity-30 scale-90 border-dashed border-2 border-amber-400 bg-amber-950/30 ring-2 ring-amber-400/40'
-                              : isDropTarget
-                              ? 'scale-105 border-2 border-amber-400 bg-amber-950/40 shadow-lg shadow-amber-500/30 ring-2 ring-amber-300'
-                              : isArranging
-                              ? 'bg-white/[0.07] border border-amber-400/50 hover:border-amber-400 shadow-md ring-1 ring-amber-400/20'
-                              : 'bg-black/40 hover:bg-white/[0.08] border border-white/10 hover:border-[hsl(28_85%_62%/0.4)] hover:shadow-[hsl(28_85%_62%/0.15)] active:scale-95'
-                          }`}
-                        >
-                          {/* Arrange Mode: Reorder Left / Right Quick Control Buttons on Mobile */}
-                          {isArranging && (
-                            <div className="absolute -top-1.5 inset-x-1 flex items-center justify-between z-20 pointer-events-auto">
-                              <button
-                                disabled={index === 0}
-                                onClick={(e) => handleShiftApp(app.id, 'left', e)}
-                                className="size-5 rounded-full bg-neutral-900 border border-amber-400/80 text-amber-300 flex items-center justify-center disabled:opacity-20 hover:bg-amber-400 hover:text-black transition-all shadow-md active:scale-90"
-                                title="向左移动"
-                              >
-                                <ArrowLeft className="size-3" />
-                              </button>
-                              <button
-                                disabled={index === sortedApps.length - 1}
-                                onClick={(e) => handleShiftApp(app.id, 'right', e)}
-                                className="size-5 rounded-full bg-neutral-900 border border-amber-400/80 text-amber-300 flex items-center justify-center disabled:opacity-20 hover:bg-amber-400 hover:text-black transition-all shadow-md active:scale-90"
-                                title="向右移动"
-                              >
-                                <ArrowRight className="size-3" />
-                              </button>
-                            </div>
-                          )}
-
-                          {/* Badge (e.g. AI视觉, 新邀请, 暂停中) */}
-                          {!isArranging && (app.badge || isGameLobbyWithInvite || hasPausedGomoku || hasPausedGhost) && (
-                            <span
-                              className={`absolute -top-1 -right-1 text-[8px] font-bold px-1.5 py-0.5 rounded-full shadow-md z-10 ${
-                                isGameLobbyWithInvite
-                                  ? 'bg-red-500 text-white animate-pulse'
-                                  : hasPausedGomoku || hasPausedGhost
-                                  ? 'bg-amber-500 text-amber-950 font-bold'
-                                  : 'text-amber-950 bg-[hsl(28_85%_62%)]'
-                              }`}
-                            >
-                              {isGameLobbyWithInvite
-                                ? '新邀约'
-                                : hasPausedGomoku
-                                ? `棋局(${activeGomokuSession?.moveHistory.length}手)`
-                                : hasPausedGhost
-                                ? `牌局(${activeGhostSession?.turnCount}轮)`
-                                : app.badge}
-                            </span>
-                          )}
-
-                          {/* App Icon (Squircle shape) */}
-                          <div
-                            className={`size-12 rounded-2xl bg-gradient-to-br ${app.gradient} shadow-md group-hover:scale-105 transition-transform duration-200 flex items-center justify-center mb-1.5 ring-1 ring-white/20 relative`}
-                          >
-                            <Icon className="size-6 text-white drop-shadow-sm" />
-                            {isArranging && (
-                              <div className="absolute inset-0 rounded-2xl bg-black/20 flex items-center justify-center">
-                                <GripVertical className="size-4 text-white/90 drop-shadow-md" />
-                              </div>
-                            )}
-                          </div>
-
-                          {/* App Label & Subtitle */}
-                          <div className="space-y-0.5 w-full">
-                            <h4 className="text-[11.5px] font-bold text-white group-hover:text-[hsl(28_85%_62%)] transition-colors truncate">
-                              {app.name}
-                            </h4>
-                            <p className="text-[9px] text-white/40 leading-none truncate scale-95">
-                              {app.subtitle}
-                            </p>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              ) : (
-                /* ========== IN-APP DETAIL VIEW ========== */
-                <div className={`animate-in fade-in-0 duration-200 ${activeApp === 'game_lobby' ? 'flex-1 flex flex-col min-h-0 overflow-hidden' : 'pt-1'}`}>
-                  {activeApp === 'game_lobby' && (
-                    <GameLobbyApp
-                      currentCharacterId={currentCharacterId}
-                      characterName={characterName}
-                      character={character}
-                      currentEmotionSnapshot={currentEmotionSnapshot}
-                      onGameFinished={onGameFinished}
-                      onApplyGameEmotionDelta={onApplyGameEmotionDelta}
-                      onInGameChat={onInGameChat}
-                      onRejectGameInvite={onRejectGameInvite}
-                      onExitLobby={() => setActiveApp(null)}
-                    />
-                  )}
-                  {activeApp === 'backup' && (
-                    <div className="p-2 sm:p-3 bg-[#fffafb] rounded-2xl text-[#4a3e3d] shadow-sm max-h-[70vh] overflow-y-auto">
-                      <DataBackupModal
-                        currentCharacterId={currentCharacterId}
-                        onDataImported={onEngineReload}
-                      />
-                    </div>
-                  )}
-                  {activeApp === 'persona' && (
-                    <PersonaApp
-                      currentCharacterId={currentCharacterId}
-                      onEngineReload={onEngineReload}
-                    />
-                  )}
-                  {activeApp === 'wallpaper' && (
-                    <WallpaperApp
-                      onBgChange={onBgChange}
-                      currentBg={currentBg}
-                    />
-                  )}
-                  {activeApp === 'llm' && (
-                    <LlmApp onConfigChange={onConfigChange} />
-                  )}
-                  {activeApp === 'ambience' && <AmbienceApp />}
-                  {activeApp === 'dictionary' && <DictionaryApp />}
-                  {activeApp === 'css' && <CssApp />}
-                </div>
-              )}
-            </div>
-
-            {/* Bottom Smartphone Navigation / Home Indicator Bar */}
-            <div className="pt-2 pb-3 px-6 bg-black/40 border-t border-white/5 flex items-center justify-center shrink-0">
-              <button
-                onClick={() => {
-                  if (activeApp) {
-                    setActiveApp(null);
-                  } else {
-                    setIsOpen(false);
-                  }
-                }}
-                className="w-32 h-1 bg-white/40 hover:bg-white/80 rounded-full transition-all active:scale-95 cursor-pointer"
-                title={activeApp ? '返回桌面' : '关闭手机'}
-              />
-            </div>
-
-          </div>
+          <RetroComputer
+            onClose={() => setIsOpen(false)}
+            onBgChange={onBgChange}
+            currentBg={currentBg}
+            currentCharacterId={currentCharacterId}
+            characterName={characterName}
+            character={character}
+            currentEmotionSnapshot={currentEmotionSnapshot}
+            onEngineReload={onEngineReload}
+            onConfigChange={onConfigChange}
+            forceOpenApp={activeApp}
+            forceOpenSubApp={forceOpenSubApp}
+            onClearForceOpenApp={() => {
+              setActiveApp(null);
+              if (onClearForceOpenApp) onClearForceOpenApp();
+            }}
+            onGameFinished={onGameFinished}
+            onApplyGameEmotionDelta={onApplyGameEmotionDelta}
+            onInGameChat={onInGameChat}
+            onRejectGameInvite={onRejectGameInvite}
+            pendingInvite={pendingInvite}
+          />
         </div>
       )}
+
     </>
   );
 }
