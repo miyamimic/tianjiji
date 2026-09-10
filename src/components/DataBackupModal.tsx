@@ -2,23 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Download, 
   Upload, 
-  FileArchive, 
-  FileText, 
-  CheckCircle2, 
-  AlertTriangle, 
-  ShieldCheck, 
-  Layers, 
-  MessageSquare, 
-  Users, 
-  Brain, 
-  Sliders, 
-  RefreshCw, 
-  Sparkles, 
-  ArrowRight,
   Database,
   Info,
   Check,
-  X
+  X,
+  AlertTriangle,
+  CheckCircle2
 } from 'lucide-react';
 import { 
   exportFullBackupZip, 
@@ -39,14 +28,119 @@ import {
   idbLoadAllDynamicMemories 
 } from '../lib/idb';
 import { getCharacterById, MOCK_CHARACTERS } from '../data/characters';
-import { LinePuppyMascot, StardewPixelFlower } from './FrenchLacePuppyElements';
+
+// ================= CUSTOM RETRO SYSTEM ICONS =================
+
+const FileCabinetIcon = () => (
+  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+    {/* 3D Drawer Cabinet Outline */}
+    <rect x="6" y="4" width="20" height="24" fill="#ffdf70" stroke="#000" strokeWidth="1.5" />
+    {/* Divider lines between drawers */}
+    <line x1="6" y1="14" x2="26" y2="14" stroke="#000" strokeWidth="1.5" />
+    <line x1="6" y1="21" x2="26" y2="21" stroke="#000" strokeWidth="1.5" />
+    {/* Drawer handles */}
+    <rect x="12" y="8" width="8" height="2" fill="#fff" stroke="#000" strokeWidth="1" />
+    <rect x="12" y="16" width="8" height="2" fill="#fff" stroke="#000" strokeWidth="1" />
+    <rect x="12" y="23" width="8" height="2" fill="#fff" stroke="#000" strokeWidth="1" />
+  </svg>
+);
+
+const ChatsFolderIcon = () => (
+  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+    {/* Retro Yellow Manila Folder */}
+    <path d="M4 6V26H28V10H16L12 6H4Z" fill="#ffdf70" stroke="#000" strokeWidth="1.5" />
+    {/* Paper sticking out slightly */}
+    <rect x="8" y="13" width="16" height="9" fill="#fff" stroke="#000" strokeWidth="1" />
+    <line x1="11" y1="16" x2="16" y2="16" stroke="#000" strokeWidth="1" />
+    <line x1="11" y1="19" x2="21" y2="19" stroke="#000" strokeWidth="1" />
+  </svg>
+);
+
+const CardsExportIcon = () => (
+  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+    {/* Personal Card Layout */}
+    <rect x="4" y="6" width="24" height="20" fill="#fff" stroke="#000" strokeWidth="1.5" />
+    <rect x="6" y="8" width="20" height="4" fill="#0000a8" />
+    {/* Character avatar silhouette */}
+    <circle cx="10" cy="18" r="3" fill="#00aaaa" stroke="#000" strokeWidth="1" />
+    <path d="M6 24C6 21 8 21 10 21C12 21 14 21 14 24" fill="#00aaaa" stroke="#000" strokeWidth="1" />
+    {/* Information lines */}
+    <line x1="16" y1="16" x2="23" y2="16" stroke="#000" strokeWidth="1" />
+    <line x1="16" y1="19" x2="21" y2="19" stroke="#000" strokeWidth="1" />
+    <line x1="16" y1="22" x2="24" y2="22" stroke="#000" strokeWidth="1" />
+  </svg>
+);
+
+const PromptPresetsIcon = () => (
+  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+    {/* Spiral binder notebook */}
+    <rect x="8" y="4" width="18" height="24" fill="#fff" stroke="#000" strokeWidth="1.5" />
+    {/* Spiral rings */}
+    <circle cx="6" cy="8" r="1.5" fill="#d4d4d4" stroke="#000" strokeWidth="1" />
+    <line x1="6" y1="8" x2="9" y2="8" stroke="#000" strokeWidth="1.2" />
+    <circle cx="6" cy="14" r="1.5" fill="#d4d4d4" stroke="#000" strokeWidth="1" />
+    <line x1="6" y1="14" x2="9" y2="14" stroke="#000" strokeWidth="1.2" />
+    <circle cx="6" cy="20" r="1.5" fill="#d4d4d4" stroke="#000" strokeWidth="1" />
+    <line x1="6" y1="20" x2="9" y2="20" stroke="#000" strokeWidth="1.2" />
+    <circle cx="6" cy="26" r="1.5" fill="#d4d4d4" stroke="#000" strokeWidth="1" />
+    <line x1="6" y1="26" x2="9" y2="26" stroke="#000" strokeWidth="1.2" />
+    {/* Writing lines */}
+    <line x1="12" y1="10" x2="22" y2="10" stroke="#0000a8" strokeWidth="1" />
+    <line x1="12" y1="15" x2="20" y2="15" stroke="#000" strokeWidth="0.8" />
+    <line x1="12" y1="20" x2="24" y2="20" stroke="#000" strokeWidth="0.8" />
+  </svg>
+);
+
+const ControlPanelIcon = () => (
+  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+    {/* Retro gray computer case with CRT display */}
+    <rect x="4" y="4" width="24" height="18" fill="#d4d4d4" stroke="#000" strokeWidth="1.5" rx="1" />
+    {/* Blue CRT screen */}
+    <rect x="7" y="7" width="18" height="12" fill="#0000a8" stroke="#000" strokeWidth="1" />
+    {/* Outer stand */}
+    <path d="M11 22L13 26H19L21 22H11Z" fill="#a0a0a0" stroke="#000" strokeWidth="1.5" />
+    {/* Dynamic CRT lines inside screen */}
+    <line x1="9" y1="10" x2="23" y2="10" stroke="#00ffff" strokeWidth="1" opacity="0.4" />
+    <line x1="9" y1="14" x2="18" y2="14" stroke="#00ffff" strokeWidth="1" opacity="0.4" />
+  </svg>
+);
+
+const FloppyDiskIcon = () => (
+  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+    {/* Classic 3.5" Blue Floppy Disk */}
+    <path d="M4 4H24L28 8V28H4V4Z" fill="#0000a8" stroke="#000" strokeWidth="1.5" />
+    {/* White sliding sticker label */}
+    <rect x="8" y="15" width="16" height="13" fill="#fff" stroke="#000" strokeWidth="1.2" />
+    <line x1="10" y1="18" x2="22" y2="18" stroke="#ff00ff" strokeWidth="1.5" />
+    <line x1="10" y1="22" x2="19" y2="22" stroke="#000" strokeWidth="1" />
+    {/* Shutter gate */}
+    <rect x="10" y="4" width="10" height="8" fill="#c0c0c0" stroke="#000" strokeWidth="1.2" />
+    <rect x="12" y="6" width="2" height="4" fill="#000" />
+  </svg>
+);
+
+const PrinterIcon = () => (
+  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+    {/* Printer device */}
+    <rect x="6" y="11" width="20" height="13" fill="#d4d4d4" stroke="#000" strokeWidth="1.5" />
+    {/* Upper paper slot */}
+    <rect x="10" y="4" width="12" height="7" fill="#fff" stroke="#000" strokeWidth="1.2" />
+    {/* Bottom paper feed output */}
+    <rect x="9" y="19" width="14" height="10" fill="#fff" stroke="#000" strokeWidth="1.2" />
+    <line x1="12" y1="22" x2="20" y2="22" stroke="#000" strokeWidth="1" />
+    <line x1="12" y1="25" x2="18" y2="25" stroke="#000" strokeWidth="1" />
+    {/* Action indicator lamps */}
+    <circle cx="22" cy="15" r="1" fill="#00ff00" />
+  </svg>
+);
 
 interface Props {
   currentCharacterId: string;
   onDataImported?: () => void;
+  onClose?: () => void;
 }
 
-export default function DataBackupModal({ currentCharacterId, onDataImported }: Props) {
+export default function DataBackupModal({ currentCharacterId, onDataImported, onClose }: Props) {
   // Storage Stats State
   const [stats, setStats] = useState<{
     charCount: number;
@@ -60,23 +154,26 @@ export default function DataBackupModal({ currentCharacterId, onDataImported }: 
     loading: true,
   });
 
-  // Export Loading State
+  // Export States
   const [exportingZip, setExportingZip] = useState(false);
   const [exportSuccessMsg, setExportSuccessMsg] = useState<string | null>(null);
 
-  // Import Workflow State
+  // Import / Inspect States
   const [inspecting, setInspecting] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [inspectionReport, setInspectionReport] = useState<ImportInspectionReport | null>(null);
   const [importResult, setImportResult] = useState<ImportExecuteResult | null>(null);
 
-  // Import Options State
+  // Import Configuration Options State
   const [importMode, setImportMode] = useState<'merge' | 'overwrite'>('merge');
   const [importChars, setImportChars] = useState(true);
   const [importChats, setImportChats] = useState(true);
   const [importMemories, setImportMemories] = useState(true);
   const [importSettings, setImportSettings] = useState(true);
   const [selectedCharIds, setSelectedCharIds] = useState<string[]>([]);
+
+  // Statistics Modal state
+  const [showStatsModal, setShowStatsModal] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const currentChar = getCharacterById(currentCharacterId) ?? MOCK_CHARACTERS[0];
@@ -125,7 +222,6 @@ export default function DataBackupModal({ currentCharacterId, onDataImported }: 
       setExportSuccessMsg(null);
       await exportFullBackupZip();
       setExportSuccessMsg('全量分文件 ZIP 备份包已成功生成并下载！');
-      setTimeout(() => setExportSuccessMsg(null), 4000);
     } catch (err: any) {
       alert(`导出备份失败: ${err.message || String(err)}`);
     } finally {
@@ -133,7 +229,7 @@ export default function DataBackupModal({ currentCharacterId, onDataImported }: 
     }
   };
 
-  // Handle File Drop / Select for Inspection (Dry Run)
+  // Handle File Input Select for Inspection
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -158,7 +254,7 @@ export default function DataBackupModal({ currentCharacterId, onDataImported }: 
       const report = await inspectImportFile(file);
       setInspectionReport(report);
 
-      // Pre-select all detected character IDs
+      // Pre-select all detected character IDs in report
       const detectedIds = new Set<string>();
       report.characters.forEach((c) => detectedIds.add(c.character.character_id));
       report.chats.forEach((c) => detectedIds.add(c.characterId));
@@ -171,7 +267,7 @@ export default function DataBackupModal({ currentCharacterId, onDataImported }: 
     }
   };
 
-  // Handle Commit / Execute Import
+  // Execute Import
   const handleExecuteImport = async () => {
     if (!inspectionReport) return;
 
@@ -188,6 +284,7 @@ export default function DataBackupModal({ currentCharacterId, onDataImported }: 
 
       const result = await executeImport(inspectionReport, options);
       setImportResult(result);
+      setInspectionReport(null); // Close the options report popup on success
       if (result.success) {
         await refreshStats();
         if (onDataImported) onDataImported();
@@ -207,551 +304,480 @@ export default function DataBackupModal({ currentCharacterId, onDataImported }: 
   };
 
   return (
-    <div className="space-y-6 text-[#4a3e3d] font-serif">
-      {/* Overview & IndexedDB Storage Banner */}
-      <div className="rounded-2xl border border-[#f2d0d9] bg-gradient-to-br from-[#fff7f9] to-[#fcedf1]/60 p-4 shadow-xs">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="size-10 rounded-2xl bg-white border border-[#f2d0d9] flex items-center justify-center text-[#e07a93] shadow-xs shrink-0">
-              <Database className="size-5" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-sm font-bold text-[#732641]">本地 IndexedDB 高容量存储与数据安全</h3>
-                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#e07a93]/10 text-[#8a3854] border border-[#e07a93]/20">
-                  突破 5MB 限制 · 纯本地无云端
-                </span>
-              </div>
-              <p className="text-xs text-[#8c7377] mt-0.5">
-                所有对话记录、多版本回复与高情绪记忆均在浏览器本地 IndexedDB 存储，支持高容忍度独立分文件导入与导出。
-              </p>
-            </div>
-          </div>
+    <div className="w-full h-full min-h-[460px] bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-black border-r-black flex flex-col relative shadow-[2px_2px_0px_#000] text-black font-mono text-xs select-none">
+      
+      {/* Hidden File Input Picker for Floppy disk interaction */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept=".zip,.json,.docx,.txt"
+        className="hidden"
+      />
 
-          {/* Quick Storage Stats */}
-          <div className="flex items-center gap-2 self-stretch sm:self-auto bg-white/80 px-3 py-2 rounded-xl border border-[#f2d0d9] text-xs">
-            <div className="text-center px-2">
-              <div className="text-[10px] text-[#998380]">角色档案</div>
-              <div className="font-bold text-[#732641]">{stats.loading ? '...' : stats.charCount}</div>
-            </div>
-            <div className="w-px h-6 bg-[#f2d0d9]" />
-            <div className="text-center px-2">
-              <div className="text-[10px] text-[#998380]">历史对话条数</div>
-              <div className="font-bold text-[#e07a93]">{stats.loading ? '...' : stats.msgCount}</div>
-            </div>
-            <div className="w-px h-6 bg-[#f2d0d9]" />
-            <div className="text-center px-2">
-              <div className="text-[10px] text-[#998380]">沉淀记忆</div>
-              <div className="font-bold text-[#5c4046]">{stats.loading ? '...' : stats.memoryCount}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Grid: Export Section vs Import Section */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {/* ========================================================================= */}
-        {/* 1. EXPORT SECTION */}
-        {/* ========================================================================= */}
-        <div className="space-y-4 rounded-2xl border border-[#f2d0d9] bg-white p-4.5 shadow-xs flex flex-col justify-between">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between border-b border-[#f5dce3] pb-2.5">
-              <div className="flex items-center gap-2">
-                <FileArchive className="size-4 text-[#e07a93]" />
-                <h4 className="text-xs font-bold text-[#732641] tracking-wide">数据导出 · 分文件安全打包</h4>
-              </div>
-              <span className="text-[11px] text-[#998380]">自动脱敏 API Key</span>
-            </div>
-
-            {/* Primary Action: Full Modular ZIP Backup */}
-            <div className="p-3.5 rounded-xl border border-[#f5dce3] bg-[#fffafb] space-y-2.5">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="text-xs font-bold text-[#4a3e3d] flex items-center gap-1.5">
-                    <span>全量分文件 ZIP 完整备份包</span>
-                    <Sparkles className="size-3.5 text-[#e07a93]" />
-                  </div>
-                  <p className="text-[11px] text-[#8c7377] mt-0.5 leading-relaxed">
-                    严格分文件打包所有角色（<code>characters/*.json</code>）、全部对话（<code>chats/*.json</code>）、记忆沉淀（<code>memories/*.json</code>）及提示词预设方案。杜绝单 JSON 大包坏块风险。
-                  </p>
-                </div>
-              </div>
-
-              <button
-                onClick={handleExportFullZip}
-                disabled={exportingZip}
-                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-[#e07a93] to-[#d66580] hover:from-[#d66580] hover:to-[#c4536e] active:scale-[0.99] text-white text-xs font-bold shadow-md shadow-[#e07a93]/20 flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50"
-              >
-                {exportingZip ? (
-                  <>
-                    <RefreshCw className="size-3.5 animate-spin" />
-                    <span>正在打包分文件数据...</span>
-                  </>
-                ) : (
-                  <>
-                    <Download className="size-3.5" />
-                    <span>导出全量 ZIP 备份包（推荐）</span>
-                  </>
-                )}
-              </button>
-
-              {exportSuccessMsg && (
-                <div className="flex items-center gap-1.5 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-lg animate-in fade-in-0">
-                  <CheckCircle2 className="size-3.5 shrink-0" />
-                  <span>{exportSuccessMsg}</span>
-                </div>
-              )}
-            </div>
-
-            {/* Secondary Granular Export Actions */}
-            <div className="space-y-2 pt-1">
-              <div className="text-[11px] font-semibold text-[#8a3854]">或导出指定单项数据：</div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                {/* Export All Characters Chats */}
-                <button
-                  onClick={() => exportAllCharactersChatsToJson()}
-                  className="p-2.5 text-left rounded-xl border border-[#f2d0d9] bg-white hover:bg-[#fcedf1]/60 hover:border-[#e07a93] transition-all flex items-center justify-between group cursor-pointer"
-                >
-                  <div className="truncate">
-                    <div className="font-semibold text-[#4a3e3d] group-hover:text-[#8a3854] truncate flex items-center gap-1">
-                      <span>全部角色聊天记录</span>
-                      <Sparkles className="size-3 text-[#e07a93]" />
-                    </div>
-                    <div className="text-[10px] text-[#998380]">一键导出所有角色全部历史对话</div>
-                  </div>
-                  <Download className="size-3.5 text-[#998380] group-hover:text-[#e07a93] shrink-0 ml-1" />
-                </button>
-
-                {/* Export Current Char Chat */}
-                <button
-                  onClick={() => exportCharacterChatToJson(currentChar.character_id, currentChar.name)}
-                  className="p-2.5 text-left rounded-xl border border-[#f2d0d9] bg-white hover:bg-[#fcedf1]/60 hover:border-[#e07a93] transition-all flex items-center justify-between group cursor-pointer"
-                >
-                  <div className="truncate">
-                    <div className="font-semibold text-[#4a3e3d] group-hover:text-[#8a3854] truncate">
-                      「{currentChar.name}」单人聊天
-                    </div>
-                    <div className="text-[10px] text-[#998380]">仅导出当前角色历史与分支</div>
-                  </div>
-                  <Download className="size-3.5 text-[#998380] group-hover:text-[#e07a93] shrink-0 ml-1" />
-                </button>
-
-                {/* Export Current Char Card */}
-                <button
-                  onClick={() => exportSingleCharacterCard(currentChar)}
-                  className="p-2.5 text-left rounded-xl border border-[#f2d0d9] bg-white hover:bg-[#fcedf1]/60 hover:border-[#e07a93] transition-all flex items-center justify-between group cursor-pointer"
-                >
-                  <div className="truncate">
-                    <div className="font-semibold text-[#4a3e3d] group-hover:text-[#8a3854] truncate">
-                      「{currentChar.name}」人设卡
-                    </div>
-                    <div className="text-[10px] text-[#998380]">核心档案与外观配置</div>
-                  </div>
-                  <Download className="size-3.5 text-[#998380] group-hover:text-[#e07a93] shrink-0 ml-1" />
-                </button>
-
-                {/* Export Prompt Presets */}
-                <button
-                  onClick={() => exportPromptPresetsToJson()}
-                  className="p-2.5 text-left rounded-xl border border-[#f2d0d9] bg-white hover:bg-[#fcedf1]/60 hover:border-[#e07a93] transition-all flex items-center justify-between group cursor-pointer"
-                >
-                  <div className="truncate">
-                    <div className="font-semibold text-[#4a3e3d] group-hover:text-[#8a3854] truncate">
-                      提示词方案预设库
-                    </div>
-                    <div className="text-[10px] text-[#998380]">全部自定义预设方案</div>
-                  </div>
-                  <Download className="size-3.5 text-[#998380] group-hover:text-[#e07a93] shrink-0 ml-1" />
-                </button>
-
-                {/* Export System Settings */}
-                <button
-                  onClick={() => exportSettingsToJson()}
-                  className="p-2.5 text-left rounded-xl border border-[#f2d0d9] bg-white hover:bg-[#fcedf1]/60 hover:border-[#e07a93] transition-all flex items-center justify-between group cursor-pointer"
-                >
-                  <div className="truncate">
-                    <div className="font-semibold text-[#4a3e3d] group-hover:text-[#8a3854] truncate">
-                      全局人设与拦截词典
-                    </div>
-                    <div className="text-[10px] text-[#998380]">脱敏系统规则包</div>
-                  </div>
-                  <Download className="size-3.5 text-[#998380] group-hover:text-[#e07a93] shrink-0 ml-1" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className="pt-2 text-[10px] text-[#998380] flex items-center gap-1.5 border-t border-[#f5dce3]/60">
-            <ShieldCheck className="size-3.5 text-emerald-600 shrink-0" />
-            <span>导出格式为标规范化 JSON / ZIP，换电脑或清缓存随时无损导回。</span>
-          </div>
-        </div>
-
-        {/* ========================================================================= */}
-        {/* 2. IMPORT SECTION */}
-        {/* ========================================================================= */}
-        <div className="space-y-4 rounded-2xl border border-[#f2d0d9] bg-white p-4.5 shadow-xs flex flex-col justify-between">
-          <div className="space-y-3">
-            <div className="flex items-center justify-between border-b border-[#f5dce3] pb-2.5">
-              <div className="flex items-center gap-2">
-                <Upload className="size-4 text-[#e07a93]" />
-                <h4 className="text-xs font-bold text-[#732641] tracking-wide">数据导入 · 高容忍度解析</h4>
-              </div>
-              <span className="text-[11px] text-[#998380]">支持 .zip / .json / .docx / .txt</span>
-            </div>
-
-            {/* File Drag & Drop Target */}
-            <input
-              type="file"
-              ref={fileInputRef}
-              onChange={handleFileChange}
-              accept=".zip,.json,.docx,.txt"
-              className="hidden"
-            />
-
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={handleDrop}
-              className="border-2 border-dashed border-[#f2d0d9] hover:border-[#e07a93] bg-[#fffafb] hover:bg-[#fff5f7] rounded-2xl p-4 sm:p-5 text-center cursor-pointer transition-all group select-none"
-            >
-              <div className="size-10 rounded-full bg-[#fcedf1] group-hover:bg-[#fbdde4] text-[#e07a93] flex items-center justify-center mx-auto mb-2 transition-colors">
-                <Upload className="size-5" />
-              </div>
-              <div className="text-xs font-bold text-[#4a3e3d] group-hover:text-[#8a3854]">
-                点击选择文件 或 拖拽文件至此区域
-              </div>
-              <p className="text-[11px] text-[#998380] mt-1 leading-relaxed">
-                全量备份 ZIP、单角色聊天 JSON、手改角色卡 JSON / DOCX 均可自动识别与容错修复
-              </p>
-            </div>
-
-            {inspecting && (
-              <div className="p-3 bg-[#fcedf1]/60 rounded-xl border border-[#f2d0d9] flex items-center justify-center gap-2 text-xs text-[#8a3854]">
-                <RefreshCw className="size-3.5 animate-spin" />
-                <span>正在执行多层结构深度预检与字段自愈识别...</span>
-              </div>
-            )}
-          </div>
-
-          <div className="pt-2 text-[10px] text-[#998380] flex items-center gap-1.5 border-t border-[#f5dce3]/60">
-            <Info className="size-3.5 text-[#e07a93] shrink-0" />
-            <span>智能容错引擎：即使修改了字段名或格式不规范，系统也会全力抢救接住，不漏数据。</span>
-          </div>
-        </div>
-      </div>
-
-      {/* ========================================================================= */}
-      {/* 3. DRY-RUN INSPECTION REPORT & EXECUTION PANEL */}
-      {/* ========================================================================= */}
-      {inspectionReport && (
-        <div className="rounded-2xl border-2 border-[#e07a93] bg-white p-5 shadow-lg space-y-4 animate-in fade-in-0 slide-in-from-bottom-2">
-          {/* Inspection Header */}
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-[#f2d0d9] pb-3">
-            <div className="flex items-center gap-2">
-              <LinePuppyMascot size={24} variant="sparkle" />
-              <div>
-                <div className="text-xs font-bold text-[#732641]">
-                  预检就绪：{inspectionReport.fileName} ({(inspectionReport.fileSize / 1024).toFixed(1)} KB)
-                </div>
-                <div className="text-[11px] text-[#8c7377]">
-                  预检发现：{inspectionReport.totalCharacters} 位角色 · {inspectionReport.totalMessages} 条对话记录 · {inspectionReport.totalMemories} 条动态记忆
-                </div>
-              </div>
-            </div>
-
-            <button
-              onClick={() => setInspectionReport(null)}
-              className="text-[#998380] hover:text-[#4a3e3d] text-xs px-2 py-1 rounded-lg hover:bg-gray-100 transition-colors"
-            >
-              取消
-            </button>
-          </div>
-
-          {/* Auto Repairs & Non-fatal Warning Notices */}
-          {inspectionReport.autoRepairs.length > 0 && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3 space-y-1 text-xs">
-              <div className="font-bold text-amber-800 flex items-center gap-1.5">
-                <Sparkles className="size-3.5 text-amber-600 shrink-0" />
-                <span>智能容错引擎自动适配与修复：</span>
-              </div>
-              <ul className="list-disc list-inside text-[11px] text-amber-900/80 space-y-0.5">
-                {inspectionReport.autoRepairs.map((r, idx) => (
-                  <li key={idx}>
-                    <span className="font-medium text-amber-950">[{r.target}]</span>: {r.action}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Isolated Non-Fatal Errors */}
-          {inspectionReport.errors.length > 0 && (
-            <div className="rounded-xl border border-red-200 bg-red-50/70 p-3 space-y-1 text-xs">
-              <div className="font-bold text-red-800 flex items-center gap-1.5">
-                <AlertTriangle className="size-3.5 text-red-600 shrink-0" />
-                <span>坏块隔离提示（以下损坏内容已自动跳过，不影响正常数据导入）：</span>
-              </div>
-              <ul className="list-disc list-inside text-[11px] text-red-900/80 space-y-0.5">
-                {inspectionReport.errors.map((e, idx) => (
-                  <li key={idx}>
-                    {e.file && <span className="font-medium text-red-950">[{e.file}]: </span>}
-                    {e.message}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {/* Import Scope Options */}
-          <div className="space-y-3 pt-1">
-            <div className="text-xs font-bold text-[#4a3e3d]">选择导入模式与内容：</div>
-
-            {/* Mode: Merge vs Overwrite */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              <label
-                className={`p-3 rounded-xl border-2 cursor-pointer transition-all flex items-start gap-2.5 ${
-                  importMode === 'merge'
-                    ? 'border-[#e07a93] bg-[#fff5f7]'
-                    : 'border-[#f2d0d9] bg-white hover:bg-gray-50'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="importMode"
-                  checked={importMode === 'merge'}
-                  onChange={() => setImportMode('merge')}
-                  className="mt-0.5 text-[#e07a93] focus:ring-[#e07a93]"
-                />
-                <div>
-                  <div className="font-bold text-[#732641]">增量合并并去重（推荐）</div>
-                  <div className="text-[11px] text-[#8c7377] mt-0.5">
-                    保留当前已有记录，仅将新导入的聊天消息和记忆追加并按时序排列，避免丢失既有对话。
-                  </div>
-                </div>
-              </label>
-
-              <label
-                className={`p-3 rounded-xl border-2 cursor-pointer transition-all flex items-start gap-2.5 ${
-                  importMode === 'overwrite'
-                    ? 'border-[#e07a93] bg-[#fff5f7]'
-                    : 'border-[#f2d0d9] bg-white hover:bg-gray-50'
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="importMode"
-                  checked={importMode === 'overwrite'}
-                  onChange={() => setImportMode('overwrite')}
-                  className="mt-0.5 text-[#e07a93] focus:ring-[#e07a93]"
-                />
-                <div>
-                  <div className="font-bold text-[#732641]">完全覆盖替换</div>
-                  <div className="text-[11px] text-[#8c7377] mt-0.5">
-                    用导入文件中的记录完全替换当前角色会话状态。
-                  </div>
-                </div>
-              </label>
-            </div>
-
-            {/* Item Checkboxes */}
-            <div className="flex flex-wrap gap-4 pt-1 text-xs">
-              <label className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={importChars}
-                  onChange={(e) => setImportChars(e.target.checked)}
-                  className="rounded text-[#e07a93] focus:ring-[#e07a93]"
-                />
-                <span className="font-medium text-[#4a3e3d]">角色档案 ({inspectionReport.totalCharacters})</span>
-              </label>
-
-              <label className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={importChats}
-                  onChange={(e) => setImportChats(e.target.checked)}
-                  className="rounded text-[#e07a93] focus:ring-[#e07a93]"
-                />
-                <span className="font-medium text-[#4a3e3d]">对话聊天记录 ({inspectionReport.totalMessages} 条)</span>
-              </label>
-
-              <label className="flex items-center gap-1.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={importMemories}
-                  onChange={(e) => setImportMemories(e.target.checked)}
-                  className="rounded text-[#e07a93] focus:ring-[#e07a93]"
-                />
-                <span className="font-medium text-[#4a3e3d]">动态沉淀记忆 ({inspectionReport.totalMemories})</span>
-              </label>
-
-              {inspectionReport.settings && (
-                <label className="flex items-center gap-1.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={importSettings}
-                    onChange={(e) => setImportSettings(e.target.checked)}
-                    className="rounded text-[#e07a93] focus:ring-[#e07a93]"
-                  />
-                  <span className="font-medium text-[#4a3e3d]">提示词预设方案与系统规则</span>
-                </label>
-              )}
-            </div>
-
-            {/* Granular Character Selective Checkboxes if multiple characters or single character chat */}
-            {(inspectionReport.characters.length > 0 || inspectionReport.chats.length > 0) && (
-              <div className="p-3 bg-[#fffafb] rounded-xl border border-[#f5dce3] space-y-2">
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="font-bold text-[#732641]">选择需要导入的角色及聊天范围：</span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const allIds = new Set<string>();
-                        inspectionReport.characters.forEach((c) => allIds.add(c.character.character_id));
-                        inspectionReport.chats.forEach((c) => allIds.add(c.characterId));
-                        setSelectedCharIds(Array.from(allIds));
-                      }}
-                      className="text-[#e07a93] hover:underline cursor-pointer"
-                    >
-                      全选
-                    </button>
-                    <span className="text-gray-300">|</span>
-                    <button
-                      type="button"
-                      onClick={() => setSelectedCharIds([])}
-                      className="text-[#998380] hover:underline cursor-pointer"
-                    >
-                      清空
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2">
-                  {(() => {
-                    const charItemsMap = new Map<string, { id: string; name: string; msgs: number; hasCard: boolean }>();
-                    inspectionReport.characters.forEach((c) => {
-                      charItemsMap.set(c.character.character_id, {
-                        id: c.character.character_id,
-                        name: c.character.name,
-                        msgs: 0,
-                        hasCard: true,
-                      });
-                    });
-                    inspectionReport.chats.forEach((ch) => {
-                      const prev = charItemsMap.get(ch.characterId);
-                      if (prev) {
-                        prev.msgs += ch.messages.length;
-                      } else {
-                        charItemsMap.set(ch.characterId, {
-                          id: ch.characterId,
-                          name: ch.characterName,
-                          msgs: ch.messages.length,
-                          hasCard: false,
-                        });
-                      }
-                    });
-
-                    return Array.from(charItemsMap.values()).map((item) => {
-                      const isSelected = selectedCharIds.includes(item.id);
-                      return (
-                        <label
-                          key={item.id}
-                          className={`p-2 rounded-lg border text-xs flex items-center justify-between cursor-pointer transition-all ${
-                            isSelected
-                              ? 'border-[#e07a93] bg-[#fff0f4] text-[#732641] font-semibold shadow-2xs'
-                              : 'border-[#f2d0d9] bg-white text-[#786b6a] hover:bg-gray-50'
-                          }`}
-                        >
-                          <div className="flex items-center gap-2 truncate">
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={(e) => {
-                                if (e.target.checked) {
-                                  setSelectedCharIds((prev) => [...prev, item.id]);
-                                } else {
-                                  setSelectedCharIds((prev) => prev.filter((id) => id !== item.id));
-                                }
-                              }}
-                              className="rounded text-[#e07a93] focus:ring-[#e07a93]"
-                            />
-                            <span className="truncate">「{item.name}」</span>
-                          </div>
-                          {item.msgs > 0 && (
-                            <span className="text-[10px] text-[#e07a93] px-1.5 py-0.5 rounded bg-white border border-[#f5dce3] shrink-0">
-                              {item.msgs} 条
-                            </span>
-                          )}
-                        </label>
-                      );
-                    });
-                  })()}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Action Commit Button */}
-          <div className="pt-2 flex items-center justify-end gap-3 border-t border-[#f2d0d9]">
-            <button
-              onClick={() => setInspectionReport(null)}
-              className="px-4 py-2 rounded-xl text-xs text-[#998380] hover:text-[#4a3e3d] hover:bg-gray-100 transition-colors"
-            >
-              放弃导入
-            </button>
-
-            <button
-              onClick={handleExecuteImport}
-              disabled={executing}
-              className="py-2.5 px-6 rounded-xl bg-gradient-to-r from-[#e07a93] to-[#d66580] hover:from-[#d66580] hover:to-[#c4536e] active:scale-95 text-white text-xs font-bold shadow-md shadow-[#e07a93]/30 flex items-center gap-2 cursor-pointer transition-all disabled:opacity-50"
-            >
-              {executing ? (
-                <>
-                  <RefreshCw className="size-3.5 animate-spin" />
-                  <span>正在安全写入 IndexedDB...</span>
-                </>
-              ) : (
-                <>
-                  <Check className="size-3.5" />
-                  <span>确认执行导入并恢复数据</span>
-                </>
-              )}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* 4. IMPORT COMPLETION BANNER */}
-      {/* ========================================================================= */}
-      {importResult && (
-        <div
-          className={`rounded-2xl border p-4 text-xs animate-in fade-in-0 flex items-start gap-3 ${
-            importResult.success
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-              : 'border-red-200 bg-red-50 text-red-900'
-          }`}
+      {/* Title Bar */}
+      <div className="h-7 bg-white border-b border-black flex items-center justify-between px-2 select-none shrink-0">
+        <div 
+          onDoubleClick={onClose}
+          className="w-4 h-4 bg-[#c0c0c0] border border-black flex items-center justify-center shrink-0 cursor-pointer"
+          title="控制菜单 (双击关闭)"
         >
-          {importResult.success ? (
-            <CheckCircle2 className="size-5 text-emerald-600 shrink-0 mt-0.5" />
-          ) : (
-            <AlertTriangle className="size-5 text-red-600 shrink-0 mt-0.5" />
-          )}
-          <div className="space-y-1 flex-1">
-            <div className="font-bold text-sm">{importResult.success ? '数据导入恢复成功！' : '导入未完全成功'}</div>
-            <p className="leading-relaxed">{importResult.message}</p>
-          </div>
-          <button
-            onClick={() => setImportResult(null)}
-            className="text-gray-400 hover:text-gray-600 p-1"
+          <div className="w-2.5 h-1 bg-black" />
+        </div>
+        
+        <span className="flex-1 text-center font-extrabold text-black tracking-widest text-[13px] sm:text-[14.5px] font-sans">
+          Backup
+        </span>
+        
+        {/* Close button (叉掉按钮) */}
+        <div 
+          onClick={onClose}
+          className="w-4 h-4 bg-[#c0c0c0] border border-black flex items-center justify-center text-[10px] font-bold shrink-0 hover:bg-red-600 hover:text-white active:bg-black active:text-white cursor-pointer select-none"
+          title="关闭"
+        >
+          ✕
+        </div>
+      </div>
+
+      {/* Window Menu Bar (Underlined hotkeys) */}
+      <div className="h-6 bg-[#c0c0c0] border-b border-black px-3.5 flex items-center gap-5 text-[12px] sm:text-[13.5px] font-sans font-bold text-black shrink-0">
+        <span className="cursor-default"><span className="underline">F</span>ile</span>
+        <span className="cursor-default"><span className="underline">O</span>ptions</span>
+        <span className="cursor-default"><span className="underline">W</span>indow</span>
+        <span className="cursor-default"><span className="underline">H</span>elp</span>
+      </div>
+
+      {/* Client Area (Pure solid white background, thick retro frame inset) */}
+      <div className="flex-1 p-5 bg-white border-2 border-t-black border-l-black border-b-white border-r-white m-1.5 overflow-y-auto">
+        
+        {/* Retro Desktop-like Desktop Icon Grid - 4 or more columns horizontally and vertically */}
+        <div className="grid grid-cols-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-y-8 gap-x-3 text-center justify-items-center">
+          
+          {/* Icon 1: Export Full ZIP */}
+          <div 
+            onDoubleClick={handleExportFullZip}
+            onClick={handleExportFullZip}
+            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            title="双击或点击打包导出系统全量备份"
           >
-            <X className="size-4" />
-          </button>
+            <div className="w-16 h-16 flex items-center justify-center animate-none">
+              <FileCabinetIcon />
+            </div>
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2">
+              打包备份.ZIP
+            </span>
+          </div>
+
+          {/* Icon 2: Export All Chats */}
+          <div 
+            onDoubleClick={exportAllCharactersChatsToJson}
+            onClick={exportAllCharactersChatsToJson}
+            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            title="双击或点击导出全部历史对话"
+          >
+            <div className="w-16 h-16 flex items-center justify-center animate-none">
+              <ChatsFolderIcon />
+            </div>
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2">
+              全部对话.JSON
+            </span>
+          </div>
+
+          {/* Icon 3: Export Current Character Card */}
+          <div 
+            onDoubleClick={() => exportSingleCharacterCard(currentChar)}
+            onClick={() => exportSingleCharacterCard(currentChar)}
+            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            title={`导出当前角色 [${currentChar.name}] 人设档案`}
+          >
+            <div className="w-16 h-16 flex items-center justify-center animate-none">
+              <CardsExportIcon />
+            </div>
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2 truncate">
+              {currentChar.name}档案.JSON
+            </span>
+          </div>
+
+          {/* Icon 4: Export Prompt Presets */}
+          <div 
+            onDoubleClick={exportPromptPresetsToJson}
+            onClick={exportPromptPresetsToJson}
+            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            title="双击或点击导出自定义提示词方案"
+          >
+            <div className="w-16 h-16 flex items-center justify-center animate-none">
+              <PromptPresetsIcon />
+            </div>
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2">
+              提示预设.JSON
+            </span>
+          </div>
+
+          {/* Icon 5: Export System Settings */}
+          <div 
+            onDoubleClick={exportSettingsToJson}
+            onClick={exportSettingsToJson}
+            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            title="双击或点击导出系统规则与拦截设置"
+          >
+            <div className="w-16 h-16 flex items-center justify-center animate-none">
+              <ControlPanelIcon />
+            </div>
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2">
+              系统规则.JSON
+            </span>
+          </div>
+
+          {/* Icon 6: Floppy Disk - Import Restore */}
+          <div 
+            onDoubleClick={() => fileInputRef.current?.click()}
+            onClick={() => fileInputRef.current?.click()}
+            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            title="双击或点击选择文件恢复本地数据库"
+          >
+            <div className="w-16 h-16 flex items-center justify-center animate-none">
+              <FloppyDiskIcon />
+            </div>
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2">
+              数据恢复.ZIP
+            </span>
+          </div>
+
+          {/* Icon 7: Storage stats (Printer) */}
+          <div 
+            onDoubleClick={() => setShowStatsModal(true)}
+            onClick={() => setShowStatsModal(true)}
+            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            title="双击或点击查看本地数据库存容量"
+          >
+            <div className="w-16 h-16 flex items-center justify-center animate-none">
+              <PrinterIcon />
+            </div>
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2">
+              存储统计
+            </span>
+          </div>
+
+        </div>
+
+        {/* Quick instructions inside white pane */}
+        <div className="mt-10 pt-4 text-[10px] text-gray-500 space-y-1">
+          <div>• 双击或点击上方图标执行对应备份/恢复操作。支持一排展示 4 个及以上图标的微调布局。</div>
+          <div>• 本地数据存储于浏览器沙盒，导出可多份独立备份并随时通过 [数据恢复] 导回。</div>
+        </div>
+      </div>
+
+      {/* Hidden Loading/Inspecting State Banner */}
+      {inspecting && (
+        <div className="absolute inset-x-2 bottom-2 bg-yellow-100 border border-black p-2 text-[10.5px] text-black shadow-md z-40 flex items-center gap-2">
+          <span>⌛ 正在对所选备份文件进行多层数据校验与自愈预检...</span>
         </div>
       )}
+
+      {/* Hidden Exporting State Banner */}
+      {exportingZip && (
+        <div className="absolute inset-x-2 bottom-2 bg-yellow-100 border border-black p-2 text-[10.5px] text-black shadow-md z-40 flex items-center gap-2 animate-pulse">
+          <span>⌛ 正在进行本地 IndexedDB 分卷提取并合并压缩，请稍候...</span>
+        </div>
+      )}
+
+      {/* Export Success Alerts */}
+      {exportSuccessMsg && (
+        <div className="absolute inset-x-2 bottom-2 bg-emerald-100 border border-black p-2 text-[10.5px] text-emerald-900 shadow-md z-40 flex items-center justify-between">
+          <span>✓ {exportSuccessMsg}</span>
+          <button onClick={() => setExportSuccessMsg(null)} className="font-bold underline text-[9px] cursor-pointer">确定</button>
+        </div>
+      )}
+
+      {/* ==================== MODAL DIALOG: STORAGE STATISTICS ==================== */}
+      {showStatsModal && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="w-80 bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-black border-r-black p-1 shadow-lg text-black font-mono">
+            {/* Modal Title Bar - NO MINUS BUTTONS */}
+            <div className="h-5 bg-[#0000a8] text-white px-2 font-bold text-xs flex items-center justify-between">
+              <span>存储属性</span>
+              <button 
+                onClick={() => setShowStatsModal(false)}
+                className="w-3.5 h-3.5 bg-[#c0c0c0] text-black border border-black flex items-center justify-center text-[8px] font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            
+            {/* Dialog Client Area */}
+            <div className="p-3 bg-[#c0c0c0] text-[11px] space-y-2">
+              <div className="bg-white p-2 border-2 border-t-black border-l-black border-b-white border-r-white space-y-1.5">
+                <div className="font-bold text-gray-700 pb-1 border-b border-gray-200">本地 IndexedDB 统计:</div>
+                <div className="flex justify-between">
+                  <span>角色档案数:</span>
+                  <span className="font-bold">{stats.loading ? '...' : stats.charCount} 位</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>对话消息数:</span>
+                  <span className="font-bold">{stats.loading ? '...' : stats.msgCount} 条</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>多版高情绪记忆:</span>
+                  <span className="font-bold">{stats.loading ? '...' : stats.memoryCount} 条</span>
+                </div>
+              </div>
+
+              <div className="text-[9.5px] text-gray-600 leading-tight">
+                * 本地存储已开启 IndexDb 扩容引擎，免除 localStorage 5MB 限制，纯本地安全运行。
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex justify-end pt-1">
+                <button 
+                  onClick={() => setShowStatsModal(false)}
+                  className="px-4 py-1 bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-black border-r-black active:border-t-black active:border-l-black active:border-b-white active:border-r-white text-xs font-bold font-mono shadow-[1px_1px_0px_#000] cursor-pointer"
+                >
+                  确定
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL DIALOG: INSPECTION & IMPORT OPTIONS ==================== */}
+      {inspectionReport && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 overflow-y-auto">
+          <div className="w-full max-w-lg bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-black border-r-black p-1 shadow-lg text-black font-mono">
+            {/* Modal Title Bar - NO MINUS BUTTON AS DIRECTED */}
+            <div className="h-5 bg-[#0000a8] text-white px-2 font-bold text-xs flex items-center justify-between">
+              <span>恢复数据包设置</span>
+              <button 
+                onClick={() => setInspectionReport(null)}
+                className="w-3.5 h-3.5 bg-[#c0c0c0] text-black border border-black flex items-center justify-center text-[8px] font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Dialog Contents */}
+            <div className="p-3 space-y-3 text-[11px]">
+              
+              {/* Inspection report summary */}
+              <div className="bg-white p-2.5 border-2 border-t-black border-l-black border-b-white border-r-white space-y-1.5">
+                <div className="font-bold text-[#0000a8]">数据预检成功: {inspectionReport.fileName}</div>
+                <div>文件尺寸: {(inspectionReport.fileSize / 1024).toFixed(1)} KB</div>
+                <div>预检测得: <b>{inspectionReport.totalCharacters}</b> 位角色 · <b>{inspectionReport.totalMessages}</b> 条对话 · <b>{inspectionReport.totalMemories}</b> 条动态记忆</div>
+              </div>
+
+              {/* Warnings and Auto-repairs if any */}
+              {inspectionReport.autoRepairs.length > 0 && (
+                <div className="bg-white p-2 border-2 border-t-black border-l-black border-b-white border-r-white text-amber-900 text-[10px] max-h-20 overflow-y-auto space-y-0.5">
+                  <div className="font-bold text-amber-800">✓ 智能容错：</div>
+                  {inspectionReport.autoRepairs.map((r, idx) => (
+                    <div key={idx}>[{r.target}]: {r.action}</div>
+                  ))}
+                </div>
+              )}
+
+              {/* Form Option: Mode Merge vs Overwrite */}
+              <div className="space-y-1.5">
+                <div className="font-bold">选择数据注入模式:</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label className="flex items-start gap-2 bg-white p-2 border-2 border-t-black border-l-black border-b-white border-r-white cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="importMode" 
+                      checked={importMode === 'merge'} 
+                      onChange={() => setImportMode('merge')} 
+                      className="mt-0.5"
+                    />
+                    <div>
+                      <div className="font-bold text-[#0000a8]">追加合并 (推荐)</div>
+                      <div className="text-[10px] text-gray-500">保留本地记录，仅增量安全合并</div>
+                    </div>
+                  </label>
+
+                  <label className="flex items-start gap-2 bg-white p-2 border-2 border-t-black border-l-black border-b-white border-r-white cursor-pointer">
+                    <input 
+                      type="radio" 
+                      name="importMode" 
+                      checked={importMode === 'overwrite'} 
+                      onChange={() => setImportMode('overwrite')} 
+                      className="mt-0.5"
+                    />
+                    <div>
+                      <div className="font-bold text-red-700">完全覆盖替换</div>
+                      <div className="text-[10px] text-gray-500">清空当前角色原记录并完全覆写</div>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
+              {/* Form Checkboxes for modules */}
+              <div className="space-y-1">
+                <div className="font-bold">选择需要恢复的模块:</div>
+                <div className="flex flex-wrap gap-x-4 gap-y-1 bg-white p-2 border-2 border-t-black border-l-black border-b-white border-r-white">
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" checked={importChars} onChange={(e) => setImportChars(e.target.checked)} />
+                    <span>角色档案 ({inspectionReport.totalCharacters})</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" checked={importChats} onChange={(e) => setImportChats(e.target.checked)} />
+                    <span>对话条数 ({inspectionReport.totalMessages})</span>
+                  </label>
+                  <label className="flex items-center gap-1.5 cursor-pointer">
+                    <input type="checkbox" checked={importMemories} onChange={(e) => setImportMemories(e.target.checked)} />
+                    <span>动态记忆 ({inspectionReport.totalMemories})</span>
+                  </label>
+                  {inspectionReport.settings && (
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="checkbox" checked={importSettings} onChange={(e) => setImportSettings(e.target.checked)} />
+                      <span>系统配置方案</span>
+                    </label>
+                  )}
+                </div>
+              </div>
+
+              {/* Selective List Box of characters */}
+              {(inspectionReport.characters.length > 0 || inspectionReport.chats.length > 0) && (
+                <div className="space-y-1">
+                  <div className="flex justify-between items-center font-bold">
+                    <span>选择注入范围:</span>
+                    <div className="flex gap-2 text-[10px]">
+                      <button 
+                        type="button" 
+                        onClick={() => {
+                          const allIds = new Set<string>();
+                          inspectionReport.characters.forEach((c) => allIds.add(c.character.character_id));
+                          inspectionReport.chats.forEach((c) => allIds.add(c.characterId));
+                          setSelectedCharIds(Array.from(allIds));
+                        }}
+                        className="underline text-[#0000a8]"
+                      >
+                        全选
+                      </button>
+                      <span>|</span>
+                      <button 
+                        type="button" 
+                        onClick={() => setSelectedCharIds([])}
+                        className="underline text-gray-600"
+                      >
+                        清空
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Retro White Listbox */}
+                  <div className="bg-white border-2 border-t-black border-l-black border-b-white border-r-white p-1.5 max-h-24 overflow-y-auto space-y-1">
+                    {(() => {
+                      const charItemsMap = new Map<string, { id: string; name: string; msgs: number }>();
+                      inspectionReport.characters.forEach((c) => {
+                        charItemsMap.set(c.character.character_id, {
+                          id: c.character.character_id,
+                          name: c.character.name,
+                          msgs: 0,
+                        });
+                      });
+                      inspectionReport.chats.forEach((ch) => {
+                        const prev = charItemsMap.get(ch.characterId);
+                        if (prev) {
+                          prev.msgs += ch.messages.length;
+                        } else {
+                          charItemsMap.set(ch.characterId, {
+                            id: ch.characterId,
+                            name: ch.characterName,
+                            msgs: ch.messages.length,
+                          });
+                        }
+                      });
+
+                      return Array.from(charItemsMap.values()).map((item) => {
+                        const isSelected = selectedCharIds.includes(item.id);
+                        return (
+                          <label key={item.id} className="flex items-center justify-between text-[10.5px] cursor-pointer hover:bg-gray-100 px-1">
+                            <div className="flex items-center gap-1.5">
+                              <input 
+                                type="checkbox" 
+                                checked={isSelected} 
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedCharIds((prev) => [...prev, item.id]);
+                                  } else {
+                                    setSelectedCharIds((prev) => prev.filter((id) => id !== item.id));
+                                  }
+                                }}
+                              />
+                              <span>「{item.name}」</span>
+                            </div>
+                            {item.msgs > 0 && <span className="text-gray-500 text-[9px]">({item.msgs}条对话)</span>}
+                          </label>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* Action trigger buttons */}
+              <div className="flex items-center justify-end gap-3 pt-2 border-t border-gray-400">
+                <button
+                  type="button"
+                  onClick={() => setInspectionReport(null)}
+                  className="px-4 py-1.5 bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-black border-r-black active:border-t-black active:border-l-black active:border-b-white active:border-r-white"
+                >
+                  放弃
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExecuteImport}
+                  disabled={executing}
+                  className="px-5 py-1.5 bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-black border-r-black active:border-t-black active:border-l-black active:border-b-white active:border-r-white font-bold text-[#0000a8]"
+                >
+                  {executing ? '⌛ 正在注入...' : '确定恢复 (OK)'}
+                </button>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================== MODAL DIALOG: RESTORE RESULT REPORT ==================== */}
+      {importResult && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="w-80 bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-black border-r-black p-1 shadow-lg text-black font-mono">
+            {/* Title Bar */}
+            <div className="h-5 bg-[#0000a8] text-white px-2 font-bold text-xs flex items-center justify-between">
+              <span>恢复数据包结果</span>
+              <button 
+                onClick={() => setImportResult(null)}
+                className="w-3.5 h-3.5 bg-[#c0c0c0] text-black border border-black flex items-center justify-center text-[8px] font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            
+            {/* Report Content */}
+            <div className="p-3 space-y-2.5 text-[11px]">
+              <div className="bg-white p-2.5 border-2 border-t-black border-l-black border-b-white border-r-white space-y-1.5">
+                <div className={`font-bold ${importResult.success ? 'text-emerald-700' : 'text-red-700'}`}>
+                  {importResult.success ? '✓ 数据库恢复导入成功！' : '✕ 数据恢复失败'}
+                </div>
+                <div className="text-gray-700 leading-normal">
+                  {importResult.message}
+                </div>
+              </div>
+
+              {/* Close Button */}
+              <div className="flex justify-end">
+                <button 
+                  onClick={() => setImportResult(null)}
+                  className="px-4 py-1 bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-black border-r-black active:border-t-black active:border-l-black active:border-b-white active:border-r-white text-xs font-bold font-mono shadow-[1px_1px_0px_#000]"
+                >
+                  确定
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

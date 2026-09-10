@@ -1,13 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import './RetroComputer.css';
 import PersonaApp from './PersonaApp';
-import WallpaperApp from './WallpaperApp';
 import LlmApp from './LlmApp';
-import AmbienceApp from './AmbienceApp';
 import DictionaryApp from './DictionaryApp';
 import CssApp from './CssApp';
 import GameLobbyApp, { type GameLobbySubApp } from './GameLobbyApp';
 import DataBackupModal from '../DataBackupModal';
+import { idbLoadRetroMailsReadState, idbSaveRetroMailsReadState } from '../../lib/idb';
 import type { LlmConfig } from '../../lib/llm';
 import type { EmotionVector, Character } from '../../data/types';
 import type { GameInvitation } from '../../lib/gameStore';
@@ -132,6 +131,100 @@ const STUDENT_DB: StudentItem[] = [
   { id: 4, name: "Doe, J.", code: "未知", major: "未知", status: "未注册", remarks: "档案已被系统管理员标记删除。" }
 ];
 
+export interface DesktopAppMeta {
+  id: string;
+  name: string;
+  fullName: string;
+  icon: string;
+  colorClass: string;
+  isCore: boolean;
+  desc: string;
+}
+
+export const DESKTOP_APPS_META: Record<string, DesktopAppMeta> = {
+  mail: {
+    id: 'mail',
+    name: 'MAIL',
+    fullName: '电子邮件 (MAIL)',
+    icon: 'fa-solid fa-envelope',
+    colorClass: 'text-blue-300',
+    isCore: true,
+    desc: '电子邮件客户端',
+  },
+  files: {
+    id: 'files',
+    name: 'FILES',
+    fullName: '文件管理器 (FILES)',
+    icon: 'fa-solid fa-folder-open',
+    colorClass: 'text-amber-300',
+    isCore: true,
+    desc: '文件资源管理器',
+  },
+  web: {
+    id: 'web',
+    name: 'WEB',
+    fullName: '万维网导航 (WEB)',
+    icon: 'fa-solid fa-compass',
+    colorClass: 'text-teal-300',
+    isCore: true,
+    desc: '万维网导航浏览器',
+  },
+  game: {
+    id: 'game',
+    name: 'GAME',
+    fullName: '游戏大厅 (GAME)',
+    icon: 'fa-solid fa-gamepad',
+    colorClass: 'text-amber-300',
+    isCore: true,
+    desc: '游戏大厅 (单机像素跳跃/五子棋/捉鬼牌/抽卡)',
+  },
+  persona: {
+    id: 'persona',
+    name: 'PERSONA',
+    fullName: '人设档案 (PERSONA)',
+    icon: 'fa-solid fa-user-gear',
+    colorClass: 'text-orange-300',
+    isCore: false,
+    desc: '人设与立绘管理',
+  },
+  css: {
+    id: 'css',
+    name: 'CSS_STYLE',
+    fullName: '外观工坊 (CSS_STYLE)',
+    icon: 'fa-solid fa-palette',
+    colorClass: 'text-blue-300',
+    isCore: false,
+    desc: '外观与音效工坊 (视觉样式/壁纸背景/氛围白噪)',
+  },
+  llm: {
+    id: 'llm',
+    name: 'LLM_CONF',
+    fullName: '模型算力 (LLM)',
+    icon: 'fa-solid fa-microchip',
+    colorClass: 'text-emerald-300',
+    isCore: false,
+    desc: '大语言模型接口与算力',
+  },
+  dictionary: {
+    id: 'dictionary',
+    name: 'DICTIONARY',
+    fullName: '词典安全 (DICTIONARY)',
+    icon: 'fa-solid fa-shield-halved',
+    colorClass: 'text-purple-300',
+    isCore: false,
+    desc: '敏感词与激化词典',
+  },
+  backup: {
+    id: 'backup',
+    name: 'BACKUP',
+    fullName: '数据备份 (BACKUP)',
+    icon: 'fa-solid fa-database',
+    colorClass: 'text-pink-300',
+    isCore: false,
+    desc: '分文件数据备份与恢复',
+  },
+};
+
 export default function RetroComputer({
   onClose,
   onBgChange,
@@ -160,9 +253,259 @@ export default function RetroComputer({
   // Active Windows: null = desktop, 'mail' | 'files' | 'web' | 'game' | system tool ids
   const [activeApp, setActiveApp] = useState<string | null>(forceOpenApp || null);
 
-  // Mail state
+  // Desktop Apps state: Default strictly mail, files, web, game
+  const [desktopApps, setDesktopApps] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('retro_desktop_apps_v2');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+    return ['mail', 'files', 'web', 'game'];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('retro_desktop_apps_v2', JSON.stringify(desktopApps));
+    } catch (e) {}
+  }, [desktopApps]);
+
+  // Desktop edit / delete mode & toast notice
+  const [isEditMode, setIsEditMode] = useState<boolean>(false);
+  const [desktopNotice, setDesktopNotice] = useState<string | null>(null);
+
+  const showDesktopNotice = (msg: string) => {
+    setDesktopNotice(msg);
+    setTimeout(() => setDesktopNotice(null), 2500);
+  };
+
+  const addAppToDesktop = (appId: string) => {
+    if (!desktopApps.includes(appId)) {
+      setDesktopApps(prev => [...prev, appId]);
+      showDesktopNotice(`快捷方式 [${DESKTOP_APPS_META[appId]?.name || appId}] 已添加到桌面`);
+    }
+  };
+
+  const removeAppFromDesktop = (appId: string) => {
+    setDesktopApps(prev => prev.filter(id => id !== appId));
+    setIsEditMode(false);
+    showDesktopNotice(`已从桌面移除 [${DESKTOP_APPS_META[appId]?.name || appId}]`);
+  };
+
+  // Auto-dismiss edit mode timer: if no deletion occurs, all red crosses automatically disappear
+  const editModeAutoDismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (isEditMode) {
+      if (editModeAutoDismissTimerRef.current) clearTimeout(editModeAutoDismissTimerRef.current);
+      // Automatically dismiss all red crosses after 5 seconds if user does not delete
+      editModeAutoDismissTimerRef.current = setTimeout(() => {
+        setIsEditMode(false);
+      }, 5000);
+    } else {
+      if (editModeAutoDismissTimerRef.current) {
+        clearTimeout(editModeAutoDismissTimerRef.current);
+        editModeAutoDismissTimerRef.current = null;
+      }
+    }
+    return () => {
+      if (editModeAutoDismissTimerRef.current) {
+        clearTimeout(editModeAutoDismissTimerRef.current);
+      }
+    };
+  }, [isEditMode]);
+
+  // iOS-compatible Touch & Pointer Drag and Drop State
+  const [draggingAppId, setDraggingAppId] = useState<string | null>(null);
+  const [dragPosition, setDragPosition] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
+  const [isOverDesktop, setIsOverDesktop] = useState<boolean>(false);
+
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartPosRef = useRef<{ x: number; y: number; appId: string } | null>(null);
+  const isDraggingActiveRef = useRef<boolean>(false);
+
+  const handleItemTouchStart = (appId: string, clientX: number, clientY: number) => {
+    touchStartPosRef.current = { x: clientX, y: clientY, appId };
+    if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current);
+
+    longPressTimerRef.current = setTimeout(() => {
+      isDraggingActiveRef.current = true;
+      setDraggingAppId(appId);
+      setDragPosition({ x: clientX, y: clientY });
+      setIsOverDesktop(true);
+      if (navigator.vibrate) {
+        try { navigator.vibrate(35); } catch (_) {}
+      }
+    }, 320);
+  };
+
+  // Snappy, reliable long-press on desktop icons to enter delete/edit mode
+  const desktopIconPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const desktopIconTouchStartPosRef = useRef<{ x: number; y: number } | null>(null);
+  const isEditModeJustActivatedRef = useRef<boolean>(false);
+  const isTouchInteractionRef = useRef<boolean>(false);
+
+  const startDesktopIconLongPress = (clientX: number, clientY: number) => {
+    desktopIconTouchStartPosRef.current = { x: clientX, y: clientY };
+    if (desktopIconPressTimerRef.current) clearTimeout(desktopIconPressTimerRef.current);
+
+    desktopIconPressTimerRef.current = setTimeout(() => {
+      setIsEditMode(true);
+      isEditModeJustActivatedRef.current = true;
+      // Shield against synthetic release clicks for 700ms so releasing finger never dismisses edit mode!
+      setTimeout(() => {
+        isEditModeJustActivatedRef.current = false;
+      }, 700);
+
+      if (navigator.vibrate) {
+        try { navigator.vibrate(40); } catch (_) {}
+      }
+
+      showDesktopNotice('已进入管理模式: 点击红叉 [×] 可从桌面删除图标');
+    }, 300);
+  };
+
+  const cancelDesktopIconLongPress = () => {
+    if (desktopIconPressTimerRef.current) {
+      clearTimeout(desktopIconPressTimerRef.current);
+      desktopIconPressTimerRef.current = null;
+    }
+    desktopIconTouchStartPosRef.current = null;
+  };
+
+  // Global listeners for iOS touch and pointer dragging
+  useEffect(() => {
+    const handleMove = (e: TouchEvent | PointerEvent) => {
+      const clientX = 'touches' in e ? e.touches[0].clientX : (e as PointerEvent).clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : (e as PointerEvent).clientY;
+
+      if (touchStartPosRef.current && !isDraggingActiveRef.current) {
+        const dist = Math.hypot(clientX - touchStartPosRef.current.x, clientY - touchStartPosRef.current.y);
+        if (dist > 8) {
+          if (longPressTimerRef.current) {
+            clearTimeout(longPressTimerRef.current);
+            longPressTimerRef.current = null;
+          }
+        }
+      }
+
+      // If finger moves significantly on desktop icon, cancel long-press (allow 15px micro-jitter)
+      if (desktopIconTouchStartPosRef.current && !isEditMode) {
+        const dist = Math.hypot(clientX - desktopIconTouchStartPosRef.current.x, clientY - desktopIconTouchStartPosRef.current.y);
+        if (dist > 15) {
+          cancelDesktopIconLongPress();
+        }
+      }
+
+      if (isDraggingActiveRef.current) {
+        if (e.cancelable) e.preventDefault();
+        setDragPosition({ x: clientX, y: clientY });
+
+        const desktopEl = document.getElementById('desktop-icons-area') || document.getElementById('main-screen');
+        if (desktopEl) {
+          const rect = desktopEl.getBoundingClientRect();
+          const over = clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom;
+          setIsOverDesktop(over);
+        }
+      }
+    };
+
+    const handleUp = (e: TouchEvent | PointerEvent) => {
+      cancelDesktopIconLongPress();
+
+      if (longPressTimerRef.current) {
+        clearTimeout(longPressTimerRef.current);
+        longPressTimerRef.current = null;
+      }
+
+      if (isDraggingActiveRef.current && touchStartPosRef.current) {
+        const appId = touchStartPosRef.current.appId;
+        const clientX = 'changedTouches' in e ? e.changedTouches[0].clientX : (e as PointerEvent).clientX;
+        const clientY = 'changedTouches' in e ? e.changedTouches[0].clientY : (e as PointerEvent).clientY;
+
+        const desktopEl = document.getElementById('desktop-icons-area') || document.getElementById('main-screen');
+        let dropped = false;
+        if (desktopEl) {
+          const rect = desktopEl.getBoundingClientRect();
+          if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
+            dropped = true;
+          }
+        }
+
+        if (dropped && appId) {
+          addAppToDesktop(appId);
+          setIsStartMenuOpen(false);
+          setIsEditMode(false);
+        }
+
+        isDraggingActiveRef.current = false;
+        setDraggingAppId(null);
+        setIsOverDesktop(false);
+      }
+
+      touchStartPosRef.current = null;
+    };
+
+    window.addEventListener('touchmove', handleMove, { passive: false });
+    window.addEventListener('touchend', handleUp);
+    window.addEventListener('touchcancel', handleUp);
+    window.addEventListener('pointermove', handleMove);
+    window.addEventListener('pointerup', handleUp);
+    window.addEventListener('pointercancel', handleUp);
+
+    return () => {
+      window.removeEventListener('touchmove', handleMove);
+      window.removeEventListener('touchend', handleUp);
+      window.removeEventListener('touchcancel', handleUp);
+      window.removeEventListener('pointermove', handleMove);
+      window.removeEventListener('pointerup', handleUp);
+      window.removeEventListener('pointercancel', handleUp);
+    };
+  }, [desktopApps]);
+
+  // System bar & OS state
+  const [isStartMenuOpen, setIsStartMenuOpen] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+  const [currentTime, setCurrentTime] = useState<string>(() => {
+    const now = new Date();
+    return now.toTimeString().slice(0, 5);
+  });
+
+  // Real-time clock update
+  useEffect(() => {
+    const timer = setInterval(() => {
+      const now = new Date();
+      setCurrentTime(now.toTimeString().slice(0, 5));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  // Mail state with persistent read status via IndexedDB
   const [mails, setMails] = useState<MailItem[]>(INITIAL_MAILS);
   const [readingMailId, setReadingMailId] = useState<number | null>(null);
+
+  // Load persistent mail read status from IndexedDB on mount
+  useEffect(() => {
+    let active = true;
+    idbLoadRetroMailsReadState().then(readIds => {
+      if (!active || !readIds || readIds.length === 0) return;
+      const readSet = new Set<number>(readIds);
+      setMails(prev =>
+        prev.map(m => ({
+          ...m,
+          unread: readSet.has(m.id) ? false : m.unread,
+        }))
+      );
+    }).catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Files state
   const [activeFile, setActiveFile] = useState<FileItem | null>(null);
@@ -170,19 +513,6 @@ export default function RetroComputer({
   // Web state
   const [webPage, setWebPage] = useState<'directory' | 'detail'>('directory');
   const [selectedStudent, setSelectedStudent] = useState<StudentItem | null>(null);
-
-  // Game state
-  const [gameScore, setGameScore] = useState(0);
-  const [isPlayingGame, setIsPlayingGame] = useState(false);
-  const [isGameJumping, setIsGameJumping] = useState(false);
-  const [gameOverlayTitle, setGameOverlayTitle] = useState('PIXEL JUMPER');
-  const [showGameOverlay, setShowGameOverlay] = useState(true);
-
-  // Refs for game elements
-  const playerRef = useRef<HTMLDivElement>(null);
-  const obstacleRef = useRef<HTMLDivElement>(null);
-  const gameScoreTimerRef = useRef<any>(null);
-  const gameCheckTimerRef = useRef<any>(null);
 
   // Initial power-on animation
   useEffect(() => {
@@ -211,7 +541,6 @@ export default function RetroComputer({
         setIsPowerOn(false);
         setIsAnimatingPower(false);
       }, 500);
-      stopPixelGame();
     } else {
       // Turn on
       setIsPowerOn(true);
@@ -230,17 +559,19 @@ export default function RetroComputer({
 
   // Open / Close system apps
   const sysOpenApp = (appId: string) => {
-    setActiveApp(appId);
-    if (appId === 'game') {
-      initPixelGame();
+    setIsStartMenuOpen(false);
+    setIsEditMode(false);
+    if (appId === 'game_lobby') {
+      setActiveApp('game');
+    } else {
+      setActiveApp(appId);
     }
   };
 
   const sysCloseApp = () => {
-    if (activeApp === 'game') {
-      stopPixelGame();
-    }
     setActiveApp(null);
+    setIsStartMenuOpen(false);
+    setIsEditMode(false);
     if (onClearForceOpenApp) {
       onClearForceOpenApp();
     }
@@ -249,7 +580,12 @@ export default function RetroComputer({
   // Mail actions
   const openMail = (id: number) => {
     setReadingMailId(id);
-    setMails(prev => prev.map(m => m.id === id ? { ...m, unread: false } : m));
+    setMails(prev => {
+      const updated = prev.map(m => m.id === id ? { ...m, unread: false } : m);
+      const readIds = updated.filter(m => !m.unread).map(m => m.id);
+      idbSaveRetroMailsReadState(readIds).catch(() => {});
+      return updated;
+    });
   };
 
   const closeMailReader = () => {
@@ -276,115 +612,6 @@ export default function RetroComputer({
     setSelectedStudent(null);
   };
 
-  // Pixel Jumper Game Logic
-  const initPixelGame = () => {
-    setGameOverlayTitle("PIXEL JUMPER");
-    setShowGameOverlay(true);
-    setIsPlayingGame(false);
-  };
-
-  const startPixelGame = () => {
-    setIsPlayingGame(true);
-    setGameScore(0);
-    setShowGameOverlay(false);
-    setIsGameJumping(false);
-
-    if (obstacleRef.current) {
-      obstacleRef.current.classList.remove('move-anim');
-      void obstacleRef.current.offsetWidth;
-      obstacleRef.current.classList.add('move-anim');
-      obstacleRef.current.style.animationPlayState = 'running';
-    }
-    if (playerRef.current) {
-      playerRef.current.style.animationPlayState = 'running';
-      playerRef.current.classList.remove('jump-anim');
-    }
-
-    clearInterval(gameScoreTimerRef.current);
-    clearInterval(gameCheckTimerRef.current);
-
-    gameScoreTimerRef.current = setInterval(() => {
-      setGameScore(prev => prev + 10);
-    }, 500);
-
-    gameCheckTimerRef.current = setInterval(checkGameCollision, 25);
-  };
-
-  const stopPixelGame = () => {
-    setIsPlayingGame(false);
-    clearInterval(gameScoreTimerRef.current);
-    clearInterval(gameCheckTimerRef.current);
-    if (obstacleRef.current) {
-      obstacleRef.current.style.animationPlayState = 'paused';
-    }
-    if (playerRef.current) {
-      playerRef.current.style.animationPlayState = 'paused';
-    }
-  };
-
-  const triggerGameOver = () => {
-    stopPixelGame();
-    setGameOverlayTitle("CRASHED");
-    setShowGameOverlay(true);
-  };
-
-  const jumpPixelGame = () => {
-    if (isGameJumping) return;
-    setIsGameJumping(true);
-
-    if (playerRef.current) {
-      playerRef.current.style.animationPlayState = 'running';
-      playerRef.current.classList.remove('jump-anim');
-      void playerRef.current.offsetWidth;
-      playerRef.current.classList.add('jump-anim');
-    }
-
-    setTimeout(() => {
-      if (playerRef.current) {
-        playerRef.current.classList.remove('jump-anim');
-      }
-      setIsGameJumping(false);
-    }, 600);
-  };
-
-  const checkGameCollision = () => {
-    if (!playerRef.current || !obstacleRef.current) return;
-    const p = playerRef.current.getBoundingClientRect();
-    const o = obstacleRef.current.getBoundingClientRect();
-    if (p.right - 5 > o.left && p.left + 5 < o.right && p.bottom > o.top + 4) {
-      triggerGameOver();
-    }
-  };
-
-  const handleGameScreenClick = () => {
-    if (!isPlayingGame) {
-      startPixelGame();
-    } else {
-      jumpPixelGame();
-    }
-  };
-
-  // Keyboard handler for Space in game
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (activeApp === 'game' && e.code === 'Space') {
-        e.preventDefault();
-        if (!isPlayingGame) startPixelGame();
-        else jumpPixelGame();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeApp, isPlayingGame, isGameJumping]);
-
-  // Clean up game timers on unmount
-  useEffect(() => {
-    return () => {
-      clearInterval(gameScoreTimerRef.current);
-      clearInterval(gameCheckTimerRef.current);
-    };
-  }, []);
-
   const readingMail = readingMailId ? mails.find(m => m.id === readingMailId) : null;
   const unreadCount = mails.filter(m => m.unread).length;
 
@@ -409,90 +636,149 @@ export default function RetroComputer({
                 style={{ filter: `brightness(${screenBrightness})` }}
               >
                 {/* CRT Effects */}
-                <div className={`crt-effects ${isPowerOn ? 'active' : ''}`} id="crt-effects"></div>
+                <div className={`crt-effects ${isPowerOn && activeApp !== 'backup' ? 'active' : ''}`} id="crt-effects"></div>
                 <div className={`power-line ${powerAnimClass}`} id="power-line"></div>
 
                 {/* Desktop OS */}
                 <div 
-                  className={`desktop-os ${isPowerOn && !activeApp ? 'active' : ''}`} 
+                  className={`desktop-os ${isPowerOn ? 'active' : ''}`} 
                   id="desktop-os"
+                  onClick={() => {
+                    setIsStartMenuOpen(false);
+                    if (isEditModeJustActivatedRef.current) return;
+                    if (isEditMode) setIsEditMode(false);
+                  }}
                 >
-                  {/* System Pending Invite Banner */}
-                  {pendingInvite && (
+                  {/* Floating Drag Ghost Badge following touch/pointer */}
+                  {draggingAppId && (
                     <div 
-                      onClick={() => sysOpenApp('game_lobby')}
-                      className="w-full mb-1 p-2 rounded bg-amber-950/80 border border-amber-400 text-amber-200 text-xs font-mono flex items-center justify-between cursor-pointer hover:bg-amber-900/90 transition-all shadow-md animate-pulse select-none"
+                      className={`retro-drag-ghost ${isOverDesktop ? 'over-desktop' : ''}`}
+                      style={{
+                        left: `${dragPosition.x}px`,
+                        top: `${dragPosition.y}px`,
+                      }}
                     >
-                      <span className="flex items-center gap-2">
-                        <i className="fa-solid fa-gamepad text-amber-400"></i>
-                        <span>[INVITE] {pendingInvite.characterName} 发来游戏邀请!</span>
+                      <i className={`${DESKTOP_APPS_META[draggingAppId]?.icon || 'fa-solid fa-cube'} text-sm`}></i>
+                      <span>{DESKTOP_APPS_META[draggingAppId]?.name || draggingAppId}</span>
+                      <span className="text-[9px] bg-black/40 px-1 py-0.5 rounded border border-white/30">
+                        {isOverDesktop ? '松手添加到桌面' : '拖动至屏幕'}
                       </span>
-                      <span className="bg-amber-400 text-black px-2 py-0.5 rounded text-[10px] font-bold">进入对局</span>
                     </div>
                   )}
 
-                  {/* Core 4 Retro Icons */}
-                  <div className="desktop-icon" onClick={() => sysOpenApp('mail')} title="电子邮件客户端">
-                    <i className="fa-solid fa-envelope"></i>
-                    <span>MAIL{unreadCount > 0 ? `(${unreadCount})` : ''}</span>
-                  </div>
+                  {/* Desktop Notice Banner */}
+                  {desktopNotice && (
+                    <div className="absolute top-2 left-1/2 -translate-x-1/2 bg-stone-900/90 text-emerald-300 border border-emerald-500/80 px-2.5 py-1 rounded text-[11px] font-mono z-30 pointer-events-none shadow-xl animate-fade-in">
+                      {desktopNotice}
+                    </div>
+                  )}
 
-                  <div className="desktop-icon" onClick={() => sysOpenApp('files')} title="文件资源管理器">
-                    <i className="fa-solid fa-folder-open"></i>
-                    <span>FILES</span>
-                  </div>
+                  {/* Desktop Icons Area */}
+                  <div 
+                    id="desktop-icons-area"
+                    className={`desktop-icons-area ${activeApp ? 'pointer-events-none opacity-0' : ''} ${draggingAppId && isOverDesktop ? 'desktop-drop-zone-active' : ''}`}
+                    onClick={() => {
+                      if (isEditModeJustActivatedRef.current) return;
+                      if (isEditMode) setIsEditMode(false);
+                    }}
+                  >
+                    {/* System Pending Invite Banner */}
+                    {pendingInvite && (
+                      <div 
+                        onClick={(e) => { e.stopPropagation(); sysOpenApp('game_lobby'); }}
+                        className="w-full mb-1 p-2 rounded bg-amber-950/80 border border-amber-400 text-amber-200 text-xs font-mono flex items-center justify-between cursor-pointer hover:bg-amber-900/90 transition-all shadow-md animate-pulse select-none"
+                      >
+                        <span className="flex items-center gap-2">
+                          <i className="fa-solid fa-gamepad text-amber-400"></i>
+                          <span>[INVITE] {pendingInvite.characterName} 发来游戏邀请!</span>
+                        </span>
+                        <span className="bg-amber-400 text-black px-2 py-0.5 rounded text-[10px] font-bold">进入对局</span>
+                      </div>
+                    )}
 
-                  <div className="desktop-icon" onClick={() => sysOpenApp('web')} title="万维网导航浏览器">
-                    <i className="fa-solid fa-compass"></i>
-                    <span>WEB</span>
-                  </div>
+                    {/* Dynamic Desktop Icons based on desktopApps state */}
+                    {desktopApps.map((appId) => {
+                      const meta = DESKTOP_APPS_META[appId];
+                      if (!meta) return null;
 
-                  <div className="desktop-icon" onClick={() => sysOpenApp('game')} title="像素跳跃小游戏">
-                    <i className="fa-solid fa-gamepad"></i>
-                    <span>GAME</span>
-                  </div>
+                      return (
+                        <div 
+                          key={appId} 
+                          className="desktop-icon-wrapper"
+                          onContextMenu={(e) => e.preventDefault()}
+                          onTouchStart={(e) => {
+                            isTouchInteractionRef.current = true;
+                            const touch = e.touches[0];
+                            startDesktopIconLongPress(touch.clientX, touch.clientY);
+                          }}
+                          onTouchEnd={() => {
+                            cancelDesktopIconLongPress();
+                            setTimeout(() => {
+                              isTouchInteractionRef.current = false;
+                            }, 400);
+                          }}
+                          onTouchCancel={() => {
+                            cancelDesktopIconLongPress();
+                            isTouchInteractionRef.current = false;
+                          }}
+                          onMouseDown={(e) => {
+                            if (isTouchInteractionRef.current) return;
+                            if (e.button === 0) {
+                              startDesktopIconLongPress(e.clientX, e.clientY);
+                            }
+                          }}
+                          onMouseUp={() => {
+                            if (isTouchInteractionRef.current) return;
+                            cancelDesktopIconLongPress();
+                          }}
+                          onMouseLeave={() => {
+                            if (isTouchInteractionRef.current) return;
+                            cancelDesktopIconLongPress();
+                          }}
+                        >
+                          <div 
+                            className={`desktop-icon ${isEditMode ? 'jiggle-mode' : ''}`} 
+                            onClick={(e) => { 
+                              e.stopPropagation(); 
+                              // If this click is the synthetic release of the long press that just activated edit mode, ignore it!
+                              if (isEditModeJustActivatedRef.current) {
+                                return;
+                              }
+                              if (isEditMode) {
+                                // A subsequent intentional tap on the icon dismisses edit mode, DOES NOT delete!
+                                setIsEditMode(false);
+                                return;
+                              }
+                              sysOpenApp(appId); 
+                            }} 
+                            title={meta.desc}
+                          >
+                            <i className={`${meta.icon} ${meta.colorClass}`}></i>
+                            <span>{meta.name}{appId === 'mail' && unreadCount > 0 ? `(${unreadCount})` : ''}</span>
+                          </div>
 
-                  {/* Wind Chime System Tool Icons */}
-                  <div className="desktop-icon" onClick={() => sysOpenApp('game_lobby')} title="游戏大厅 (五子棋/捉鬼牌/抽卡)">
-                    <i className="fa-solid fa-dice text-amber-300"></i>
-                    <span>LOBBY</span>
+                          {/* Delete [×] Badge: shown when long-pressed into edit mode for all desktop apps */}
+                          {isEditMode && (
+                            <div 
+                              className="desktop-icon-remove-badge"
+                              onTouchStart={(e) => e.stopPropagation()}
+                              onTouchEnd={(e) => {
+                                e.stopPropagation();
+                                removeAppFromDesktop(appId);
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                removeAppFromDesktop(appId);
+                              }}
+                              title={`从桌面删除 ${meta.name}`}
+                            >
+                              ×
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-
-                  <div className="desktop-icon" onClick={() => sysOpenApp('persona')} title="人设与立绘管理">
-                    <i className="fa-solid fa-user-gear text-orange-300"></i>
-                    <span>PERSONA</span>
-                  </div>
-
-                  <div className="desktop-icon" onClick={() => sysOpenApp('wallpaper')} title="桌面背景装扮">
-                    <i className="fa-solid fa-image text-cyan-300"></i>
-                    <span>WALLPAPER</span>
-                  </div>
-
-                  <div className="desktop-icon" onClick={() => sysOpenApp('llm')} title="大语言模型接口与算力">
-                    <i className="fa-solid fa-microchip text-emerald-300"></i>
-                    <span>LLM_CONF</span>
-                  </div>
-
-                  <div className="desktop-icon" onClick={() => sysOpenApp('ambience')} title="背景氛围白噪声">
-                    <i className="fa-solid fa-music text-rose-300"></i>
-                    <span>AMBIENCE</span>
-                  </div>
-
-                  <div className="desktop-icon" onClick={() => sysOpenApp('dictionary')} title="敏感词与激化词典">
-                    <i className="fa-solid fa-shield-halved text-purple-300"></i>
-                    <span>DICTIONARY</span>
-                  </div>
-
-                  <div className="desktop-icon" onClick={() => sysOpenApp('css')} title="界面样式与滤镜工坊">
-                    <i className="fa-solid fa-palette text-blue-300"></i>
-                    <span>CSS_STYLE</span>
-                  </div>
-
-                  <div className="desktop-icon" onClick={() => sysOpenApp('backup')} title="分文件数据备份与恢复">
-                    <i className="fa-solid fa-database text-pink-300"></i>
-                    <span>BACKUP</span>
-                  </div>
-                </div>
 
                 {/* ================= APP 1: MAIL ================= */}
                 <div className={`app-window app-mail ${isPowerOn && activeApp === 'mail' ? 'active' : ''}`} id="app-mail">
@@ -686,50 +972,29 @@ export default function RetroComputer({
                   </div>
                 </div>
 
-                {/* ================= APP 4: GAME (PIXEL JUMPER) ================= */}
-                <div className={`app-window app-game ${isPowerOn && activeApp === 'game' ? 'active' : ''}`} id="app-game">
-                  <div className="game-topbar">
-                    <span>A:\PIXEL_JUMPER.EXE</span>
-                    <div className="game-close-btn" onClick={sysCloseApp}>[X]</div>
-                  </div>
-                  <div className="game-screen" id="game-screen-area" onClick={handleGameScreenClick}>
-                    <div className="game-score">SCORE: <span id="score-val">{gameScore}</span></div>
-                    <div className="game-world" id="game-world">
-                      <div className="ground-line"></div>
-                      <div className="player" id="player" ref={playerRef}></div>
-                      <div className="obstacle" id="obstacle" ref={obstacleRef}></div>
-                    </div>
-                    <div className={`game-overlay ${showGameOverlay ? 'active' : ''}`} id="game-overlay">
-                      <div className="overlay-title" id="overlay-title">{gameOverlayTitle}</div>
-                      <div className="overlay-blink">CLICK OR PRESS SPACE TO {gameOverlayTitle === 'CRASHED' ? 'RETRY' : 'START'}</div>
-                    </div>
-                  </div>
-                </div>
-
-                {/* ================= APP 5: SYSTEM TOOLS (Integrated WindChime features) ================= */}
-                {isPowerOn && activeApp && !['mail', 'files', 'web', 'game'].includes(activeApp) && (
+                {/* ================= APP 4: SYSTEM & GAME TOOLS (Integrated WindChime features) ================= */}
+                {isPowerOn && activeApp && !['mail', 'files', 'web'].includes(activeApp) && (
                   <div className="app-sys-tool active">
-                    <div className="sys-tool-titlebar">
-                      <span>SYS_APP.EXE - {
-                        activeApp === 'game_lobby' ? '游戏大厅 (GAME_LOBBY)' :
-                        activeApp === 'persona' ? '人设档案 (PERSONA)' :
-                        activeApp === 'wallpaper' ? '壁纸装扮 (WALLPAPER)' :
-                        activeApp === 'llm' ? '模型算力 (LLM_CONFIG)' :
-                        activeApp === 'ambience' ? '氛围白噪 (AMBIENCE)' :
-                        activeApp === 'dictionary' ? '拦截词典 (DICTIONARY)' :
-                        activeApp === 'css' ? '视觉工坊 (CSS_STUDIO)' :
-                        activeApp === 'backup' ? '数据备份 (DATA_BACKUP)' : activeApp
-                      }</span>
-                      <div 
-                        onClick={sysCloseApp} 
-                        className="cursor-pointer px-1 hover:bg-red-600 font-bold"
-                        title="关闭应用返回桌面"
-                      >
-                        [X]
+                    {activeApp !== 'backup' && (
+                      <div className="sys-tool-titlebar">
+                        <span>SYS_APP.EXE - {
+                          (activeApp === 'game' || activeApp === 'game_lobby') ? '游戏大厅 (GAME)' :
+                          activeApp === 'persona' ? '人设档案 (PERSONA)' :
+                          (activeApp === 'css' || activeApp === 'wallpaper' || activeApp === 'ambience') ? '外观与音效工坊 (CSS_STYLE)' :
+                          activeApp === 'llm' ? '模型算力 (LLM_CONFIG)' :
+                          activeApp === 'dictionary' ? '拦截词典 (DICTIONARY)' : activeApp
+                        }</span>
+                        <div 
+                          onClick={sysCloseApp} 
+                          className="cursor-pointer px-1 hover:bg-red-600 font-bold"
+                          title="关闭应用返回桌面"
+                        >
+                          [X]
+                        </div>
                       </div>
-                    </div>
+                    )}
                     <div className="sys-tool-body">
-                      {activeApp === 'game_lobby' && (
+                      {(activeApp === 'game' || activeApp === 'game_lobby') && (
                         <GameLobbyApp
                           characterName={characterName || '少女'}
                           character={character}
@@ -749,11 +1014,12 @@ export default function RetroComputer({
                           />
                         </div>
                       )}
-                      {activeApp === 'wallpaper' && (
+                      {(activeApp === 'css' || activeApp === 'wallpaper' || activeApp === 'ambience') && (
                         <div className="p-3 overflow-y-auto h-full">
-                          <WallpaperApp
+                          <CssApp
                             onBgChange={onBgChange}
                             currentBg={currentBg}
+                            initialTab={activeApp === 'wallpaper' ? 'wallpaper' : activeApp === 'ambience' ? 'ambience' : 'css'}
                           />
                         </div>
                       )}
@@ -762,32 +1028,158 @@ export default function RetroComputer({
                           <LlmApp onConfigChange={onConfigChange} />
                         </div>
                       )}
-                      {activeApp === 'ambience' && (
-                        <div className="p-3 overflow-y-auto h-full">
-                          <AmbienceApp />
-                        </div>
-                      )}
                       {activeApp === 'dictionary' && (
                         <div className="p-3 overflow-y-auto h-full">
                           <DictionaryApp />
                         </div>
                       )}
-                      {activeApp === 'css' && (
-                        <div className="p-3 overflow-y-auto h-full">
-                          <CssApp />
-                        </div>
-                      )}
                       {activeApp === 'backup' && (
-                        <div className="p-2 sm:p-3 bg-[#fffafb] text-[#4a3e3d] shadow-sm h-full overflow-y-auto">
+                        <div className="h-full overflow-y-auto">
                           <DataBackupModal
                             currentCharacterId={currentCharacterId || 'default'}
                             onDataImported={onEngineReload}
+                            onClose={sysCloseApp}
                           />
                         </div>
                       )}
                     </div>
                   </div>
                 )}
+
+                {/* ================= RETRO START MENU (开始菜单) ================= */}
+                {isPowerOn && isStartMenuOpen && (
+                  <div 
+                    className="retro-start-menu" 
+                    id="retro-start-menu"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className="start-menu-sidebar">
+                      <span>Windows</span>
+                    </div>
+                    <div className="start-menu-items">
+                      {Object.values(DESKTOP_APPS_META).map((meta, idx) => {
+                        const isDraggingThis = draggingAppId === meta.id;
+
+                        return (
+                          <React.Fragment key={meta.id}>
+                            {idx === 4 && <div className="start-menu-divider" />}
+                            <div 
+                              className={`start-menu-item ${isDraggingThis ? 'dragging-source' : ''}`}
+                              onTouchStart={(e) => {
+                                const touch = e.touches[0];
+                                handleItemTouchStart(meta.id, touch.clientX, touch.clientY);
+                              }}
+                              onMouseDown={(e) => {
+                                handleItemTouchStart(meta.id, e.clientX, e.clientY);
+                              }}
+                              onClick={() => {
+                                if (!isDraggingActiveRef.current) {
+                                  sysOpenApp(meta.id);
+                                }
+                              }}
+                              title={`${meta.fullName} - 可长按拖拽至桌面`}
+                            >
+                              <i className={`${meta.icon} ${
+                                meta.id === 'mail' ? 'text-blue-600' :
+                                meta.id === 'files' ? 'text-amber-600' :
+                                meta.id === 'web' ? 'text-teal-600' :
+                                meta.id === 'game' ? 'text-purple-600' :
+                                meta.id === 'persona' ? 'text-orange-600' :
+                                meta.id === 'css' ? 'text-indigo-600' :
+                                meta.id === 'llm' ? 'text-emerald-600' :
+                                meta.id === 'dictionary' ? 'text-red-600' :
+                                'text-pink-600'
+                              } w-4 text-center shrink-0`}></i>
+                              <span className="truncate flex-1">{meta.fullName}</span>
+                            </div>
+                          </React.Fragment>
+                        );
+                      })}
+                      <div className="start-menu-divider"></div>
+                      <div className="start-menu-item" onClick={handleTogglePower}>
+                        <i className="fa-solid fa-power-off text-rose-600 w-4 text-center shrink-0"></i>
+                        <span>关闭计算机 (SHUTDOWN)</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ================= RETRO SYSTEM TASKBAR (系统栏) ================= */}
+                {isPowerOn && (
+                  <div 
+                    className="retro-taskbar" 
+                    id="retro-taskbar"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* Left: Green Windows Start Key & Active App Window Button */}
+                    <div className="flex items-center gap-1.5 overflow-hidden h-full">
+                      <button 
+                        className={`start-btn ${isStartMenuOpen ? 'pressed' : ''}`}
+                        id="start-button"
+                        onClick={() => setIsStartMenuOpen(prev => !prev)}
+                        title="开始"
+                      >
+                        <svg viewBox="0 0 16 16" className="w-3.5 h-3.5 shrink-0 filter drop-shadow-[0_1px_1px_rgba(0,0,0,0.6)]">
+                          <path d="M1.5 2.5 C3.5 2 5.5 3.5 7.5 3 L7.5 7.5 C5.5 8 3.5 6.5 1.5 7 Z" fill="#f34f1c" />
+                          <path d="M8.5 2.7 C10.5 2.2 12.5 3.7 14.5 3.2 L14.5 7.7 C12.5 8.2 10.5 6.7 8.5 7.2 Z" fill="#7fba00" />
+                          <path d="M1.5 8.5 C3.5 8 5.5 9.5 7.5 9 L7.5 13.5 C5.5 14 3.5 12.5 1.5 13 Z" fill="#01a6f0" />
+                          <path d="M8.5 8.7 C10.5 8.2 12.5 9.7 14.5 9.2 L14.5 13.7 C12.5 14.2 10.5 12.7 8.5 13.2 Z" fill="#ffba08" />
+                        </svg>
+                        <span className="font-black italic tracking-wide text-xs">开始</span>
+                      </button>
+
+                      {/* Active Task / Window Indicator */}
+                      {activeApp && (
+                        <div 
+                          className="taskbar-active-item truncate max-w-[140px] sm:max-w-[180px]"
+                          onClick={sysCloseApp}
+                          title="点击返回桌面 / 最小化"
+                        >
+                          <i className={`fa-solid ${
+                            activeApp === 'mail' ? 'fa-envelope text-blue-200' :
+                            activeApp === 'files' ? 'fa-folder-open text-amber-200' :
+                            activeApp === 'web' ? 'fa-compass text-teal-200' :
+                            (activeApp === 'game' || activeApp === 'game_lobby') ? 'fa-gamepad text-purple-200' :
+                            activeApp === 'persona' ? 'fa-user-gear text-orange-200' :
+                            (activeApp === 'css' || activeApp === 'wallpaper' || activeApp === 'ambience') ? 'fa-palette text-indigo-200' :
+                            activeApp === 'llm' ? 'fa-microchip text-emerald-200' :
+                            activeApp === 'dictionary' ? 'fa-shield-halved text-red-200' :
+                            'fa-database text-pink-200'
+                          } text-[11px]`}></i>
+                          <span className="truncate">{
+                            activeApp === 'mail' ? 'SYS_MAIL' :
+                            activeApp === 'files' ? 'SYS_FILES' :
+                            activeApp === 'web' ? 'SYS_WEB' :
+                            (activeApp === 'game' || activeApp === 'game_lobby') ? 'SYS_GAME' :
+                            activeApp === 'persona' ? 'SYS_PERSONA' :
+                            (activeApp === 'css' || activeApp === 'wallpaper' || activeApp === 'ambience') ? 'SYS_CSS' :
+                            activeApp === 'llm' ? 'SYS_LLM' :
+                            activeApp === 'dictionary' ? 'SYS_DICT' : 'SYS_BACKUP'
+                          }</span>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Right: System Tray (Audio + Real-time Clock) */}
+                    <div className="taskbar-tray" id="taskbar-tray">
+                      {/* Audio mute toggle */}
+                      <div 
+                        className="tray-icon cursor-pointer"
+                        onClick={() => setIsMuted(prev => !prev)}
+                        title={isMuted ? '声音: 已静音 (点击开启)' : '声音: 正常 (点击静音)'}
+                      >
+                        <i className={`fa-solid ${isMuted ? 'fa-volume-xmark text-red-300' : 'fa-volume-high text-white'}`}></i>
+                      </div>
+
+                      {/* Digital Clock */}
+                      <div className="tray-clock" title={`系统时间: ${currentTime}`}>
+                        {currentTime}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+              </div> {/* End desktop-os */}
 
               </div>
             </div>

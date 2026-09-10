@@ -9,6 +9,10 @@ interface Props {
   onSelectCharacter: (characterId: string) => void;
   title?: string;
   compact?: boolean;
+  retro?: boolean;
+  defaultOpen?: boolean;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 export default function GameCharacterSelector({
@@ -16,14 +20,30 @@ export default function GameCharacterSelector({
   onSelectCharacter,
   title = '选择对战伙伴',
   compact = false,
+  retro = false,
+  defaultOpen = false,
+  isOpen: externalIsOpen,
+  onClose,
 }: Props) {
-  const [isOpen, setIsOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const isOpen = externalIsOpen !== undefined ? externalIsOpen : internalOpen;
+  const setIsOpen = (val: boolean) => {
+    setInternalOpen(val);
+    if (!val && onClose) onClose();
+  };
   const characters = getSavedCharacters();
   const currentChar = getCharacterById(selectedCharacterId) || characters[0] || MOCK_CHARACTERS[0];
   const currentAvatar = loadCharAvatar(currentChar.character_id);
   const currentRank = loadCharGomokuRank(currentChar.character_id);
 
   const getRankBadge = (rank: string) => {
+    if (retro) {
+      return (
+        <span className="px-1 bg-[#00aaaa] text-black font-bold text-[9px]">
+          [{rank === 'master' ? '王者' : rank === 'gold' ? '黄金' : rank === 'silver' ? '白银' : '青铜'}]
+        </span>
+      );
+    }
     switch (rank) {
       case 'master':
         return <span className="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-400/30 text-[9.5px]">王者</span>;
@@ -35,6 +55,122 @@ export default function GameCharacterSelector({
         return <span className="px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-300 border border-orange-400/30 text-[9.5px]">青铜</span>;
     }
   };
+
+  if (retro) {
+    return (
+      <>
+        {/* Retro Turbo Vision Trigger */}
+        <div className="flex items-center justify-between p-2 bg-[#000080] border-2 border-t-[#00ffff] border-l-[#00ffff] border-b-[#000000] border-r-[#000000] font-mono text-white shadow-[2px_2px_0px_#000000]">
+          <div className="flex items-center gap-2 min-w-0">
+            <div className="size-8 overflow-hidden bg-black border border-[#00ffff] shrink-0">
+              {currentAvatar ? (
+                <img src={currentAvatar} alt="" className="w-full h-full object-cover" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-xs font-bold text-[#ffff55]">
+                  {currentChar.name.charAt(0)}
+                </div>
+              )}
+            </div>
+            <div className="min-w-0 text-left">
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-xs text-[#ffff55] truncate">{currentChar.name}</span>
+                {getRankBadge(currentRank)}
+              </div>
+              <p className="text-[9.5px] text-[#aaaaaa] truncate">
+                {currentChar.core?.values?.slice(0, 2).join(' · ') || '对弈伙伴'}
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setIsOpen(true)}
+            className="px-2 py-1 bg-[#c0c0c0] hover:bg-white text-black font-bold text-xs border-t border-l border-white border-b-2 border-r-2 border-black shadow-[2px_2px_0px_#000000] active:translate-x-0.5 active:translate-y-0.5 cursor-pointer shrink-0"
+          >
+            [ 切换伙伴 F2 ]
+          </button>
+        </div>
+
+        {/* Retro Character Modal */}
+        {isOpen && (
+          <div className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-3 animate-in fade-in-0 duration-100 font-mono">
+            <div className="bg-[#c0c0c0] text-black border-2 border-t-white border-l-white border-b-black border-r-black shadow-[6px_6px_0px_#000000] max-w-sm w-full flex flex-col max-h-[85vh]">
+              {/* Title Bar */}
+              <div className="bg-[#0000a8] text-[#ffff55] px-2 py-1 flex items-center justify-between font-bold text-xs border-b border-black">
+                <span>[■] {title} · SELECT [▲]</span>
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className="px-1.5 py-0.5 bg-[#c0c0c0] text-black hover:bg-red-600 hover:text-white font-bold text-[10px] border border-black shadow-[1px_1px_0px_#000] cursor-pointer"
+                >
+                  [X]
+                </button>
+              </div>
+
+              {/* Character List */}
+              <div className="p-2 overflow-y-auto space-y-1.5 flex-1 bg-[#000080]">
+                {characters.map((c) => {
+                  const avatar = loadCharAvatar(c.character_id);
+                  const rank = loadCharGomokuRank(c.character_id);
+                  const isSelected = c.character_id === selectedCharacterId;
+
+                  return (
+                    <div
+                      key={c.character_id}
+                      onClick={() => {
+                        onSelectCharacter(c.character_id);
+                        setIsOpen(false);
+                      }}
+                      className={`p-2 border flex items-center justify-between cursor-pointer font-mono ${
+                        isSelected
+                          ? 'bg-[#00aaaa] text-black border-[#ffff55] font-bold shadow-[2px_2px_0px_#000]'
+                          : 'bg-[#000054] hover:bg-[#0000aa] text-white border-black'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <div className="size-8 bg-black border border-white shrink-0 overflow-hidden">
+                          {avatar ? (
+                            <img src={avatar} alt="" className="w-full h-full object-cover" />
+                          ) : (
+                            <span className="flex items-center justify-center h-full text-xs font-bold text-yellow-300">
+                              {c.name.charAt(0)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="min-w-0 text-left">
+                          <div className="text-xs truncate font-bold">
+                            {c.name} {isSelected && '◄ (当前)'}
+                          </div>
+                          <div className="text-[10px] opacity-80 truncate">
+                            [{rank}] {c.core?.values?.slice(0, 2).join(' / ') || '伙伴'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-[10px] font-bold shrink-0">
+                        {isSelected ? '[已选定]' : '[选择]'}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Footer */}
+              <div className="p-1.5 bg-[#c0c0c0] border-t border-black flex items-center justify-between text-[10px] text-black font-bold">
+                <span>切换后自动加载独立心智与战绩</span>
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className="px-2 py-0.5 bg-[#d4d4d4] hover:bg-white text-black border border-black shadow-[1px_1px_0px_#000] cursor-pointer"
+                >
+                  [Esc 关闭]
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
 
   return (
     <>

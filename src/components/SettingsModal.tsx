@@ -138,6 +138,7 @@ export default function SettingsModal({
             <DataBackupModal
               currentCharacterId={currentCharacterId}
               onDataImported={onEngineReload}
+              onClose={onClose}
             />
           )}
         </div>

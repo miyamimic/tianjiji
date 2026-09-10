@@ -45,8 +45,18 @@ import {
   saveGrainIntensity
 } from '../../lib/themeSystem';
 import { LinePuppyMascot, StardewPixelFlower, FlowerLacePattern } from '../FrenchLacePuppyElements';
+import WallpaperApp from './WallpaperApp';
+import AmbienceApp from './AmbienceApp';
+import { Image as ImageIcon, Volume2, Paintbrush } from 'lucide-react';
 
-export default function CssApp() {
+interface CssAppProps {
+  onBgChange?: (newBg: string) => void;
+  currentBg?: string;
+  initialTab?: 'css' | 'wallpaper' | 'ambience';
+}
+
+export default function CssApp({ onBgChange, currentBg, initialTab = 'css' }: CssAppProps) {
+  const [activeTab, setActiveTab] = useState<'css' | 'wallpaper' | 'ambience'>(initialTab);
   const [cssCode, setCssCode] = useState('');
   const [screenFilter, setScreenFilter] = useState<'none' | 'warm' | 'cool' | 'vintage' | 'crt'>('none');
   const [windChimePos, setWindChimePos] = useState<WindChimePosition>('right');
@@ -185,21 +195,72 @@ export default function CssApp() {
 
   return (
     <div className="space-y-4 text-xs text-[#4a3e3d] pb-6 animate-in fade-in-0 duration-200 font-serif">
-      {/* Notice Banner */}
-      {importNotice && (
-        <div className="p-3 rounded-2xl bg-[#fff0f3] border-2 border-[#f2d0d9] text-[#8a3854] text-[11px] flex items-center justify-between shadow-md animate-in fade-in-0 duration-150">
-          <div className="flex items-center gap-1.5 font-bold">
-            <Sparkles className="size-3.5 text-[#e07a93]" />
-            <span>{importNotice}</span>
-          </div>
-          <button 
-            onClick={() => setImportNotice(null)}
-            className="text-[#e07a93] hover:text-[#8a3854] ml-2 text-xs font-bold font-sans cursor-pointer"
-          >
-            ✕
-          </button>
+      {/* Top 3-in-1 Unified Tab Navigation */}
+      <div className="p-1 rounded-2xl bg-white/70 border-2 border-[#f2d0d9] shadow-sm flex items-center gap-1">
+        <button
+          onClick={() => setActiveTab('css')}
+          className={`flex-1 py-2 px-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            activeTab === 'css'
+              ? 'bg-gradient-to-r from-[#f898ad] to-[#e07a93] text-white shadow-md'
+              : 'text-[#8a3854] hover:bg-[#fff0f3]'
+          }`}
+        >
+          <Paintbrush className="size-3.5" />
+          <span>视觉样式</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('wallpaper')}
+          className={`flex-1 py-2 px-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            activeTab === 'wallpaper'
+              ? 'bg-gradient-to-r from-[#f898ad] to-[#e07a93] text-white shadow-md'
+              : 'text-[#8a3854] hover:bg-[#fff0f3]'
+          }`}
+        >
+          <ImageIcon className="size-3.5" />
+          <span>壁纸背景</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('ambience')}
+          className={`flex-1 py-2 px-2 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+            activeTab === 'ambience'
+              ? 'bg-gradient-to-r from-[#f898ad] to-[#e07a93] text-white shadow-md'
+              : 'text-[#8a3854] hover:bg-[#fff0f3]'
+          }`}
+        >
+          <Volume2 className="size-3.5" />
+          <span>氛围白噪</span>
+        </button>
+      </div>
+
+      {activeTab === 'wallpaper' && (
+        <div className="animate-in fade-in-0 duration-200">
+          <WallpaperApp onBgChange={onBgChange || (() => {})} currentBg={currentBg} />
         </div>
       )}
+
+      {activeTab === 'ambience' && (
+        <div className="animate-in fade-in-0 duration-200">
+          <AmbienceApp />
+        </div>
+      )}
+
+      {activeTab === 'css' && (
+        <div className="space-y-4 animate-in fade-in-0 duration-200">
+          {/* Notice Banner */}
+          {importNotice && (
+            <div className="p-3 rounded-2xl bg-[#fff0f3] border-2 border-[#f2d0d9] text-[#8a3854] text-[11px] flex items-center justify-between shadow-md animate-in fade-in-0 duration-150">
+              <div className="flex items-center gap-1.5 font-bold">
+                <Sparkles className="size-3.5 text-[#e07a93]" />
+                <span>{importNotice}</span>
+              </div>
+              <button 
+                onClick={() => setImportNotice(null)}
+                className="text-[#e07a93] hover:text-[#8a3854] ml-2 text-xs font-bold font-sans cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+          )}
 
       {/* 1. French Pastel & Stardew Theme Preset Chooser */}
       <div className="p-4 rounded-2xl border-2 border-[#f2d0d9] bg-white/90 shadow-sm space-y-3 relative overflow-hidden">
@@ -375,6 +436,8 @@ export default function CssApp() {
           {saved ? 'CSS 已实时注入并生效' : '应用自定义 CSS 样式'}
         </button>
       </div>
+        </div>
+      )}
     </div>
   );
 }

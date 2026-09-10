@@ -891,3 +891,27 @@ export async function idbMigrateFromLocalStorage(): Promise<{
     return { migrated: false, chatCount, charCount, memoryCount };
   }
 }
+
+// -------------------------------------------------------------
+// 9. Retro Computer Mail State (IndexedDB persistent)
+// -------------------------------------------------------------
+
+export async function idbSaveRetroMailsReadState(readIds: number[]): Promise<void> {
+  await idbPut('settings_kv', {
+    key: 'retro_mails_read_ids',
+    value: readIds,
+    updatedAt: Date.now(),
+  });
+}
+
+export async function idbLoadRetroMailsReadState(): Promise<number[]> {
+  try {
+    const doc = await idbGet<{ key: string; value: number[] }>('settings_kv', 'retro_mails_read_ids');
+    if (doc && Array.isArray(doc.value)) {
+      return doc.value;
+    }
+  } catch {
+    // ignore
+  }
+  return [];
+}
