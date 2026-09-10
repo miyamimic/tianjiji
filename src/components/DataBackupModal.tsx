@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import '@react95/fonts/sans-serif/8pt';
 import { 
   Download, 
   Upload, 
@@ -325,7 +326,7 @@ export default function DataBackupModal({ currentCharacterId, onDataImported, on
           <div className="w-2.5 h-1 bg-black" />
         </div>
         
-        <span className="flex-1 text-center font-extrabold text-black tracking-widest text-[13px] sm:text-[14.5px] font-sans">
+        <span className="flex-1 text-center font-bold text-black tracking-wide text-[16px] sm:text-[18px]" style={{ fontFamily: "'R95 Sans Serif 8pt', sans-serif", WebkitFontSmoothing: "none" }}>
           Backup
         </span>
         
@@ -340,7 +341,7 @@ export default function DataBackupModal({ currentCharacterId, onDataImported, on
       </div>
 
       {/* Window Menu Bar (Underlined hotkeys) */}
-      <div className="h-6 bg-[#c0c0c0] border-b border-black px-3.5 flex items-center gap-5 text-[12px] sm:text-[13.5px] font-sans font-bold text-black shrink-0">
+      <div className="h-6 bg-[#c0c0c0] border-b border-black px-3.5 flex items-center gap-5 text-[15px] sm:text-[16px] font-bold text-black shrink-0" style={{ fontFamily: "'R95 Sans Serif 8pt', sans-serif", WebkitFontSmoothing: "none" }}>
         <span className="cursor-default"><span className="underline">F</span>ile</span>
         <span className="cursor-default"><span className="underline">O</span>ptions</span>
         <span className="cursor-default"><span className="underline">W</span>indow</span>
@@ -439,7 +440,7 @@ export default function DataBackupModal({ currentCharacterId, onDataImported, on
               <FloppyDiskIcon />
             </div>
             <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2">
-              数据恢复.ZIP
+              数据恢复
             </span>
           </div>
 
