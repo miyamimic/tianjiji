@@ -11,6 +11,7 @@ import {
   EyeOff,
   Trash2,
   Plus,
+  Palette,
 } from 'lucide-react';
 
 export interface CircleButtonArea {
@@ -32,10 +33,13 @@ export interface LayeredGachaConfig {
   characterImage: string; // Layer 2: 卡池人物图
   frameImage: string;     // Layer 3: 免扣边框图 (最上层)
 
-  // 3 calibrated button circles based on frame layer
+  // 6 calibrated button circles based on frame layer
   exitCircle: CircleButtonArea;     // 退出抽卡
   pullOnceCircle: CircleButtonArea; // 抽一次
   pullTenCircle: CircleButtonArea;  // 抽十次
+  detailsCircle: CircleButtonArea;  // 卡池详情
+  historyCircle: CircleButtonArea;  // 抽卡记录
+  customCircle: CircleButtonArea;   // 自定义卡池
 
   rates: {
     SSR: number;
@@ -86,20 +90,20 @@ const DEFAULT_FRAME_SVG = `data:image/svg+xml;utf8,${encodeURIComponent(`
   <path d="M 16 670 C 120 650, 330 650, 434 670 L 434 784 L 16 784 Z" fill="#0c0a09" fill-opacity="0.9" filter="url(#shadow)" />
   <line x1="20" y1="675" x2="430" y2="675" stroke="url(#gold)" stroke-width="2" />
 
-  <!-- Pull 1 Button Circle Placeholder on Frame (Bottom Left) -->
+  <!-- Pull 1 Button Circle Placeholder on Frame (Bottom Left) - Moved up to 656 -->
   <g id="frame-pull-once" filter="url(#shadow)">
-    <circle cx="130" cy="728" r="36" fill="#1c1917" stroke="url(#gold)" stroke-width="3" />
-    <circle cx="130" cy="728" r="31" fill="#292524" />
-    <text x="130" y="725" fill="#fef08a" font-size="13" font-weight="bold" font-family="sans-serif" text-anchor="middle">单抽</text>
-    <text x="130" y="742" fill="#a8a29e" font-size="10" font-family="sans-serif" text-anchor="middle">1 抽</text>
+    <circle cx="130" cy="656" r="36" fill="#1c1917" stroke="url(#gold)" stroke-width="3" />
+    <circle cx="130" cy="656" r="31" fill="#292524" />
+    <text x="130" y="653" fill="#fef08a" font-size="13" font-weight="bold" font-family="sans-serif" text-anchor="middle">单抽</text>
+    <text x="130" y="670" fill="#a8a29e" font-size="10" font-family="sans-serif" text-anchor="middle">1 抽</text>
   </g>
 
-  <!-- Pull 10 Button Circle Placeholder on Frame (Bottom Right) -->
+  <!-- Pull 10 Button Circle Placeholder on Frame (Bottom Right) - Moved up to 656 -->
   <g id="frame-pull-ten" filter="url(#shadow)">
-    <circle cx="320" cy="728" r="38" fill="url(#gold)" stroke="#fef08a" stroke-width="3" />
-    <circle cx="320" cy="728" r="33" fill="#ca8a04" />
-    <text x="320" y="725" fill="#0c0a09" font-size="14" font-weight="900" font-family="sans-serif" text-anchor="middle">十连</text>
-    <text x="320" y="742" fill="#451a03" font-size="10" font-weight="bold" font-family="sans-serif" text-anchor="middle">必得 SR</text>
+    <circle cx="320" cy="656" r="38" fill="url(#gold)" stroke="#fef08a" stroke-width="3" />
+    <circle cx="320" cy="656" r="33" fill="#ca8a04" />
+    <text x="320" y="653" fill="#0c0a09" font-size="14" font-weight="900" font-family="sans-serif" text-anchor="middle">十连</text>
+    <text x="320" y="670" fill="#451a03" font-size="10" font-weight="bold" font-family="sans-serif" text-anchor="middle">必得 SR</text>
   </g>
 </svg>
 `)}`;
@@ -112,10 +116,13 @@ const DEFAULT_CONFIG: LayeredGachaConfig = {
   // Layer 3: 免扣边框图 (最上层)
   frameImage: DEFAULT_FRAME_SVG,
 
-  // Initial calibrated buttons on frame
+  // Initial calibrated buttons on frame - Moved up to cy: 82.0
   exitCircle: { cx: 12.2, cy: 6.9, r: 6.5 },
-  pullOnceCircle: { cx: 28.9, cy: 91.0, r: 9.0 },
-  pullTenCircle: { cx: 71.1, cy: 91.0, r: 9.5 },
+  pullOnceCircle: { cx: 28.9, cy: 82.0, r: 9.0 },
+  pullTenCircle: { cx: 71.1, cy: 82.0, r: 9.5 },
+  detailsCircle: { cx: 20.0, cy: 94.0, r: 8.0 },
+  historyCircle: { cx: 50.0, cy: 94.0, r: 8.0 },
+  customCircle: { cx: 80.0, cy: 94.0, r: 8.0 },
 
   rates: {
     SSR: 0.03,
@@ -218,9 +225,27 @@ export default function GachaApp({
   // Pull Results State
   const [pullResults, setPullResults] = useState<GachaCardItem[] | null>(null);
 
-  // Right Side View: 'chat' (聊天地方) or 'settings' (卡池与图层定制)
-  const [rightView, setRightView] = useState<'chat' | 'settings'>('chat');
+  // Dialogue Modals State
+  const [showCustomModal, setShowCustomModal] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [pullHistory, setPullHistory] = useState<GachaCardItem[]>([]);
+  const [customSubView, setCustomSubView] = useState<'menu' | 'brush' | 'settings'>('menu');
+
+  // Right Side View: always 'chat' for the bare dialogue layout
+  const [rightView] = useState<'chat'>('chat');
   const [settingsTab, setSettingsTab] = useState<'layers' | 'brush' | 'cards'>('layers');
+
+  // Auto-migrate old cy coordinates upwards if they are still at the very bottom
+  useEffect(() => {
+    if (config.pullOnceCircle.cy > 88.0 || config.pullTenCircle.cy > 88.0) {
+      setConfig((prev) => ({
+        ...prev,
+        pullOnceCircle: { ...prev.pullOnceCircle, cy: 82.0 },
+        pullTenCircle: { ...prev.pullTenCircle, cy: 82.0 },
+      }));
+    }
+  }, [config.pullOnceCircle.cy, config.pullTenCircle.cy]);
 
   // Chat State
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => [
@@ -236,7 +261,7 @@ export default function GachaApp({
   const chatBottomRef = useRef<HTMLDivElement>(null);
 
   // Brush Circle Calibration State
-  const [activeBrushTarget, setActiveBrushTarget] = useState<'exit' | 'pull_once' | 'pull_ten'>('exit');
+  const [activeBrushTarget, setActiveBrushTarget] = useState<'exit' | 'pull_once' | 'pull_ten' | 'details' | 'history' | 'custom'>('exit');
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawnPoints, setDrawnPoints] = useState<Array<{ x: number; y: number }>>([]);
   const [confirmationNotice, setConfirmationNotice] = useState<string | null>(null);
@@ -360,6 +385,7 @@ export default function GachaApp({
     }
 
     setPullResults(results);
+    setPullHistory((prev) => [...results, ...prev]);
 
     // Contextual reaction in chat
     const hasSSR = results.some((r) => r.rarity === 'SSR');
@@ -414,9 +440,15 @@ export default function GachaApp({
     const height = canvas.height;
     ctx.clearRect(0, 0, width, height);
 
+    // Render circles and user drawn paths immediately as a fallback so the canvas is never blank
+    drawCirclesAndStrokes(ctx, width, height);
+
     if (config.frameImage) {
       const img = new Image();
-      img.crossOrigin = 'anonymous';
+      // Only set crossOrigin if it is an external URL (not local and not data-url)
+      if (config.frameImage.startsWith('http') && !config.frameImage.includes(window.location.host)) {
+        img.crossOrigin = 'anonymous';
+      }
       img.onload = () => {
         ctx.clearRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
@@ -424,19 +456,21 @@ export default function GachaApp({
       };
       img.src = config.frameImage;
       if (img.complete) {
+        ctx.clearRect(0, 0, width, height);
         ctx.drawImage(img, 0, 0, width, height);
         drawCirclesAndStrokes(ctx, width, height);
       }
-    } else {
-      drawCirclesAndStrokes(ctx, width, height);
     }
-  }, [config.frameImage, config.exitCircle, config.pullOnceCircle, config.pullTenCircle, drawnPoints, activeBrushTarget]);
+  }, [config.frameImage, config.exitCircle, config.pullOnceCircle, config.pullTenCircle, config.detailsCircle, config.historyCircle, config.customCircle, drawnPoints, activeBrushTarget]);
 
   const drawCirclesAndStrokes = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
     const targets = [
       { key: 'exit', circle: config.exitCircle, color: '#ef4444', label: '退出' },
       { key: 'pull_once', circle: config.pullOnceCircle, color: '#3b82f6', label: '单抽' },
       { key: 'pull_ten', circle: config.pullTenCircle, color: '#eab308', label: '十连' },
+      { key: 'details', circle: config.detailsCircle, color: '#10b981', label: '详情' },
+      { key: 'history', circle: config.historyCircle, color: '#a855f7', label: '记录' },
+      { key: 'custom', circle: config.customCircle, color: '#ec4899', label: '自定义' },
     ];
 
     targets.forEach((t) => {
@@ -471,7 +505,13 @@ export default function GachaApp({
           ? '#ef4444'
           : activeBrushTarget === 'pull_once'
           ? '#3b82f6'
-          : '#eab308';
+          : activeBrushTarget === 'pull_ten'
+          ? '#eab308'
+          : activeBrushTarget === 'details'
+          ? '#10b981'
+          : activeBrushTarget === 'history'
+          ? '#a855f7'
+          : '#ec4899';
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
@@ -487,8 +527,11 @@ export default function GachaApp({
   };
 
   useEffect(() => {
-    redrawCanvas();
-  }, [redrawCanvas]);
+    const timer = setTimeout(() => {
+      redrawCanvas();
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [redrawCanvas, customSubView]);
 
   const getCanvasCoords = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -542,18 +585,31 @@ export default function GachaApp({
 
     const confirmedCircle: CircleButtonArea = { cx, cy, r };
 
-    let targetName = '退出抽卡';
+    let targetName = '退出键';
     if (activeBrushTarget === 'exit') {
-      targetName = '退出抽卡';
+      targetName = '退出键';
       setConfig((prev) => ({ ...prev, exitCircle: confirmedCircle }));
       setActiveBrushTarget('pull_once');
     } else if (activeBrushTarget === 'pull_once') {
-      targetName = '抽一次';
+      targetName = '单抽键';
       setConfig((prev) => ({ ...prev, pullOnceCircle: confirmedCircle }));
       setActiveBrushTarget('pull_ten');
-    } else {
-      targetName = '抽十次';
+    } else if (activeBrushTarget === 'pull_ten') {
+      targetName = '十连键';
       setConfig((prev) => ({ ...prev, pullTenCircle: confirmedCircle }));
+      setActiveBrushTarget('details');
+    } else if (activeBrushTarget === 'details') {
+      targetName = '卡池详情';
+      setConfig((prev) => ({ ...prev, detailsCircle: confirmedCircle }));
+      setActiveBrushTarget('history');
+    } else if (activeBrushTarget === 'history') {
+      targetName = '抽卡记录';
+      setConfig((prev) => ({ ...prev, historyCircle: confirmedCircle }));
+      setActiveBrushTarget('custom');
+    } else if (activeBrushTarget === 'custom') {
+      targetName = '自定义卡池';
+      setConfig((prev) => ({ ...prev, customCircle: confirmedCircle }));
+      setActiveBrushTarget('exit');
     }
 
     setConfirmationNotice(`✓ 已自动确认「${targetName}」位置: 中心 (${cx}%, ${cy}%), 半径: ${r}%`);
@@ -592,7 +648,7 @@ export default function GachaApp({
     // TRUE FULLSCREEN CONTAINER: 绝对全屏覆盖，无任何外挂顶栏或外部多余边框
     <div
       id="gacha-fullscreen-root"
-      className="fixed inset-0 z-[99999] w-screen h-screen bg-black text-neutral-100 flex flex-row select-none font-sans overflow-hidden"
+      className="absolute inset-0 w-full h-full bg-neutral-950 text-neutral-100 flex flex-row select-none font-sans overflow-hidden"
     >
       {/* ========================================================================= */}
       {/* LEFT SIDE: 卡池 (占大头 3/5 ~ 2/3，根据9:16留出充足地方，无任何顶栏挡位置) */}
@@ -618,9 +674,9 @@ export default function GachaApp({
             />
           )}
 
-          {/* Layer 2: 卡池人物图 (中间层，双层贺卡立体夹层) */}
+          {/* Layer 3: 卡池人物图 (最上层) */}
           {config.characterImage && (
-            <div className="absolute inset-0 z-[2] pointer-events-none flex items-center justify-center overflow-hidden">
+            <div className="absolute inset-0 z-[3] pointer-events-none flex items-center justify-center overflow-hidden">
               <img
                 src={config.characterImage}
                 alt="卡池人物"
@@ -630,12 +686,12 @@ export default function GachaApp({
             </div>
           )}
 
-          {/* Layer 3: 免扣边框图 (最上层) */}
+          {/* Layer 2: 免扣边框图 (中间层) */}
           {config.frameImage && (
             <img
               src={config.frameImage}
               alt="免扣边框图"
-              className="absolute inset-0 w-full h-full object-contain pointer-events-none z-[3]"
+              className="absolute inset-0 w-full h-full object-contain pointer-events-none z-[2]"
               referrerPolicy="no-referrer"
             />
           )}
@@ -712,11 +768,83 @@ export default function GachaApp({
             )}
           </button>
 
+          {/* 4. 卡池详情按键热区 */}
+          <button
+            type="button"
+            onClick={() => setShowDetailsModal(true)}
+            title="卡池详情"
+            style={{
+              left: `${config.detailsCircle.cx}%`,
+              top: `${config.detailsCircle.cy}%`,
+              width: `${config.detailsCircle.r * 2}%`,
+              height: `${config.detailsCircle.r * 2}%`,
+              transform: 'translate(-50%, -50%)',
+            }}
+            className={`absolute z-10 rounded-full cursor-pointer transition active:scale-90 flex items-center justify-center ${
+              showHotZoneOutline
+                ? 'border-2 border-emerald-500/70 bg-emerald-500/20 hover:bg-emerald-500/40'
+                : 'opacity-0 hover:opacity-100 bg-emerald-500/20'
+            }`}
+          >
+            {showHotZoneOutline && (
+              <span className="text-[9.5px] font-bold text-emerald-200 drop-shadow">详情</span>
+            )}
+          </button>
+
+          {/* 5. 抽卡记录按键热区 */}
+          <button
+            type="button"
+            onClick={() => setShowHistoryModal(true)}
+            title="抽卡记录"
+            style={{
+              left: `${config.historyCircle.cx}%`,
+              top: `${config.historyCircle.cy}%`,
+              width: `${config.historyCircle.r * 2}%`,
+              height: `${config.historyCircle.r * 2}%`,
+              transform: 'translate(-50%, -50%)',
+            }}
+            className={`absolute z-10 rounded-full cursor-pointer transition active:scale-90 flex items-center justify-center ${
+              showHotZoneOutline
+                ? 'border-2 border-purple-500/70 bg-purple-500/20 hover:bg-purple-500/40'
+                : 'opacity-0 hover:opacity-100 bg-purple-500/20'
+            }`}
+          >
+            {showHotZoneOutline && (
+              <span className="text-[9.5px] font-bold text-purple-200 drop-shadow">记录</span>
+            )}
+          </button>
+
+          {/* 6. 自定义配置中心按键热区 */}
+          <button
+            type="button"
+            onClick={() => {
+              setCustomSubView('menu');
+              setShowCustomModal(true);
+            }}
+            title="自定义卡池"
+            style={{
+              left: `${config.customCircle.cx}%`,
+              top: `${config.customCircle.cy}%`,
+              width: `${config.customCircle.r * 2}%`,
+              height: `${config.customCircle.r * 2}%`,
+              transform: 'translate(-50%, -50%)',
+            }}
+            className={`absolute z-10 rounded-full cursor-pointer transition active:scale-90 flex items-center justify-center ${
+              showHotZoneOutline
+                ? 'border-2 border-pink-500/70 bg-pink-500/20 hover:bg-pink-500/40'
+                : 'opacity-0 hover:opacity-100 bg-pink-500/20'
+            }`}
+          >
+            {showHotZoneOutline && (
+              <span className="text-[9.5px] font-bold text-pink-200 drop-shadow">自定义</span>
+            )}
+          </button>
+
           {/* ================= PULL RESULTS OVERLAY (卡片展示) ================= */}
           {pullResults && (
             <div
               onClick={() => setPullResults(null)}
-              className="absolute inset-0 z-20 bg-black/90 backdrop-blur-md p-3 flex flex-col items-center justify-between cursor-pointer animate-fadeIn"
+              className="absolute inset-0 z-20 bg-black/95 backdrop-blur-md p-3 flex flex-col items-center justify-between cursor-pointer animate-fadeIn"
             >
               <div className="w-full flex items-center justify-between pb-2 border-b border-neutral-800 text-xs text-amber-300 font-bold">
                 <span>✦ 共鸣结果 ✦</span>
@@ -802,177 +930,313 @@ export default function GachaApp({
       </div>
 
       {/* ========================================================================= */}
-      {/* RIGHT SIDE: 聊天地方 (所有设置按钮都在本全屏内部，无外挂菜单栏) */}
+      {/* RIGHT SIDE: 仅留对话聊天 (字号小2个尺寸，无多余头部、切换标签或设置按钮) */}
       {/* ========================================================================= */}
       <div
         id="gacha-right-chat"
-        className="w-[38%] h-full flex flex-col bg-neutral-900 overflow-hidden relative"
+        className="flex-1 h-full flex flex-col bg-neutral-900 overflow-hidden relative"
       >
-        {/* 内置无缝切换栏：在全屏内部随时在【聊天】与【卡池定制】之间切换 */}
-        <div className="flex items-center justify-between px-3 py-2 bg-neutral-950/90 border-b border-neutral-800 shrink-0">
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setRightView('chat')}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
-                rightView === 'chat'
-                  ? 'bg-amber-500 text-neutral-950 shadow'
-                  : 'text-neutral-400 hover:text-white bg-neutral-800/80'
-              }`}
-            >
-              <MessageSquare className="size-3.5" />
-              <span>聊天互动</span>
-            </button>
-
-            <button
-              onClick={() => setRightView('settings')}
-              className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
-                rightView === 'settings'
-                  ? 'bg-amber-500 text-neutral-950 shadow'
-                  : 'text-neutral-400 hover:text-white bg-neutral-800/80'
-              }`}
-            >
-              <Sliders className="size-3.5" />
-              <span>卡池设置</span>
-            </button>
-          </div>
-
-          <button
-            onClick={() => setShowHotZoneOutline(!showHotZoneOutline)}
-            className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-[11px] flex items-center gap-1 cursor-pointer"
-            title="显示/隐藏卡池热区圆圈"
-          >
-            {showHotZoneOutline ? <Eye className="size-3 text-amber-400" /> : <EyeOff className="size-3" />}
-            <span>{showHotZoneOutline ? '显圈' : '隐圈'}</span>
-          </button>
+        {/* Chat Messages Stream */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3.5">
+          {chatMessages.map((msg) => {
+            const isChar = msg.sender === 'character';
+            return (
+              <div
+                key={msg.id}
+                className={`flex flex-col ${isChar ? 'items-start' : 'items-end'} w-full`}
+              >
+                <div
+                  className={`max-w-[85%] px-3 py-2 rounded-xl text-[10px] leading-relaxed break-words shadow-sm ${
+                    isChar
+                      ? 'bg-neutral-800 text-neutral-100 rounded-tl-none border border-neutral-700/40'
+                      : 'bg-amber-500 text-neutral-950 font-medium rounded-tr-none'
+                  }`}
+                >
+                  {msg.text}
+                </div>
+              </div>
+            );
+          })}
+          {isSending && (
+            <div className="flex items-center gap-1.5 text-[9px] text-neutral-400 px-1 italic">
+              <span className="size-1 bg-neutral-400 rounded-full animate-bounce" />
+              <span>正在回应...</span>
+            </div>
+          )}
+          <div ref={chatBottomRef} />
         </div>
 
-        {/* --------------------------------------------------------------------- */}
-        {/* VIEW A: 聊天地方 (用户与角色聊天沟通) */}
-        {/* --------------------------------------------------------------------- */}
-        {rightView === 'chat' && (
-          <div className="flex-1 flex flex-col h-full min-h-0 bg-neutral-900/60">
-            {/* Chat Header inside right view */}
-            <div className="px-3 py-2 bg-neutral-900/90 border-b border-neutral-800 flex items-center justify-between text-xs">
-              <div className="flex items-center gap-2">
-                <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="font-bold text-white text-xs">{characterName || '陆沉'}</span>
-                <span className="text-[10px] text-neutral-400">卡池实时联络</span>
-              </div>
-            </div>
+        {/* Chat Input Bar */}
+        <div className="p-3 bg-neutral-950 border-t border-neutral-850 shrink-0">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              placeholder={`和${characterName || '角色'}聊天...`}
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleSendMessage();
+              }}
+              className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-855 text-[11px] text-white placeholder:text-neutral-500 focus:outline-none focus:border-amber-500"
+            />
+            <button
+              onClick={() => handleSendMessage()}
+              disabled={!chatInput.trim() || isSending}
+              className="p-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-neutral-950 font-bold transition cursor-pointer"
+            >
+              <Send className="size-3.5" />
+            </button>
+          </div>
+        </div>
+      </div>
 
-            {/* Chat Messages Stream */}
-            <div className="flex-1 overflow-y-auto p-3 space-y-3">
-              {chatMessages.map((msg) => {
-                const isChar = msg.sender === 'character';
-                return (
-                  <div
-                    key={msg.id}
-                    className={`flex flex-col ${isChar ? 'items-start' : 'items-end'}`}
-                  >
-                    <span className="text-[9px] text-neutral-500 mb-0.5 px-1 font-mono">
-                      {isChar ? characterName || '陆沉' : '我'}
+      {/* ========================================================================= */}
+      {/* DIALOG MODALS POPUPS SECTION (使用 absolute 相对全面屏绝对定位，不超出 CRT 框且不溢出) */}
+      {/* ========================================================================= */}
+
+      {/* 1. 自定义卡池与机位标定 Modal */}
+      {showCustomModal && (
+        <div className="absolute inset-0 z-40 bg-black/95 backdrop-blur-sm flex items-center justify-center p-2 animate-fadeIn">
+          <div className="w-[94%] h-[94%] max-w-[330px] max-h-[580px] bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-neutral-200 relative">
+            
+            {/* 1.1 MENU SELECTION SCREEN */}
+            {customSubView === 'menu' && (
+              <div className="flex-1 flex flex-col p-4 justify-between overflow-y-auto">
+                <div className="space-y-4">
+                  {/* Title & Decorative */}
+                  <div className="text-center py-1 border-b border-neutral-800">
+                    <span className="text-amber-400 font-black tracking-wider text-xs flex items-center justify-center gap-1.5">
+                      <Sparkles className="size-4" />
+                      <span>自定义配置中心</span>
                     </span>
-                    <div
-                      className={`max-w-[85%] px-3 py-2 rounded-2xl text-xs leading-relaxed break-words shadow ${
-                        isChar
-                          ? 'bg-neutral-800 text-neutral-100 rounded-tl-sm border border-neutral-700/60'
-                          : 'bg-amber-500 text-neutral-950 font-medium rounded-tr-sm'
+                  </div>
+ 
+                  {/* Options Cards */}
+                  <div className="space-y-3">
+                    <button
+                      type="button"
+                      onClick={() => setCustomSubView('brush')}
+                      className="w-full text-left p-3 rounded-xl bg-neutral-950 border border-neutral-800 hover:border-amber-500 hover:bg-neutral-900/60 transition-all duration-200 cursor-pointer group flex items-start gap-3 shadow-md"
+                    >
+                      <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400 group-hover:scale-105 transition-transform shrink-0">
+                        <Palette className="size-5" />
+                      </div>
+                      <div className="space-y-0.5">
+                        <span className="font-bold text-xs text-neutral-100 group-hover:text-amber-300 transition-colors">🎨 1. 画圈圈选按键位置 (画笔标定)</span>
+                        <p className="text-[9.5px] text-neutral-400 leading-relaxed">
+                          用画笔在屏幕画圈，系统自动绑定对准您的退出、单抽、十连及详情、记录、自定义热区。
+                        </p>
+                      </div>
+                    </button>
+ 
+                    <button
+                      type="button"
+                      onClick={() => setCustomSubView('settings')}
+                      className="w-full text-left p-3 rounded-xl bg-neutral-950 border border-neutral-800 hover:border-amber-500 hover:bg-neutral-900/60 transition-all duration-200 cursor-pointer group flex items-start gap-3 shadow-md"
+                    >
+                      <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400 group-hover:scale-105 transition-transform shrink-0">
+                        <Upload className="size-5" />
+                      </div>
+                      <div className="space-y-0.5">
+                        <span className="font-bold text-xs text-neutral-100 group-hover:text-amber-300 transition-colors">⚙️ 2. 卡池素材与卡片配置 (图片/概率)</span>
+                        <p className="text-[9.5px] text-neutral-400 leading-relaxed">
+                          上传三层背景图层，设定SSR/SR/R出货概率，向卡池中添加、删除您的卡片角色立绘。
+                        </p>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+ 
+                {/* Big Close Button at Menu Bottom */}
+                <div className="pt-4 border-t border-neutral-850 flex flex-col gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomModal(false)}
+                    className="w-full py-2.5 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-xs text-center shadow-lg hover:scale-[1.01] transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                  >
+                    <span>退出并返回聊天</span>
+                  </button>
+                </div>
+              </div>
+            )}
+ 
+            {/* 1.2 BRUSH DRAW VIEW (Only when 'brush' is selected) */}
+            {customSubView === 'brush' && (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {/* Header with Back and Direct Close */}
+                <div className="flex items-center justify-between px-3 py-2 bg-neutral-950 border-b border-neutral-800 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setCustomSubView('menu')}
+                    className="text-amber-400 hover:text-white text-[11px] font-bold px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 cursor-pointer transition-all flex items-center gap-1"
+                  >
+                    <span>⬅ 返回菜单</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomModal(false)}
+                    className="text-white hover:text-neutral-100 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-500 cursor-pointer transition-all shadow-md shrink-0"
+                  >
+                    直接关闭
+                  </button>
+                </div>
+ 
+                {/* Paintbrush Draw Interface */}
+                <div className="flex-1 overflow-y-auto p-3 flex flex-col space-y-2.5">
+                  <div className="p-2 rounded-xl bg-neutral-950 border border-neutral-850 shrink-0 text-center">
+                    <span className="text-amber-300 font-bold text-xs block">🎨 1. 画笔画圈定位热区</span>
+                    <p className="text-[9.5px] text-neutral-400 leading-relaxed mt-0.5">
+                      在下方画布上画圈。松手后系统将自动算出中心和大小，并绑定为对应的点击热区！
+                    </p>
+                  </div>
+ 
+                  <div className="grid grid-cols-3 gap-1 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setActiveBrushTarget('exit')}
+                      className={`py-1 px-1 rounded-lg text-[9px] font-bold border transition cursor-pointer flex flex-col items-center justify-center ${
+                        activeBrushTarget === 'exit'
+                          ? 'bg-red-500/20 border-red-500 text-red-300 shadow-sm'
+                          : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
                       }`}
                     >
-                      {msg.text}
+                      <span>🔴 退出键</span>
+                      <span className="text-[7.5px] opacity-75 font-mono mt-0.5">
+                        ({config.exitCircle.cx}%, {config.exitCircle.cy}%)
+                      </span>
+                    </button>
+ 
+                    <button
+                      type="button"
+                      onClick={() => setActiveBrushTarget('pull_once')}
+                      className={`py-1 px-1 rounded-lg text-[9px] font-bold border transition cursor-pointer flex flex-col items-center justify-center ${
+                        activeBrushTarget === 'pull_once'
+                          ? 'bg-blue-500/20 border-blue-500 text-blue-300 shadow-sm'
+                          : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <span>🔵 单抽键</span>
+                      <span className="text-[7.5px] opacity-75 font-mono mt-0.5">
+                        ({config.pullOnceCircle.cx}%, {config.pullOnceCircle.cy}%)
+                      </span>
+                    </button>
+ 
+                    <button
+                      type="button"
+                      onClick={() => setActiveBrushTarget('pull_ten')}
+                      className={`py-1 px-1 rounded-lg text-[9px] font-bold border transition cursor-pointer flex flex-col items-center justify-center ${
+                        activeBrushTarget === 'pull_ten'
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm'
+                          : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <span>🟡 十连键</span>
+                      <span className="text-[7.5px] opacity-75 font-mono mt-0.5">
+                        ({config.pullTenCircle.cx}%, {config.pullTenCircle.cy}%)
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveBrushTarget('details')}
+                      className={`py-1 px-1 rounded-lg text-[9px] font-bold border transition cursor-pointer flex flex-col items-center justify-center ${
+                        activeBrushTarget === 'details'
+                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm'
+                          : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <span>🟢 详情键</span>
+                      <span className="text-[7.5px] opacity-75 font-mono mt-0.5">
+                        ({config.detailsCircle.cx}%, {config.detailsCircle.cy}%)
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveBrushTarget('history')}
+                      className={`py-1 px-1 rounded-lg text-[9px] font-bold border transition cursor-pointer flex flex-col items-center justify-center ${
+                        activeBrushTarget === 'history'
+                          ? 'bg-purple-500/20 border-purple-500 text-purple-300 shadow-sm'
+                          : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <span>🟣 记录键</span>
+                      <span className="text-[7.5px] opacity-75 font-mono mt-0.5">
+                        ({config.historyCircle.cx}%, {config.historyCircle.cy}%)
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveBrushTarget('custom')}
+                      className={`py-1 px-1 rounded-lg text-[9px] font-bold border transition cursor-pointer flex flex-col items-center justify-center ${
+                        activeBrushTarget === 'custom'
+                          ? 'bg-pink-500/20 border-pink-500 text-pink-300 shadow-sm'
+                          : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <span>🌸 自定义键</span>
+                      <span className="text-[7.5px] opacity-75 font-mono mt-0.5">
+                        ({config.customCircle.cx}%, {config.customCircle.cy}%)
+                      </span>
+                    </button>
+                  </div>
+ 
+                  {confirmationNotice && (
+                    <div className="p-1.5 rounded-lg bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-[9px] flex items-center gap-1 shrink-0 animate-fadeIn justify-center">
+                      <Check className="size-3 text-emerald-400 shrink-0" />
+                      <span>{confirmationNotice}</span>
                     </div>
+                  )}
+ 
+                  <div className="flex-1 w-full aspect-[9/16] min-h-[260px] max-w-[240px] mx-auto bg-black rounded-xl overflow-hidden border border-neutral-800 relative touch-none cursor-crosshair">
+                    <canvas
+                      ref={canvasRef}
+                      width={360}
+                      height={640}
+                      onPointerDown={handlePointerDown}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerUp}
+                      className="w-full h-full object-contain block"
+                    />
                   </div>
-                );
-              })}
-              {isSending && (
-                <div className="flex items-center gap-1 text-[10px] text-neutral-400 px-1 italic">
-                  <span>{characterName || '陆沉'} 正在回应...</span>
                 </div>
-              )}
-              <div ref={chatBottomRef} />
-            </div>
-
-            {/* Chat Input Bar */}
-            <div className="p-2.5 bg-neutral-950 border-t border-neutral-800 shrink-0">
-              <div className="flex items-center gap-2">
-                <input
-                  type="text"
-                  placeholder={`和${characterName || '角色'}聊天...`}
-                  value={chatInput}
-                  onChange={(e) => setChatInput(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') handleSendMessage();
-                  }}
-                  className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-xs text-white placeholder:text-neutral-500 focus:outline-none focus:border-amber-500"
-                />
-                <button
-                  onClick={() => handleSendMessage()}
-                  disabled={!chatInput.trim() || isSending}
-                  className="p-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-neutral-950 font-bold transition cursor-pointer"
-                >
-                  <Send className="size-4" />
-                </button>
               </div>
-            </div>
-          </div>
-        )}
+            )}
 
-        {/* --------------------------------------------------------------------- */}
-        {/* VIEW B: 所有设置都在全屏内 (图层上传、画笔圈选三个按键、卡片与概率) */}
-        {/* --------------------------------------------------------------------- */}
-        {rightView === 'settings' && (
-          <div className="flex-1 flex flex-col h-full min-h-0 bg-neutral-900">
-            {/* Sub Tabs */}
-            <div className="flex items-center gap-1 px-3 py-2 bg-neutral-950/60 border-b border-neutral-800 shrink-0">
-              <button
-                onClick={() => setSettingsTab('layers')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
-                  settingsTab === 'layers'
-                    ? 'bg-neutral-800 text-amber-400 border border-amber-500/30'
-                    : 'text-neutral-400 hover:text-white'
-                }`}
-              >
-                三大图层
-              </button>
-              <button
-                onClick={() => setSettingsTab('brush')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
-                  settingsTab === 'brush'
-                    ? 'bg-neutral-800 text-amber-400 border border-amber-500/30'
-                    : 'text-neutral-400 hover:text-white'
-                }`}
-              >
-                画笔圈选按键
-              </button>
-              <button
-                onClick={() => setSettingsTab('cards')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
-                  settingsTab === 'cards'
-                    ? 'bg-neutral-800 text-amber-400 border border-amber-500/30'
-                    : 'text-neutral-400 hover:text-white'
-                }`}
-              >
-                卡片与概率
-              </button>
-            </div>
+            {/* 1.3 SETTINGS & UPLOADS VIEW (Only when 'settings' is selected) */}
+            {customSubView === 'settings' && (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                {/* Header with Back and Direct Close */}
+                <div className="flex items-center justify-between px-4 py-3 bg-neutral-950 border-b border-neutral-800 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setCustomSubView('menu')}
+                    className="text-amber-400 hover:text-white text-xs font-bold px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 cursor-pointer transition-all flex items-center gap-1"
+                  >
+                    <span>⬅ 返回菜单</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setShowCustomModal(false)}
+                    className="text-white hover:text-neutral-100 text-xs font-bold px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 cursor-pointer transition-all shadow-md shrink-0"
+                  >
+                    直接关闭
+                  </button>
+                </div>
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-4">
-              {/* TAB 1: 三大图层 (从左往右依次图层往上：底图 -> 卡池人物图 -> 免扣边框图) */}
-              {settingsTab === 'layers' && (
-                <div className="space-y-4">
-                  <div className="p-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-400 text-[11px] leading-relaxed">
-                    从左往右（从底到顶）图层依次往上：
-                    <span className="text-amber-400 font-bold"> ① 底图 </span>➔ 
-                    <span className="text-amber-400 font-bold"> ② 卡池人物图 </span>➔ 
-                    <span className="text-amber-400 font-bold"> ③ 免扣边框图 </span>。
-                    双层贺卡立体感，退出与抽卡键以免扣边框为准。
-                  </div>
+                {/* Upload & Pool Config Fields */}
+                <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
+                  {/* 1. 三大图层上传 */}
+                  <div className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-3">
+                    <span className="font-bold text-amber-300 text-[11px] block">🖼️ 1. 上传底图、立绘与免扣边框</span>
 
-                  {/* 1. 底图 */}
-                  <div className="p-3 rounded-xl bg-neutral-950/80 border border-neutral-800 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-amber-300 text-xs">① 底图 (最底层)</span>
-                      <label className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10.5px] cursor-pointer flex items-center gap-1">
+                    {/* ① 底图 */}
+                    <div className="flex items-center justify-between gap-2 border-b border-neutral-850 pb-2.5">
+                      <div className="min-w-0">
+                        <span className="font-bold text-white text-[10.5px]">① 底图 (最底层)</span>
+                      </div>
+                      <label className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10px] cursor-pointer flex items-center gap-1 transition shrink-0">
                         <Upload className="size-3" />
                         <span>上传底图</span>
                         <input
@@ -983,20 +1247,15 @@ export default function GachaApp({
                         />
                       </label>
                     </div>
-                    {config.bgImage && (
-                      <div className="w-full h-20 rounded-lg overflow-hidden border border-neutral-800">
-                        <img src={config.bgImage} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                      </div>
-                    )}
-                  </div>
 
-                  {/* 2. 卡池人物图 */}
-                  <div className="p-3 rounded-xl bg-neutral-950/80 border border-neutral-800 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-amber-300 text-xs">② 卡池人物图 (中间层)</span>
-                      <label className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10.5px] cursor-pointer flex items-center gap-1">
+                    {/* ② 人物立绘 */}
+                    <div className="flex items-center justify-between gap-2 border-b border-neutral-850 pb-2.5">
+                      <div className="min-w-0">
+                        <span className="font-bold text-white text-[10.5px]">② 角色立绘 (中间层)</span>
+                      </div>
+                      <label className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10px] cursor-pointer flex items-center gap-1 transition shrink-0">
                         <Upload className="size-3" />
-                        <span>上传人物图</span>
+                        <span>上传立绘</span>
                         <input
                           type="file"
                           accept="image/*"
@@ -1005,142 +1264,31 @@ export default function GachaApp({
                         />
                       </label>
                     </div>
-                    {config.characterImage && (
-                      <div className="w-full h-20 rounded-lg overflow-hidden border border-neutral-800 bg-neutral-950 flex items-center justify-center">
-                        <img src={config.characterImage} alt="" className="h-full object-contain" referrerPolicy="no-referrer" />
-                      </div>
-                    )}
-                  </div>
 
-                  {/* 3. 免扣边框图 */}
-                  <div className="p-3 rounded-xl bg-neutral-950/80 border border-neutral-800 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <span className="font-bold text-amber-300 text-xs">③ 免扣边框图 (最上层)</span>
-                        <p className="text-[10px] text-neutral-400">退出/单抽/十连按钮以此图层为基准</p>
+                    {/* ③ 免扣边框 */}
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <span className="font-bold text-white text-[10.5px]">③ 免扣边框 (最上层)</span>
                       </div>
-                      <label className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10.5px] cursor-pointer flex items-center gap-1">
+                      <label className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10px] cursor-pointer flex items-center gap-1 transition shrink-0">
                         <Upload className="size-3" />
-                        <span>上传免扣边框</span>
+                        <span>上传边框</span>
                         <input
                           type="file"
                           accept="image/*"
                           className="hidden"
-                          onChange={(e) => handleFileUpload(e, (url) => {
-                            setConfig((p) => ({ ...p, frameImage: url }));
-                            setSettingsTab('brush');
-                          })}
+                          onChange={(e) => handleFileUpload(e, (url) => setConfig((p) => ({ ...p, frameImage: url })))}
                         />
                       </label>
                     </div>
-                    {config.frameImage && (
-                      <div className="w-full h-20 rounded-lg overflow-hidden border border-neutral-800 bg-black flex items-center justify-center">
-                        <img src={config.frameImage} alt="" className="h-full object-contain" referrerPolicy="no-referrer" />
-                      </div>
-                    )}
                   </div>
 
-                  <div className="pt-2 flex justify-end">
-                    <button
-                      onClick={() => setConfig(DEFAULT_CONFIG)}
-                      className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white text-xs flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <RotateCcw className="size-3.5" />
-                      <span>恢复默认贺卡预设</span>
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 2: 画笔圈选三大按键 */}
-              {settingsTab === 'brush' && (
-                <div className="space-y-3">
-                  <div className="p-2.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-1">
-                    <div className="text-amber-300 font-bold text-xs flex items-center gap-1">
-                      <Sparkles className="size-3.5" />
-                      <span>画笔画圈自动确认位置</span>
-                    </div>
-                    <p className="text-[10.5px] text-neutral-400 leading-relaxed">
-                      请在下方边框画布上画一个圈。松手后系统将自动算出中心和大小，并绑定为对应的点击热区！
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-1.5">
-                    <button
-                      onClick={() => setActiveBrushTarget('exit')}
-                      className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition cursor-pointer flex flex-col items-center ${
-                        activeBrushTarget === 'exit'
-                          ? 'bg-red-500/20 border-red-500 text-red-300 shadow'
-                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
-                      }`}
-                    >
-                      <span>🔴 退出抽卡</span>
-                      <span className="text-[9px] opacity-75 font-mono">
-                        ({config.exitCircle.cx}%, {config.exitCircle.cy}%)
-                      </span>
-                    </button>
-
-                    <button
-                      onClick={() => setActiveBrushTarget('pull_once')}
-                      className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition cursor-pointer flex flex-col items-center ${
-                        activeBrushTarget === 'pull_once'
-                          ? 'bg-blue-500/20 border-blue-500 text-blue-300 shadow'
-                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
-                      }`}
-                    >
-                      <span>🔵 抽一次</span>
-                      <span className="text-[9px] opacity-75 font-mono">
-                        ({config.pullOnceCircle.cx}%, {config.pullOnceCircle.cy}%)
-                      </span>
-                    </button>
-
-                    <button
-                      onClick={() => setActiveBrushTarget('pull_ten')}
-                      className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition cursor-pointer flex flex-col items-center ${
-                        activeBrushTarget === 'pull_ten'
-                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow'
-                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
-                      }`}
-                    >
-                      <span>🟡 抽十次</span>
-                      <span className="text-[9px] opacity-75 font-mono">
-                        ({config.pullTenCircle.cx}%, {config.pullTenCircle.cy}%)
-                      </span>
-                    </button>
-                  </div>
-
-                  {confirmationNotice && (
-                    <div className="p-2 rounded-lg bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-xs flex items-center gap-1.5 animate-fadeIn">
-                      <Check className="size-4 shrink-0 text-emerald-400" />
-                      <span>{confirmationNotice}</span>
-                    </div>
-                  )}
-
-                  <div className="w-full aspect-[9/16] max-h-[360px] mx-auto bg-black rounded-xl overflow-hidden border-2 border-dashed border-amber-500/40 relative shadow-inner touch-none cursor-crosshair flex items-center justify-center">
-                    <canvas
-                      ref={canvasRef}
-                      width={360}
-                      height={640}
-                      onPointerDown={handlePointerDown}
-                      onPointerMove={handlePointerMove}
-                      onPointerUp={handlePointerUp}
-                      className="w-full h-full object-contain block"
-                    />
-                    <div className="absolute top-2 left-2 pointer-events-none bg-black/70 px-2 py-0.5 rounded text-[9.5px] text-amber-300 font-mono">
-                      当前画笔：画「{activeBrushTarget === 'exit' ? '退出' : activeBrushTarget === 'pull_once' ? '单抽' : '十连'}」圈
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* TAB 3: 卡片与概率配置 */}
-              {settingsTab === 'cards' && (
-                <div className="space-y-4">
-                  <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2">
-                    <span className="font-bold text-amber-300 text-xs">出货概率设置</span>
+                  {/* 2. 出货概率与概率分配 */}
+                  <div className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2">
+                    <span className="font-bold text-amber-300 text-[11px] block">📈 2. 出货概率百分比配置</span>
                     <div className="grid grid-cols-3 gap-2">
                       <div>
-                        <label className="block text-[10px] text-amber-400 mb-0.5 font-bold">SSR (%)</label>
+                        <label className="block text-[9px] text-amber-400 mb-0.5 font-bold">SSR (%)</label>
                         <input
                           type="number"
                           step="0.1"
@@ -1151,11 +1299,11 @@ export default function GachaApp({
                             const val = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
                             setConfig((p) => ({ ...p, rates: { ...p.rates, SSR: val / 100 } }));
                           }}
-                          className="w-full px-2 py-1 rounded bg-neutral-900 border border-neutral-800 text-xs text-white"
+                          className="w-full px-2 py-1 rounded bg-neutral-900 border border-neutral-850 text-[11px] text-white"
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-purple-400 mb-0.5 font-bold">SR (%)</label>
+                        <label className="block text-[9px] text-purple-400 mb-0.5 font-bold">SR (%)</label>
                         <input
                           type="number"
                           step="0.1"
@@ -1166,11 +1314,11 @@ export default function GachaApp({
                             const val = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
                             setConfig((p) => ({ ...p, rates: { ...p.rates, SR: val / 100 } }));
                           }}
-                          className="w-full px-2 py-1 rounded bg-neutral-900 border border-neutral-800 text-xs text-white"
+                          className="w-full px-2 py-1 rounded bg-neutral-900 border border-neutral-850 text-[11px] text-white"
                         />
                       </div>
                       <div>
-                        <label className="block text-[10px] text-blue-400 mb-0.5 font-bold">R (%)</label>
+                        <label className="block text-[9px] text-blue-400 mb-0.5 font-bold">R (%)</label>
                         <input
                           type="number"
                           step="0.1"
@@ -1181,26 +1329,27 @@ export default function GachaApp({
                             const val = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
                             setConfig((p) => ({ ...p, rates: { ...p.rates, R: val / 100 } }));
                           }}
-                          className="w-full px-2 py-1 rounded bg-neutral-900 border border-neutral-800 text-xs text-white"
+                          className="w-full px-2 py-1 rounded bg-neutral-900 border border-neutral-850 text-[11px] text-white"
                         />
                       </div>
                     </div>
                   </div>
 
-                  <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2">
-                    <span className="font-bold text-amber-300 text-xs">添加卡片</span>
+                  {/* 3. 添加新卡片到卡池 */}
+                  <div className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2.5">
+                    <span className="font-bold text-amber-300 text-[11px] block">🃏 3. 向卡池添加自定义卡片</span>
                     <div className="flex gap-2">
                       <input
                         type="text"
                         placeholder="卡片名称..."
                         value={newCardName}
                         onChange={(e) => setNewCardName(e.target.value)}
-                        className="flex-1 px-2.5 py-1.5 rounded bg-neutral-900 border border-neutral-800 text-xs text-white"
+                        className="flex-1 px-2.5 py-1 rounded bg-neutral-900 border border-neutral-850 text-[11px] text-white"
                       />
                       <select
                         value={newCardRarity}
                         onChange={(e) => setNewCardRarity(e.target.value as any)}
-                        className="px-2 py-1.5 rounded bg-neutral-900 border border-neutral-800 text-xs text-white"
+                        className="px-2 py-1 rounded bg-neutral-900 border border-neutral-850 text-[11px] text-white"
                       >
                         <option value="SSR">SSR</option>
                         <option value="SR">SR</option>
@@ -1208,10 +1357,10 @@ export default function GachaApp({
                       </select>
                     </div>
 
-                    <div className="flex items-center justify-between gap-2">
-                      <label className="px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-[11px] text-neutral-300 cursor-pointer flex items-center gap-1">
-                        <Upload className="size-3" />
-                        <span>{newCardImage ? '已选图片' : '上传卡面图片'}</span>
+                    <div className="flex items-center justify-between gap-2 pt-0.5">
+                      <label className="px-2.5 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 text-[10px] text-neutral-300 cursor-pointer flex items-center gap-1 transition">
+                        <Upload className="size-3 animate-pulse" />
+                        <span>{newCardImage ? '已选择卡面' : '上传卡面'}</span>
                         <input
                           type="file"
                           accept="image/*"
@@ -1221,53 +1370,207 @@ export default function GachaApp({
                       </label>
 
                       <button
+                        type="button"
                         onClick={handleAddCard}
-                        className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs flex items-center gap-1 cursor-pointer"
+                        className="px-3 py-1.5 rounded bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[11px] flex items-center gap-1 cursor-pointer transition shadow-sm"
                       >
                         <Plus className="size-3.5" />
-                        <span>添加</span>
+                        <span>确认添加</span>
                       </button>
                     </div>
                   </div>
 
-                  <div className="space-y-1.5">
-                    <span className="font-bold text-neutral-300 text-xs">现有卡片 ({config.cards.length})</span>
-                    {config.cards.map((card) => (
-                      <div
-                        key={card.id}
-                        className="p-2 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-between gap-2"
-                      >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <img
-                            src={card.image}
-                            alt=""
-                            className="size-8 rounded-lg object-cover bg-black shrink-0"
-                            referrerPolicy="no-referrer"
-                          />
-                          <div className="min-w-0">
-                            <span className="font-bold text-white text-xs truncate block">{card.name}</span>
-                            <span className={`text-[8px] font-bold px-1 rounded ${
-                              card.rarity === 'SSR' ? 'bg-amber-400 text-neutral-950' : card.rarity === 'SR' ? 'bg-purple-500 text-white' : 'bg-blue-600 text-white'
-                            }`}>{card.rarity}</span>
+                  {/* 4. 现有卡片列表 */}
+                  <div className="space-y-2">
+                    <span className="font-bold text-neutral-300 text-[11px] block">📦 现有卡片 ({config.cards.length})</span>
+                    <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-0.5">
+                      {config.cards.map((card) => (
+                        <div
+                          key={card.id}
+                          className="p-1.5 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-between gap-2"
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <img
+                              src={card.image}
+                              alt=""
+                              className="size-7 rounded-lg object-cover bg-black shrink-0"
+                              referrerPolicy="no-referrer"
+                            />
+                            <div className="min-w-0">
+                              <span className="font-bold text-white text-[11px] truncate block">{card.name}</span>
+                              <span className={`text-[7px] font-bold px-1 rounded ${
+                                card.rarity === 'SSR' ? 'bg-amber-400 text-neutral-950' : card.rarity === 'SR' ? 'bg-purple-500 text-white' : 'bg-blue-600 text-white'
+                              }`}>{card.rarity}</span>
+                            </div>
                           </div>
+                          {config.cards.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCard(card.id)}
+                              className="p-1 rounded text-neutral-500 hover:text-red-400 hover:bg-neutral-800 cursor-pointer transition"
+                            >
+                              <Trash2 className="size-3" />
+                            </button>
+                          )}
                         </div>
-                        {config.cards.length > 1 && (
-                          <button
-                            onClick={() => handleDeleteCard(card.id)}
-                            className="p-1 rounded text-neutral-500 hover:text-red-400 hover:bg-neutral-800 cursor-pointer"
-                          >
-                            <Trash2 className="size-3.5" />
-                          </button>
-                        )}
-                      </div>
-                    ))}
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Reset button */}
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm('确认恢复默认预设卡池吗？')) {
+                          setConfig(DEFAULT_CONFIG);
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded bg-neutral-950 hover:bg-neutral-850 text-neutral-500 hover:text-white text-[9.5px] flex items-center gap-1 cursor-pointer transition border border-neutral-855"
+                    >
+                      <RotateCcw className="size-3" />
+                      <span>恢复默认预设</span>
+                    </button>
                   </div>
                 </div>
-              )}
+              </div>
+            )}
+
+          </div>
+        </div>
+      )}
+
+      {/* 2. 卡池详情 Modal */}
+      {showDetailsModal && (
+        <div className="absolute inset-0 z-40 bg-black/95 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
+          <div className="w-full h-full max-h-[85vh] max-w-sm bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl p-4 flex flex-col overflow-hidden text-neutral-200 relative">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-800 shrink-0">
+              <span className="font-bold text-amber-300 text-sm">✦ 卡池详情与概率 ✦</span>
+              <button
+                type="button"
+                onClick={() => setShowDetailsModal(false)}
+                className="text-white hover:text-neutral-100 text-xs font-bold px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 cursor-pointer transition-all shadow-md"
+              >
+                关闭
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto py-3 space-y-3 pr-0.5">
+              {/* Rate info */}
+              <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-850 space-y-1 text-center shrink-0">
+                <span className="text-[10px] text-neutral-400">出货概率分布</span>
+                <div className="grid grid-cols-3 gap-2 pt-1">
+                  <div className="p-1.5 rounded bg-neutral-900 border border-amber-500/20">
+                    <span className="block text-[10px] text-amber-400 font-bold">SSR</span>
+                    <span className="text-xs text-white font-bold">{(config.rates.SSR * 100).toFixed(1)}%</span>
+                  </div>
+                  <div className="p-1.5 rounded bg-neutral-900 border border-purple-500/20">
+                    <span className="block text-[10px] text-purple-400 font-bold">SR</span>
+                    <span className="text-xs text-white font-bold">{(config.rates.SR * 100).toFixed(1)}%</span>
+                  </div>
+                  <div className="p-1.5 rounded bg-neutral-900 border border-blue-500/20">
+                    <span className="block text-[10px] text-blue-400 font-bold">R</span>
+                    <span className="text-xs text-white font-bold">{(config.rates.R * 100).toFixed(1)}%</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Grouped card list */}
+              <div className="space-y-2.5">
+                {['SSR', 'SR', 'R'].map((rarity) => {
+                  const items = config.cards.filter((c) => c.rarity === rarity);
+                  if (items.length === 0) return null;
+                  return (
+                    <div key={rarity} className="space-y-1">
+                      <span className={`text-[10px] font-black tracking-wider px-1.5 py-0.5 rounded ${
+                        rarity === 'SSR'
+                          ? 'text-amber-400 bg-amber-950/45'
+                          : rarity === 'SR'
+                          ? 'text-purple-400 bg-purple-950/45'
+                          : 'text-blue-400 bg-blue-950/45'
+                      }`}>
+                        {rarity} 级共鸣对象 ({items.length})
+                      </span>
+                      <div className="grid grid-cols-1 gap-1.5 pl-1">
+                        {items.map((item) => (
+                          <div key={item.id} className="flex items-center gap-2.5 p-1.5 rounded-lg bg-neutral-950/50 hover:bg-neutral-950 transition-all border border-neutral-850">
+                            <img src={item.image} alt="" className="size-8 rounded object-cover shrink-0" referrerPolicy="no-referrer" />
+                            <div className="min-w-0">
+                              <div className="text-xs font-bold text-white leading-tight truncate">{item.name}</div>
+                              {item.description && <div className="text-[9px] text-neutral-400 truncate">{item.description}</div>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
+
+      {/* 3. 抽卡记录 Modal */}
+      {showHistoryModal && (
+        <div className="absolute inset-0 z-40 bg-black/95 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-fadeIn">
+          <div className="w-full h-full max-h-[85vh] max-w-sm bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl p-4 flex flex-col overflow-hidden text-neutral-200 relative">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-800 shrink-0">
+              <span className="font-bold text-amber-300 text-sm">✦ 历史共鸣抽卡记录 ✦</span>
+              <button
+                type="button"
+                onClick={() => setShowHistoryModal(false)}
+                className="text-white hover:text-neutral-100 text-xs font-bold px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 cursor-pointer transition-all shadow-md"
+              >
+                关闭
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto py-2 space-y-1.5 pr-0.5">
+              {pullHistory.length === 0 ? (
+                <div className="h-40 flex items-center justify-center text-neutral-500 text-xs italic">
+                  暂无共鸣历史，赶快去抽卡吧！
+                </div>
+              ) : (
+                pullHistory.map((item, idx) => (
+                  <div
+                    key={idx}
+                    className="flex items-center justify-between p-2 rounded-lg bg-neutral-950 border border-neutral-850"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <span className={`px-1 rounded text-[8px] font-black shrink-0 ${
+                        item.rarity === 'SSR'
+                          ? 'bg-amber-400 text-neutral-950'
+                          : item.rarity === 'SR'
+                          ? 'bg-purple-500 text-white'
+                          : 'bg-blue-600 text-white'
+                      }`}>
+                        {item.rarity}
+                      </span>
+                      <span className="text-xs text-white truncate font-medium">{item.name}</span>
+                    </div>
+                    <span className="text-[9px] text-neutral-500 shrink-0 font-mono">
+                      第 {pullHistory.length - idx} 次共鸣
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {pullHistory.length > 0 && (
+              <div className="pt-2 border-t border-neutral-800 flex justify-end shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setPullHistory([])}
+                  className="px-2.5 py-1 text-[10px] bg-red-900/40 hover:bg-red-900/60 text-red-300 hover:text-red-200 rounded cursor-pointer transition"
+                >
+                  清空记录
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
