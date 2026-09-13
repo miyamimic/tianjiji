@@ -12,6 +12,10 @@ import {
   Trash2,
   Plus,
   Palette,
+  Smile,
+  Save,
+  Copy,
+  Link,
 } from 'lucide-react';
 
 export interface CircleButtonArea {
@@ -29,9 +33,9 @@ export interface GachaCardItem {
 }
 
 export interface LayeredGachaConfig {
-  bgImage: string;        // Layer 1: 底图
-  characterImage: string; // Layer 2: 卡池人物图
-  frameImage: string;     // Layer 3: 免扣边框图 (最上层)
+  bgImage: string;        // Layer 1: 底图 (最底层)
+  characterImage: string; // Layer 3: 角色立绘图 (最上层)
+  frameImage: string;     // Layer 2: 免抠边框图 (中间层)
 
   // 6 calibrated button circles based on frame layer
   exitCircle: CircleButtonArea;     // 退出抽卡
@@ -109,15 +113,15 @@ const DEFAULT_FRAME_SVG = `data:image/svg+xml;utf8,${encodeURIComponent(`
 `)}`;
 
 const DEFAULT_CONFIG: LayeredGachaConfig = {
-  // Layer 1: 底图
+  // Layer 1: 底图 (最底层)
   bgImage: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1000&auto=format&fit=crop',
-  // Layer 2: 卡池人物图
+  // Layer 3: 角色立绘图 (最上层)
   characterImage: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=800&auto=format&fit=crop',
-  // Layer 3: 免扣边框图 (最上层)
+  // Layer 2: 免抠边框图 (中间层)
   frameImage: DEFAULT_FRAME_SVG,
 
   // Initial calibrated buttons on frame - Moved up to cy: 82.0
-  exitCircle: { cx: 12.2, cy: 6.9, r: 6.5 },
+  exitCircle: { cx: 0, cy: 0, r: 0 },
   pullOnceCircle: { cx: 28.9, cy: 82.0, r: 9.0 },
   pullTenCircle: { cx: 71.1, cy: 82.0, r: 9.5 },
   detailsCircle: { cx: 20.0, cy: 94.0, r: 8.0 },
@@ -265,12 +269,36 @@ export default function GachaApp({
   const [isDrawing, setIsDrawing] = useState(false);
   const [drawnPoints, setDrawnPoints] = useState<Array<{ x: number; y: number }>>([]);
   const [confirmationNotice, setConfirmationNotice] = useState<string | null>(null);
-  const [showHotZoneOutline, setShowHotZoneOutline] = useState(true);
+  const [showHotZoneOutline, setShowHotZoneOutline] = useState<boolean>(() => {
+    const saved = localStorage.getItem('gacha_show_hotzones');
+    return saved !== null ? saved === 'true' : true;
+  });
 
   // New Card Form State
   const [newCardName, setNewCardName] = useState('');
   const [newCardRarity, setNewCardRarity] = useState<'SSR' | 'SR' | 'R'>('SSR');
   const [newCardImage, setNewCardImage] = useState('');
+
+  // Image URL input modes
+  const [showBgUrlInput, setShowBgUrlInput] = useState(false);
+  const [showFrameUrlInput, setShowFrameUrlInput] = useState(false);
+  const [showCharacterUrlInput, setShowCharacterUrlInput] = useState(false);
+  const [showNewCardUrlInput, setShowNewCardUrlInput] = useState(false);
+
+  // Presets States
+  const [presets, setPresets] = useState<any[]>(() => {
+    const saved = localStorage.getItem('gacha_image_presets');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error('Error parsing presets:', e);
+      }
+    }
+    return [];
+  });
+  const [presetInputName, setPresetInputName] = useState('');
+  const [selectedPresetId, setSelectedPresetId] = useState<string>('');
 
   // Canvas Refs for Brush Circle Calibration
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -427,6 +455,67 @@ export default function GachaApp({
     e.target.value = '';
   };
 
+  // Preset Management Helpers
+  const [presetFeedback, setPresetFeedback] = useState<string | null>(null);
+  useEffect(() => {
+    if (presetFeedback) {
+      const timer = setTimeout(() => setPresetFeedback(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [presetFeedback]);
+
+  const handleSavePreset = () => {
+    const name = presetInputName.trim() || `自定预设_${presets.length + 1}`;
+    const newId = 'p_' + Date.now();
+    const newPreset = {
+      id: newId,
+      name,
+      bgImage: config.bgImage,
+      frameImage: config.frameImage,
+      characterImage: config.characterImage,
+      exitCircle: config.exitCircle,
+      pullOnceCircle: config.pullOnceCircle,
+      pullTenCircle: config.pullTenCircle,
+      detailsCircle: config.detailsCircle,
+      historyCircle: config.historyCircle,
+      customCircle: config.customCircle,
+      date: new Date().toLocaleDateString()
+    };
+    const updated = [...presets, newPreset];
+    setPresets(updated);
+    localStorage.setItem('gacha_image_presets', JSON.stringify(updated));
+    setSelectedPresetId(newId);
+    setPresetInputName('');
+    setPresetFeedback(`成功保存新预设: "${name}"`);
+  };
+
+  const handleLoadPreset = (preset: any) => {
+    setSelectedPresetId(preset.id);
+    setConfig((prev) => ({
+      ...prev,
+      bgImage: preset.bgImage || prev.bgImage,
+      frameImage: preset.frameImage || prev.frameImage,
+      characterImage: preset.characterImage || prev.characterImage,
+      exitCircle: preset.exitCircle || prev.exitCircle,
+      pullOnceCircle: preset.pullOnceCircle || prev.pullOnceCircle,
+      pullTenCircle: preset.pullTenCircle || prev.pullTenCircle,
+      detailsCircle: preset.detailsCircle || prev.detailsCircle,
+      historyCircle: preset.historyCircle || prev.historyCircle,
+      customCircle: preset.customCircle || prev.customCircle,
+    }));
+    setPresetFeedback(`已成功加载预设: "${preset.name}"`);
+  };
+
+  const handleDeletePreset = (id: string) => {
+    const updated = presets.filter((p) => p.id !== id);
+    setPresets(updated);
+    localStorage.setItem('gacha_image_presets', JSON.stringify(updated));
+    if (selectedPresetId === id) {
+      setSelectedPresetId('');
+    }
+    setPresetFeedback('已删除该预设');
+  };
+
   // ============================================================================
   // Brush Canvas Drawing & Circle Auto-Detection
   // ============================================================================
@@ -474,6 +563,8 @@ export default function GachaApp({
     ];
 
     targets.forEach((t) => {
+      if (t.circle.cx === 0 && t.circle.cy === 0 && t.circle.r === 0) return;
+
       const px = (t.circle.cx / 100) * width;
       const py = (t.circle.cy / 100) * height;
       const pr = (t.circle.r / 100) * width;
@@ -674,29 +765,29 @@ export default function GachaApp({
             />
           )}
 
-          {/* Layer 3: 卡池人物图 (最上层) */}
+          {/* Layer 3: 角色立绘 (最上层) */}
           {config.characterImage && (
             <div className="absolute inset-0 z-[3] pointer-events-none flex items-center justify-center overflow-hidden">
               <img
                 src={config.characterImage}
-                alt="卡池人物"
+                alt="角色立绘"
                 className="w-full h-full object-contain filter drop-shadow-[0_15px_30px_rgba(0,0,0,0.85)] scale-95"
                 referrerPolicy="no-referrer"
               />
             </div>
           )}
 
-          {/* Layer 2: 免扣边框图 (中间层) */}
+          {/* Layer 2: 免抠边框图 (中间层) */}
           {config.frameImage && (
             <img
               src={config.frameImage}
-              alt="免扣边框图"
+              alt="免抠边框图"
               className="absolute inset-0 w-full h-full object-contain pointer-events-none z-[2]"
               referrerPolicy="no-referrer"
             />
           )}
 
-          {/* ================= THREE HOT-ZONE BUTTONS (以用户免扣边框图层为准) ================= */}
+          {/* ================= THREE HOT-ZONE BUTTONS (以用户免抠边框图层为准) ================= */}
           {/* 1. 退出抽卡按键热区 */}
           <button
             type="button"
@@ -705,16 +796,16 @@ export default function GachaApp({
             }}
             title="退出抽卡"
             style={{
-              left: `${config.exitCircle.cx}%`,
-              top: `${config.exitCircle.cy}%`,
-              width: `${config.exitCircle.r * 2}%`,
-              height: `${config.exitCircle.r * 2}%`,
+              left: `${config.exitCircle.cx > 0 ? config.exitCircle.cx : 12.2}%`,
+              top: `${config.exitCircle.cy > 0 ? config.exitCircle.cy : 6.9}%`,
+              width: `${config.exitCircle.r > 0 ? config.exitCircle.r * 2 : 13}%`,
+              height: `${config.exitCircle.r > 0 ? config.exitCircle.r * 2 : 13}%`,
               transform: 'translate(-50%, -50%)',
             }}
             className={`absolute z-10 rounded-full cursor-pointer transition active:scale-90 flex items-center justify-center ${
               showHotZoneOutline
                 ? 'border-2 border-red-500/70 bg-red-500/20 hover:bg-red-500/40'
-                : 'opacity-0 hover:opacity-100 bg-red-500/20'
+                : 'border-none bg-transparent hover:bg-red-500/10'
             }`}
           >
             {showHotZoneOutline && (
@@ -737,7 +828,7 @@ export default function GachaApp({
             className={`absolute z-10 rounded-full cursor-pointer transition active:scale-90 flex items-center justify-center ${
               showHotZoneOutline
                 ? 'border-2 border-blue-500/70 bg-blue-500/20 hover:bg-blue-500/40'
-                : 'opacity-0 hover:opacity-100 bg-blue-500/20'
+                : 'border-none bg-transparent hover:bg-blue-500/10'
             }`}
           >
             {showHotZoneOutline && (
@@ -760,7 +851,7 @@ export default function GachaApp({
             className={`absolute z-10 rounded-full cursor-pointer transition active:scale-90 flex items-center justify-center ${
               showHotZoneOutline
                 ? 'border-2 border-amber-400/80 bg-amber-400/25 hover:bg-amber-400/45 ring-2 ring-amber-400/30'
-                : 'opacity-0 hover:opacity-100 bg-amber-400/25'
+                : 'border-none bg-transparent hover:bg-amber-400/10'
             }`}
           >
             {showHotZoneOutline && (
@@ -783,7 +874,7 @@ export default function GachaApp({
             className={`absolute z-10 rounded-full cursor-pointer transition active:scale-90 flex items-center justify-center ${
               showHotZoneOutline
                 ? 'border-2 border-emerald-500/70 bg-emerald-500/20 hover:bg-emerald-500/40'
-                : 'opacity-0 hover:opacity-100 bg-emerald-500/20'
+                : 'border-none bg-transparent hover:bg-emerald-500/10'
             }`}
           >
             {showHotZoneOutline && (
@@ -806,7 +897,7 @@ export default function GachaApp({
             className={`absolute z-10 rounded-full cursor-pointer transition active:scale-90 flex items-center justify-center ${
               showHotZoneOutline
                 ? 'border-2 border-purple-500/70 bg-purple-500/20 hover:bg-purple-500/40'
-                : 'opacity-0 hover:opacity-100 bg-purple-500/20'
+                : 'border-none bg-transparent hover:bg-purple-500/10'
             }`}
           >
             {showHotZoneOutline && (
@@ -832,7 +923,7 @@ export default function GachaApp({
             className={`absolute z-10 rounded-full cursor-pointer transition active:scale-90 flex items-center justify-center ${
               showHotZoneOutline
                 ? 'border-2 border-pink-500/70 bg-pink-500/20 hover:bg-pink-500/40'
-                : 'opacity-0 hover:opacity-100 bg-pink-500/20'
+                : 'border-none bg-transparent hover:bg-pink-500/10'
             }`}
           >
             {showHotZoneOutline && (
@@ -937,20 +1028,20 @@ export default function GachaApp({
         className="flex-1 h-full flex flex-col bg-neutral-900 overflow-hidden relative"
       >
         {/* Chat Messages Stream */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3.5">
+        <div className="flex-1 overflow-y-auto px-0 py-4 space-y-3.5">
           {chatMessages.map((msg) => {
             const isChar = msg.sender === 'character';
             return (
               <div
                 key={msg.id}
-                className={`flex flex-col ${isChar ? 'items-start' : 'items-end'} w-full`}
+                className={`flex flex-col ${isChar ? 'items-start w-full' : 'items-end w-full px-3.5'}`}
               >
                 <div
-                  className={`max-w-[85%] px-3 py-2 rounded-xl text-[10px] leading-relaxed break-words shadow-sm ${
+                  className={`${
                     isChar
-                      ? 'bg-neutral-800 text-neutral-100 rounded-tl-none border border-neutral-700/40'
-                      : 'bg-amber-500 text-neutral-950 font-medium rounded-tr-none'
-                  }`}
+                      ? 'w-full px-2.5 py-1.5 bg-neutral-800 text-neutral-100 text-[9px]'
+                      : 'max-w-[85%] px-3 py-2 rounded-xl bg-amber-500 text-neutral-950 font-medium rounded-tr-none text-[10px]'
+                  } leading-relaxed break-words shadow-sm`}
                 >
                   {msg.text}
                 </div>
@@ -958,7 +1049,7 @@ export default function GachaApp({
             );
           })}
           {isSending && (
-            <div className="flex items-center gap-1.5 text-[9px] text-neutral-400 px-1 italic">
+            <div className="flex items-center gap-1.5 text-[9px] text-neutral-400 px-4 italic">
               <span className="size-1 bg-neutral-400 rounded-full animate-bounce" />
               <span>正在回应...</span>
             </div>
@@ -967,8 +1058,36 @@ export default function GachaApp({
         </div>
 
         {/* Chat Input Bar */}
-        <div className="p-3 bg-neutral-950 border-t border-neutral-850 shrink-0">
-          <div className="flex items-center gap-2">
+        <div className="w-[88%] mx-auto mb-3.5 shrink-0 flex flex-col gap-1.5">
+          {/* Action Row: Smile & Toggle Outlines */}
+          <div className="flex items-center gap-2 px-0.5 select-none">
+            {/* Smile Emoji Icon Button */}
+            <button
+              type="button"
+              onClick={() => setChatInput((p) => p + '😄')}
+              title="表情包"
+              className="p-1 rounded text-neutral-400 hover:text-white hover:bg-neutral-900 active:scale-90 transition-all cursor-pointer flex items-center justify-center"
+            >
+              <Smile className="size-3.5 text-amber-400" />
+            </button>
+
+            {/* Toggle show/hide outlines - Text Only Button */}
+            <button
+              type="button"
+              onClick={() => setShowHotZoneOutline((v) => {
+                const next = !v;
+                localStorage.setItem('gacha_show_hotzones', String(next));
+                return next;
+              })}
+              title={showHotZoneOutline ? "隐藏标注圆圈" : "显示标注圆圈"}
+              className="text-[9.5px] font-bold text-neutral-400 hover:text-white hover:bg-neutral-900 px-1.5 py-0.5 rounded transition-all active:scale-95 cursor-pointer"
+            >
+              {showHotZoneOutline ? '隐藏' : '显示'}
+            </button>
+          </div>
+
+          {/* Actual Input Controls */}
+          <div className="flex items-center gap-1.5">
             <input
               type="text"
               placeholder={`和${characterName || '角色'}聊天...`}
@@ -977,14 +1096,14 @@ export default function GachaApp({
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleSendMessage();
               }}
-              className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-855 text-[11px] text-white placeholder:text-neutral-500 focus:outline-none focus:border-amber-500"
+              className="flex-1 px-2.5 py-1 rounded-lg bg-neutral-900 border border-neutral-800 text-[10px] text-white placeholder:text-neutral-500 focus:outline-none focus:border-amber-500 min-h-[25px]"
             />
             <button
               onClick={() => handleSendMessage()}
               disabled={!chatInput.trim() || isSending}
-              className="p-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-neutral-950 font-bold transition cursor-pointer"
+              className="p-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-neutral-950 font-bold transition cursor-pointer flex items-center justify-center shrink-0"
             >
-              <Send className="size-3.5" />
+              <Send className="size-3" />
             </button>
           </div>
         </div>
@@ -997,7 +1116,15 @@ export default function GachaApp({
       {/* 1. 自定义卡池与机位标定 Modal */}
       {showCustomModal && (
         <div className="absolute inset-0 z-40 bg-black/95 backdrop-blur-sm flex items-center justify-center p-2 animate-fadeIn">
-          <div className="w-[94%] h-[94%] max-w-[330px] max-h-[580px] bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-neutral-200 relative">
+          <div
+            style={{
+              maxWidth: customSubView === 'brush' ? '540px' : '330px',
+              maxHeight: customSubView === 'brush' ? '460px' : '580px',
+              width: '94%',
+              height: '94%',
+            }}
+            className="bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl flex flex-col overflow-hidden text-neutral-200 relative transition-all duration-300"
+          >
             
             {/* 1.1 MENU SELECTION SCREEN */}
             {customSubView === 'menu' && (
@@ -1062,143 +1189,155 @@ export default function GachaApp({
  
             {/* 1.2 BRUSH DRAW VIEW (Only when 'brush' is selected) */}
             {customSubView === 'brush' && (
-              <div className="flex-1 flex flex-col overflow-hidden">
+              <div className="flex-1 flex flex-col overflow-hidden touch-none">
                 {/* Header with Back and Direct Close */}
-                <div className="flex items-center justify-between px-3 py-2 bg-neutral-950 border-b border-neutral-800 shrink-0">
+                <div className="flex items-center justify-between px-3 py-1.5 bg-neutral-950 border-b border-neutral-800 shrink-0">
                   <button
                     type="button"
                     onClick={() => setCustomSubView('menu')}
-                    className="text-amber-400 hover:text-white text-[11px] font-bold px-2.5 py-1 rounded-lg bg-neutral-800 hover:bg-neutral-700 cursor-pointer transition-all flex items-center gap-1"
+                    className="text-amber-400 hover:text-white text-[10px] font-bold px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 cursor-pointer transition-all flex items-center gap-1"
                   >
                     <span>⬅ 返回菜单</span>
                   </button>
+                  <span className="text-[10px] text-amber-200 font-bold">画笔机位标定</span>
                   <button
                     type="button"
                     onClick={() => setShowCustomModal(false)}
-                    className="text-white hover:text-neutral-100 text-[11px] font-bold px-2.5 py-1 rounded-lg bg-red-600 hover:bg-red-500 cursor-pointer transition-all shadow-md shrink-0"
+                    className="text-white hover:text-neutral-100 text-[10px] font-bold px-2 py-1 rounded bg-red-600 hover:bg-red-500 cursor-pointer transition-all shrink-0"
                   >
-                    直接关闭
+                    关闭
                   </button>
                 </div>
  
-                {/* Paintbrush Draw Interface */}
-                <div className="flex-1 overflow-y-auto p-3 flex flex-col space-y-2.5">
-                  <div className="p-2 rounded-xl bg-neutral-950 border border-neutral-850 shrink-0 text-center">
-                    <span className="text-amber-300 font-bold text-xs block">🎨 1. 画笔画圈定位热区</span>
-                    <p className="text-[9.5px] text-neutral-400 leading-relaxed mt-0.5">
-                      在下方画布上画圈。松手后系统将自动算出中心和大小，并绑定为对应的点击热区！
-                    </p>
-                  </div>
- 
-                  <div className="grid grid-cols-3 gap-1 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() => setActiveBrushTarget('exit')}
-                      className={`py-1 px-1 rounded-lg text-[9px] font-bold border transition cursor-pointer flex flex-col items-center justify-center ${
-                        activeBrushTarget === 'exit'
-                          ? 'bg-red-500/20 border-red-500 text-red-300 shadow-sm'
-                          : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
-                      }`}
-                    >
-                      <span>🔴 退出键</span>
-                      <span className="text-[7.5px] opacity-75 font-mono mt-0.5">
-                        ({config.exitCircle.cx}%, {config.exitCircle.cy}%)
-                      </span>
-                    </button>
- 
-                    <button
-                      type="button"
-                      onClick={() => setActiveBrushTarget('pull_once')}
-                      className={`py-1 px-1 rounded-lg text-[9px] font-bold border transition cursor-pointer flex flex-col items-center justify-center ${
-                        activeBrushTarget === 'pull_once'
-                          ? 'bg-blue-500/20 border-blue-500 text-blue-300 shadow-sm'
-                          : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
-                      }`}
-                    >
-                      <span>🔵 单抽键</span>
-                      <span className="text-[7.5px] opacity-75 font-mono mt-0.5">
-                        ({config.pullOnceCircle.cx}%, {config.pullOnceCircle.cy}%)
-                      </span>
-                    </button>
- 
-                    <button
-                      type="button"
-                      onClick={() => setActiveBrushTarget('pull_ten')}
-                      className={`py-1 px-1 rounded-lg text-[9px] font-bold border transition cursor-pointer flex flex-col items-center justify-center ${
-                        activeBrushTarget === 'pull_ten'
-                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm'
-                          : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
-                      }`}
-                    >
-                      <span>🟡 十连键</span>
-                      <span className="text-[7.5px] opacity-75 font-mono mt-0.5">
-                        ({config.pullTenCircle.cx}%, {config.pullTenCircle.cy}%)
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setActiveBrushTarget('details')}
-                      className={`py-1 px-1 rounded-lg text-[9px] font-bold border transition cursor-pointer flex flex-col items-center justify-center ${
-                        activeBrushTarget === 'details'
-                          ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm'
-                          : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
-                      }`}
-                    >
-                      <span>🟢 详情键</span>
-                      <span className="text-[7.5px] opacity-75 font-mono mt-0.5">
-                        ({config.detailsCircle.cx}%, {config.detailsCircle.cy}%)
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setActiveBrushTarget('history')}
-                      className={`py-1 px-1 rounded-lg text-[9px] font-bold border transition cursor-pointer flex flex-col items-center justify-center ${
-                        activeBrushTarget === 'history'
-                          ? 'bg-purple-500/20 border-purple-500 text-purple-300 shadow-sm'
-                          : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
-                      }`}
-                    >
-                      <span>🟣 记录键</span>
-                      <span className="text-[7.5px] opacity-75 font-mono mt-0.5">
-                        ({config.historyCircle.cx}%, {config.historyCircle.cy}%)
-                      </span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setActiveBrushTarget('custom')}
-                      className={`py-1 px-1 rounded-lg text-[9px] font-bold border transition cursor-pointer flex flex-col items-center justify-center ${
-                        activeBrushTarget === 'custom'
-                          ? 'bg-pink-500/20 border-pink-500 text-pink-300 shadow-sm'
-                          : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
-                      }`}
-                    >
-                      <span>🌸 自定义键</span>
-                      <span className="text-[7.5px] opacity-75 font-mono mt-0.5">
-                        ({config.customCircle.cx}%, {config.customCircle.cy}%)
-                      </span>
-                    </button>
-                  </div>
- 
-                  {confirmationNotice && (
-                    <div className="p-1.5 rounded-lg bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-[9px] flex items-center gap-1 shrink-0 animate-fadeIn justify-center">
-                      <Check className="size-3 text-emerald-400 shrink-0" />
-                      <span>{confirmationNotice}</span>
+                {/* Paintbrush Draw Interface: Horizontal Split Screen */}
+                <div className="flex-1 flex flex-row overflow-hidden p-2 gap-2 touch-none">
+                  {/* Left Column: Color/Keys Controls */}
+                  <div className="w-[44%] flex flex-col justify-between overflow-y-auto pr-0.5 select-none gap-2">
+                    <div className="p-1 rounded bg-neutral-950 border border-neutral-850 shrink-0 text-center">
+                      <span className="text-amber-300 font-bold text-[9px] block">🎨 画笔圈定热区</span>
+                      <p className="text-[8px] text-neutral-400 leading-normal mt-0.5">
+                        在右侧画布上用画笔画圈标定，松手后即可自动定位。
+                      </p>
                     </div>
-                  )}
- 
-                  <div className="flex-1 w-full aspect-[9/16] min-h-[260px] max-w-[240px] mx-auto bg-black rounded-xl overflow-hidden border border-neutral-800 relative touch-none cursor-crosshair">
-                    <canvas
-                      ref={canvasRef}
-                      width={360}
-                      height={640}
-                      onPointerDown={handlePointerDown}
-                      onPointerMove={handlePointerMove}
-                      onPointerUp={handlePointerUp}
-                      className="w-full h-full object-contain block"
-                    />
+
+                    {/* Compact Stack of 6 Targets */}
+                    <div className="grid grid-cols-2 gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setActiveBrushTarget('exit')}
+                        className={`py-1 px-0.5 rounded text-[8.5px] font-bold border transition cursor-pointer flex flex-col items-center justify-center leading-tight ${
+                          activeBrushTarget === 'exit'
+                            ? 'bg-red-500/20 border-red-500 text-red-300 shadow-sm'
+                            : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
+                        }`}
+                      >
+                        <span>🔴 退出键</span>
+                        <span className="text-[7.2px] opacity-75 font-mono">
+                          ({config.exitCircle.cx}%, {config.exitCircle.cy}%)
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setActiveBrushTarget('pull_once')}
+                        className={`py-1 px-0.5 rounded text-[8.5px] font-bold border transition cursor-pointer flex flex-col items-center justify-center leading-tight ${
+                          activeBrushTarget === 'pull_once'
+                            ? 'bg-blue-500/20 border-blue-500 text-blue-300 shadow-sm'
+                            : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
+                        }`}
+                      >
+                        <span>🔵 单抽键</span>
+                        <span className="text-[7.2px] opacity-75 font-mono">
+                          ({config.pullOnceCircle.cx}%, {config.pullOnceCircle.cy}%)
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setActiveBrushTarget('pull_ten')}
+                        className={`py-1 px-0.5 rounded text-[8.5px] font-bold border transition cursor-pointer flex flex-col items-center justify-center leading-tight ${
+                          activeBrushTarget === 'pull_ten'
+                            ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-sm'
+                            : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
+                        }`}
+                      >
+                        <span>🟡 十连键</span>
+                        <span className="text-[7.2px] opacity-75 font-mono">
+                          ({config.pullTenCircle.cx}%, {config.pullTenCircle.cy}%)
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setActiveBrushTarget('details')}
+                        className={`py-1 px-0.5 rounded text-[8.5px] font-bold border transition cursor-pointer flex flex-col items-center justify-center leading-tight ${
+                          activeBrushTarget === 'details'
+                            ? 'bg-emerald-500/20 border-emerald-500 text-emerald-300 shadow-sm'
+                            : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
+                        }`}
+                      >
+                        <span>🟢 详情键</span>
+                        <span className="text-[7.2px] opacity-75 font-mono">
+                          ({config.detailsCircle.cx}%, {config.detailsCircle.cy}%)
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setActiveBrushTarget('history')}
+                        className={`py-1 px-0.5 rounded text-[8.5px] font-bold border transition cursor-pointer flex flex-col items-center justify-center leading-tight ${
+                          activeBrushTarget === 'history'
+                            ? 'bg-purple-500/20 border-purple-500 text-purple-300 shadow-sm'
+                            : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
+                        }`}
+                      >
+                        <span>🟣 记录键</span>
+                        <span className="text-[7.2px] opacity-75 font-mono">
+                          ({config.historyCircle.cx}%, {config.historyCircle.cy}%)
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setActiveBrushTarget('custom')}
+                        className={`py-1 px-0.5 rounded text-[8.5px] font-bold border transition cursor-pointer flex flex-col items-center justify-center leading-tight ${
+                          activeBrushTarget === 'custom'
+                            ? 'bg-pink-500/20 border-pink-500 text-pink-300 shadow-sm'
+                            : 'bg-neutral-950 border-neutral-850 text-neutral-400 hover:text-white'
+                        }`}
+                      >
+                        <span>🌸 自定义键</span>
+                        <span className="text-[7.2px] opacity-75 font-mono">
+                          ({config.customCircle.cx}%, {config.customCircle.cy}%)
+                        </span>
+                      </button>
+                    </div>
+
+                    {confirmationNotice ? (
+                      <div className="p-1 rounded bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-[8px] leading-tight flex items-center gap-1 shrink-0 animate-fadeIn justify-center text-center">
+                        <Check className="size-2.5 text-emerald-400 shrink-0" />
+                        <span>{confirmationNotice}</span>
+                      </div>
+                    ) : (
+                      <div className="p-1 rounded bg-neutral-950 text-neutral-400 text-[7.5px] leading-tight text-center">
+                        依次点亮按键，并在右侧底图画面对应位置画圈标定。
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Right Column: Canvas Container */}
+                  <div className="flex-1 h-full flex items-center justify-center relative bg-black rounded-xl border border-neutral-800 overflow-hidden touch-none">
+                    <div className="relative aspect-[9/16] h-full max-h-full flex items-center justify-center">
+                      <canvas
+                        ref={canvasRef}
+                        width={360}
+                        height={640}
+                        onPointerDown={handlePointerDown}
+                        onPointerMove={handlePointerMove}
+                        onPointerUp={handlePointerUp}
+                        className="w-full h-full bg-black block touch-none cursor-crosshair"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1228,58 +1367,212 @@ export default function GachaApp({
                 {/* Upload & Pool Config Fields */}
                 <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
                   {/* 1. 三大图层上传 */}
-                  <div className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-3">
-                    <span className="font-bold text-amber-300 text-[11px] block">🖼️ 1. 上传底图、立绘与免扣边框</span>
+                  <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2.5 relative">
+                    {/* Header with compact presets row */}
+                    <div className="flex flex-wrap items-center justify-between gap-1.5 border-b border-neutral-850 pb-2">
+                      <span className="font-bold text-amber-300 text-[10.5px]">🖼️ 1. 上传与预设</span>
+                      
+                      {/* Presets Row: "两个小框" */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {/* 1. 保存预设小框 */}
+                        <div className="flex items-center gap-1 bg-neutral-900 border border-neutral-800 rounded px-1.5 py-0.5">
+                          <input
+                            type="text"
+                            placeholder="起名保存..."
+                            value={presetInputName}
+                            onChange={(e) => setPresetInputName(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') handleSavePreset();
+                            }}
+                            className="bg-transparent text-[8.5px] text-white focus:outline-none w-[55px] placeholder:text-neutral-600"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleSavePreset}
+                            title="保存预设"
+                            className="p-0.5 text-amber-400 hover:text-amber-300 active:scale-90 transition cursor-pointer shrink-0"
+                          >
+                            <Save className="size-2.5" />
+                          </button>
+                        </div>
+
+                        {/* 2. 已有预设下拉小框 */}
+                        <select
+                          value={selectedPresetId}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (!val) return;
+                            const selected = presets.find(p => p.id === val);
+                            if (selected) {
+                              handleLoadPreset(selected);
+                            }
+                          }}
+                          className="px-1 py-0.5 rounded bg-neutral-900 border border-neutral-800 text-[8.5px] text-neutral-300 focus:outline-none max-w-[80px] cursor-pointer"
+                        >
+                          <option value="">已有预设 ({presets.length})</option>
+                          {presets.map(p => (
+                            <option key={p.id} value={p.id}>{p.name}</option>
+                          ))}
+                        </select>
+
+                        {/* 3. 垃圾桶按钮 */}
+                        {selectedPresetId && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              handleDeletePreset(selectedPresetId);
+                            }}
+                            title="删除当前预设"
+                            className="p-1 rounded bg-neutral-900 border border-neutral-800 hover:bg-red-950 text-neutral-400 hover:text-red-400 active:scale-90 transition cursor-pointer shrink-0 flex items-center justify-center"
+                          >
+                            <Trash2 className="size-3" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {presetFeedback && (
+                      <div className="absolute top-1 right-2 px-1.5 py-0.5 rounded bg-amber-500 text-neutral-950 text-[8px] font-bold z-20 shadow-lg animate-fadeIn">
+                        {presetFeedback}
+                      </div>
+                    )}
 
                     {/* ① 底图 */}
                     <div className="flex items-center justify-between gap-2 border-b border-neutral-850 pb-2.5">
                       <div className="min-w-0">
-                        <span className="font-bold text-white text-[10.5px]">① 底图 (最底层)</span>
+                        <span className="font-bold text-white text-[10px]">① 底图 (最底层)</span>
                       </div>
-                      <label className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10px] cursor-pointer flex items-center gap-1 transition shrink-0">
-                        <Upload className="size-3" />
-                        <span>上传底图</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => handleFileUpload(e, (url) => setConfig((p) => ({ ...p, bgImage: url })))}
-                        />
-                      </label>
+                      {showBgUrlInput ? (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input
+                            type="text"
+                            placeholder="粘贴底图URL..."
+                            value={config.bgImage}
+                            onChange={(e) => setConfig((p) => ({ ...p, bgImage: e.target.value }))}
+                            className="px-2 py-1 rounded bg-neutral-900 border border-neutral-800 text-[9px] text-white focus:outline-none w-[110px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowBgUrlInput(false)}
+                            className="text-[8.5px] text-neutral-400 hover:text-white px-1.5 py-1"
+                          >
+                            本地
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setShowBgUrlInput(true)}
+                            title="输入图床链接"
+                            className="p-1 rounded bg-neutral-900 border border-neutral-800 hover:border-amber-500 hover:text-amber-400 text-neutral-400 transition cursor-pointer"
+                          >
+                            <Link className="size-3" />
+                          </button>
+                          <label className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10px] cursor-pointer flex items-center gap-1 transition shrink-0">
+                            <Upload className="size-3" />
+                            <span>上传底图</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => handleFileUpload(e, (url) => setConfig((p) => ({ ...p, bgImage: url })))}
+                            />
+                          </label>
+                        </div>
+                      )}
                     </div>
 
-                    {/* ② 人物立绘 */}
+                    {/* ② 免抠边框 */}
                     <div className="flex items-center justify-between gap-2 border-b border-neutral-850 pb-2.5">
                       <div className="min-w-0">
-                        <span className="font-bold text-white text-[10.5px]">② 角色立绘 (中间层)</span>
+                        <span className="font-bold text-white text-[10px]">② 免抠边框 (中间层)</span>
                       </div>
-                      <label className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10px] cursor-pointer flex items-center gap-1 transition shrink-0">
-                        <Upload className="size-3" />
-                        <span>上传立绘</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => handleFileUpload(e, (url) => setConfig((p) => ({ ...p, characterImage: url })))}
-                        />
-                      </label>
+                      {showFrameUrlInput ? (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input
+                            type="text"
+                            placeholder="粘贴边框URL..."
+                            value={config.frameImage}
+                            onChange={(e) => setConfig((p) => ({ ...p, frameImage: e.target.value }))}
+                            className="px-2 py-1 rounded bg-neutral-900 border border-neutral-800 text-[9px] text-white focus:outline-none w-[110px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowFrameUrlInput(false)}
+                            className="text-[8.5px] text-neutral-400 hover:text-white px-1.5 py-1"
+                          >
+                            本地
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setShowFrameUrlInput(true)}
+                            title="输入图床链接"
+                            className="p-1 rounded bg-neutral-900 border border-neutral-800 hover:border-amber-500 hover:text-amber-400 text-neutral-400 transition cursor-pointer"
+                          >
+                            <Link className="size-3" />
+                          </button>
+                          <label className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10px] cursor-pointer flex items-center gap-1 transition shrink-0">
+                            <Upload className="size-3" />
+                            <span>上传边框</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => handleFileUpload(e, (url) => setConfig((p) => ({ ...p, frameImage: url })))}
+                            />
+                          </label>
+                        </div>
+                      )}
                     </div>
 
-                    {/* ③ 免扣边框 */}
+                    {/* ③ 角色立绘 */}
                     <div className="flex items-center justify-between gap-2">
                       <div className="min-w-0">
-                        <span className="font-bold text-white text-[10.5px]">③ 免扣边框 (最上层)</span>
+                        <span className="font-bold text-white text-[10px]">③ 角色立绘 (最上层)</span>
                       </div>
-                      <label className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10px] cursor-pointer flex items-center gap-1 transition shrink-0">
-                        <Upload className="size-3" />
-                        <span>上传边框</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => handleFileUpload(e, (url) => setConfig((p) => ({ ...p, frameImage: url })))}
-                        />
-                      </label>
+                      {showCharacterUrlInput ? (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <input
+                            type="text"
+                            placeholder="粘贴立绘URL..."
+                            value={config.characterImage}
+                            onChange={(e) => setConfig((p) => ({ ...p, characterImage: e.target.value }))}
+                            className="px-2 py-1 rounded bg-neutral-900 border border-neutral-800 text-[9px] text-white focus:outline-none w-[110px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowCharacterUrlInput(false)}
+                            className="text-[8.5px] text-neutral-400 hover:text-white px-1.5 py-1"
+                          >
+                            本地
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setShowCharacterUrlInput(true)}
+                            title="输入图床链接"
+                            className="p-1 rounded bg-neutral-900 border border-neutral-800 hover:border-amber-500 hover:text-amber-400 text-neutral-400 transition cursor-pointer"
+                          >
+                            <Link className="size-3" />
+                          </button>
+                          <label className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10px] cursor-pointer flex items-center gap-1 transition shrink-0">
+                            <Upload className="size-3" />
+                            <span>上传立绘</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => handleFileUpload(e, (url) => setConfig((p) => ({ ...p, characterImage: url })))}
+                            />
+                          </label>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1357,17 +1650,46 @@ export default function GachaApp({
                       </select>
                     </div>
 
-                    <div className="flex items-center justify-between gap-2 pt-0.5">
-                      <label className="px-2.5 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 text-[10px] text-neutral-300 cursor-pointer flex items-center gap-1 transition">
-                        <Upload className="size-3 animate-pulse" />
-                        <span>{newCardImage ? '已选择卡面' : '上传卡面'}</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => handleFileUpload(e, (url) => setNewCardImage(url))}
-                        />
-                      </label>
+                     <div className="flex items-center justify-between gap-2 pt-0.5">
+                      {showNewCardUrlInput ? (
+                        <div className="flex items-center gap-1">
+                          <input
+                            type="text"
+                            placeholder="粘贴卡面URL..."
+                            value={newCardImage}
+                            onChange={(e) => setNewCardImage(e.target.value)}
+                            className="px-2 py-1 rounded bg-neutral-900 border border-neutral-800 text-[10px] text-white focus:outline-none w-[110px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowNewCardUrlInput(false)}
+                            className="text-[8.5px] text-neutral-400 hover:text-white px-1.5"
+                          >
+                            本地
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setShowNewCardUrlInput(true)}
+                            title="输入图床链接"
+                            className="p-1.5 rounded bg-neutral-900 border border-neutral-800 hover:border-amber-500 hover:text-amber-400 text-neutral-400 transition cursor-pointer"
+                          >
+                            <Link className="size-3" />
+                          </button>
+                          <label className="px-2.5 py-1.5 rounded bg-neutral-800 hover:bg-neutral-700 text-[10px] text-neutral-300 cursor-pointer flex items-center gap-1 transition">
+                            <Upload className="size-3 animate-pulse" />
+                            <span>{newCardImage ? '已选择卡面' : '上传卡面'}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => handleFileUpload(e, (url) => setNewCardImage(url))}
+                            />
+                          </label>
+                        </div>
+                      )}
 
                       <button
                         type="button"
