@@ -33,7 +33,7 @@ import { getCharacterById, MOCK_CHARACTERS } from '../data/characters';
 // ================= CUSTOM RETRO SYSTEM ICONS =================
 
 const FileCabinetIcon = () => (
-  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+  <svg className="w-8 h-8 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
     {/* 3D Drawer Cabinet Outline */}
     <rect x="6" y="4" width="20" height="24" fill="#ffdf70" stroke="#000" strokeWidth="1.5" />
     {/* Divider lines between drawers */}
@@ -47,7 +47,7 @@ const FileCabinetIcon = () => (
 );
 
 const ChatsFolderIcon = () => (
-  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+  <svg className="w-8 h-8 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
     {/* Retro Yellow Manila Folder */}
     <path d="M4 6V26H28V10H16L12 6H4Z" fill="#ffdf70" stroke="#000" strokeWidth="1.5" />
     {/* Paper sticking out slightly */}
@@ -58,7 +58,7 @@ const ChatsFolderIcon = () => (
 );
 
 const CardsExportIcon = () => (
-  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+  <svg className="w-8 h-8 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
     {/* Personal Card Layout */}
     <rect x="4" y="6" width="24" height="20" fill="#fff" stroke="#000" strokeWidth="1.5" />
     <rect x="6" y="8" width="20" height="4" fill="#0000a8" />
@@ -73,7 +73,7 @@ const CardsExportIcon = () => (
 );
 
 const PromptPresetsIcon = () => (
-  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+  <svg className="w-8 h-8 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
     {/* Spiral binder notebook */}
     <rect x="8" y="4" width="18" height="24" fill="#fff" stroke="#000" strokeWidth="1.5" />
     {/* Spiral rings */}
@@ -93,7 +93,7 @@ const PromptPresetsIcon = () => (
 );
 
 const ControlPanelIcon = () => (
-  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+  <svg className="w-8 h-8 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
     {/* Retro gray computer case with CRT display */}
     <rect x="4" y="4" width="24" height="18" fill="#d4d4d4" stroke="#000" strokeWidth="1.5" rx="1" />
     {/* Blue CRT screen */}
@@ -107,7 +107,7 @@ const ControlPanelIcon = () => (
 );
 
 const FloppyDiskIcon = () => (
-  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+  <svg className="w-8 h-8 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
     {/* Classic 3.5" Blue Floppy Disk */}
     <path d="M4 4H24L28 8V28H4V4Z" fill="#0000a8" stroke="#000" strokeWidth="1.5" />
     {/* White sliding sticker label */}
@@ -121,7 +121,7 @@ const FloppyDiskIcon = () => (
 );
 
 const PrinterIcon = () => (
-  <svg className="w-14 h-14 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
+  <svg className="w-8 h-8 select-none pointer-events-none" viewBox="0 0 32 32" fill="none">
     {/* Printer device */}
     <rect x="6" y="11" width="20" height="13" fill="#d4d4d4" stroke="#000" strokeWidth="1.5" />
     {/* Upper paper slot */}
@@ -352,19 +352,19 @@ export default function DataBackupModal({ currentCharacterId, onDataImported, on
       <div className="flex-1 p-5 bg-white border-2 border-t-black border-l-black border-b-white border-r-white m-1.5 overflow-y-auto">
         
         {/* Retro Desktop-like Desktop Icon Grid - 4 or more columns horizontally and vertically */}
-        <div className="grid grid-cols-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-y-8 gap-x-3 text-center justify-items-center">
+        <div className="grid grid-cols-4 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 gap-y-5 gap-x-2 text-center justify-items-center">
           
           {/* Icon 1: Export Full ZIP */}
           <div 
             onDoubleClick={handleExportFullZip}
             onClick={handleExportFullZip}
-            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            className="group flex flex-col items-center gap-0.5 cursor-pointer p-1 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
             title="双击或点击打包导出系统全量备份"
           >
-            <div className="w-16 h-16 flex items-center justify-center animate-none">
+            <div className="w-9 h-9 flex items-center justify-center animate-none">
               <FileCabinetIcon />
             </div>
-            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2">
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[68px] sm:max-w-[76px] break-all sm:break-normal line-clamp-2">
               打包备份.ZIP
             </span>
           </div>
@@ -373,13 +373,13 @@ export default function DataBackupModal({ currentCharacterId, onDataImported, on
           <div 
             onDoubleClick={exportAllCharactersChatsToJson}
             onClick={exportAllCharactersChatsToJson}
-            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            className="group flex flex-col items-center gap-0.5 cursor-pointer p-1 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
             title="双击或点击导出全部历史对话"
           >
-            <div className="w-16 h-16 flex items-center justify-center animate-none">
+            <div className="w-9 h-9 flex items-center justify-center animate-none">
               <ChatsFolderIcon />
             </div>
-            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2">
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[68px] sm:max-w-[76px] break-all sm:break-normal line-clamp-2">
               全部对话.JSON
             </span>
           </div>
@@ -388,13 +388,13 @@ export default function DataBackupModal({ currentCharacterId, onDataImported, on
           <div 
             onDoubleClick={() => exportSingleCharacterCard(currentChar)}
             onClick={() => exportSingleCharacterCard(currentChar)}
-            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            className="group flex flex-col items-center gap-0.5 cursor-pointer p-1 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
             title={`导出当前角色 [${currentChar.name}] 人设档案`}
           >
-            <div className="w-16 h-16 flex items-center justify-center animate-none">
+            <div className="w-9 h-9 flex items-center justify-center animate-none">
               <CardsExportIcon />
             </div>
-            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2 truncate">
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[68px] sm:max-w-[76px] break-all sm:break-normal line-clamp-2 truncate">
               {currentChar.name}档案.JSON
             </span>
           </div>
@@ -403,13 +403,13 @@ export default function DataBackupModal({ currentCharacterId, onDataImported, on
           <div 
             onDoubleClick={exportPromptPresetsToJson}
             onClick={exportPromptPresetsToJson}
-            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            className="group flex flex-col items-center gap-0.5 cursor-pointer p-1 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
             title="双击或点击导出自定义提示词方案"
           >
-            <div className="w-16 h-16 flex items-center justify-center animate-none">
+            <div className="w-9 h-9 flex items-center justify-center animate-none">
               <PromptPresetsIcon />
             </div>
-            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2">
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[68px] sm:max-w-[76px] break-all sm:break-normal line-clamp-2">
               提示预设.JSON
             </span>
           </div>
@@ -418,13 +418,13 @@ export default function DataBackupModal({ currentCharacterId, onDataImported, on
           <div 
             onDoubleClick={exportSettingsToJson}
             onClick={exportSettingsToJson}
-            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            className="group flex flex-col items-center gap-0.5 cursor-pointer p-1 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
             title="双击或点击导出系统规则与拦截设置"
           >
-            <div className="w-16 h-16 flex items-center justify-center animate-none">
+            <div className="w-9 h-9 flex items-center justify-center animate-none">
               <ControlPanelIcon />
             </div>
-            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2">
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[68px] sm:max-w-[76px] break-all sm:break-normal line-clamp-2">
               系统规则.JSON
             </span>
           </div>
@@ -433,13 +433,13 @@ export default function DataBackupModal({ currentCharacterId, onDataImported, on
           <div 
             onDoubleClick={() => fileInputRef.current?.click()}
             onClick={() => fileInputRef.current?.click()}
-            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            className="group flex flex-col items-center gap-0.5 cursor-pointer p-1 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
             title="双击或点击选择文件恢复本地数据库"
           >
-            <div className="w-16 h-16 flex items-center justify-center animate-none">
+            <div className="w-9 h-9 flex items-center justify-center animate-none">
               <FloppyDiskIcon />
             </div>
-            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2">
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[68px] sm:max-w-[76px] break-all sm:break-normal line-clamp-2">
               数据恢复
             </span>
           </div>
@@ -448,13 +448,13 @@ export default function DataBackupModal({ currentCharacterId, onDataImported, on
           <div 
             onDoubleClick={() => setShowStatsModal(true)}
             onClick={() => setShowStatsModal(true)}
-            className="group flex flex-col items-center gap-1 cursor-pointer p-1.5 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
+            className="group flex flex-col items-center gap-0.5 cursor-pointer p-1 rounded hover:bg-[#0000a8] hover:text-white transition-all select-none"
             title="双击或点击查看本地数据库存容量"
           >
-            <div className="w-16 h-16 flex items-center justify-center animate-none">
+            <div className="w-9 h-9 flex items-center justify-center animate-none">
               <PrinterIcon />
             </div>
-            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[85px] sm:max-w-[95px] break-all sm:break-normal line-clamp-2">
+            <span className="text-[9px] font-bold tracking-tight leading-tight max-w-[68px] sm:max-w-[76px] break-all sm:break-normal line-clamp-2">
               存储统计
             </span>
           </div>

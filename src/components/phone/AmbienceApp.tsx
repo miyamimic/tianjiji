@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Volume2, VolumeX, Flame, CloudRain, Wind, Sparkles } from 'lucide-react';
+import { Volume2, VolumeX, Flame, CloudRain, Wind } from 'lucide-react';
 import { ambiencePlayer, type AmbienceType } from '../../lib/ambiencePlayer';
 
 export default function AmbienceApp() {
@@ -28,86 +28,101 @@ export default function AmbienceApp() {
   };
 
   return (
-    <div className="space-y-4 text-xs text-white/90 pb-6 animate-in fade-in-0 duration-200">
-      <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.03] space-y-4">
-        <span className="font-semibold text-white flex items-center gap-1.5 text-xs">
-          <Sparkles className="size-3.5 text-[hsl(28_85%_62%)]" />
-          白噪音环境音效合成器 (持久后台播放)
-        </span>
-        <p className="text-[10px] text-white/40 leading-relaxed">
-          纯本地算法实时合成环境白噪音。开启后即使退出风铃手机也会在后台静默相伴，营造极具沉浸感的深夜心境。
+    <div className="space-y-4 text-xs text-black font-sans select-none">
+      <fieldset className="border border-t-[#808080] border-l-[#808080] border-b-white border-r-white p-3 pt-2 bg-[#c0c0c0] space-y-3.5">
+        <legend className="px-1 text-black font-bold text-xs bg-[#c0c0c0] flex items-center gap-1.5">
+          <span>环境音效合成器 (Ambience Synthesizer)</span>
+        </legend>
+
+        <p className="text-[11px] text-[#333] leading-relaxed">
+          纯算法实时合成白噪音环境音。开启后将在后台持久静音相伴，无需额外消耗网络流量。
         </p>
 
-        {/* Ambient Mode Buttons */}
-        <div className="grid grid-cols-3 gap-2">
+        {/* Retro 3D Push Button Sound Selector */}
+        <div className="grid grid-cols-3 gap-2.5">
           <button
             onClick={() => handleToggle('fire')}
-            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all ${
+            className={`p-3 flex flex-col items-center gap-1.5 cursor-pointer font-bold transition-none ${
               activeSound === 'fire'
-                ? 'border-amber-500/80 bg-amber-500/15 text-amber-300 ring-2 ring-amber-500/30'
-                : 'border-white/10 bg-black/40 hover:bg-white/5 text-white/70'
+                ? 'bg-[#a0a0a0] border-2 border-t-[#404040] border-l-[#404040] border-b-white border-r-white text-[#800000]'
+                : 'bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-[#404040] border-r-[#404040] text-black hover:bg-[#d0d0d0]'
             }`}
           >
-            <Flame className="size-5 text-amber-400 animate-pulse" />
-            <span className="text-[11px] font-medium">壁炉篝火</span>
+            <Flame className={`w-5 h-5 ${activeSound === 'fire' ? 'text-amber-700' : 'text-[#555]'}`} />
+            <span className="text-xs">壁炉篝火</span>
+            <span className="text-[9px] font-mono font-normal">
+              {activeSound === 'fire' ? '[PLAYING]' : '[STOPPED]'}
+            </span>
           </button>
 
           <button
             onClick={() => handleToggle('rain')}
-            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all ${
+            className={`p-3 flex flex-col items-center gap-1.5 cursor-pointer font-bold transition-none ${
               activeSound === 'rain'
-                ? 'border-cyan-500/80 bg-cyan-500/15 text-cyan-300 ring-2 ring-cyan-500/30'
-                : 'border-white/10 bg-black/40 hover:bg-white/5 text-white/70'
+                ? 'bg-[#a0a0a0] border-2 border-t-[#404040] border-l-[#404040] border-b-white border-r-white text-[#000080]'
+                : 'bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-[#404040] border-r-[#404040] text-black hover:bg-[#d0d0d0]'
             }`}
           >
-            <CloudRain className="size-5 text-cyan-400" />
-            <span className="text-[11px] font-medium">夜雨微澜</span>
+            <CloudRain className={`w-5 h-5 ${activeSound === 'rain' ? 'text-blue-700' : 'text-[#555]'}`} />
+            <span className="text-xs">夜雨微澜</span>
+            <span className="text-[9px] font-mono font-normal">
+              {activeSound === 'rain' ? '[PLAYING]' : '[STOPPED]'}
+            </span>
           </button>
 
           <button
             onClick={() => handleToggle('wind')}
-            className={`flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all ${
+            className={`p-3 flex flex-col items-center gap-1.5 cursor-pointer font-bold transition-none ${
               activeSound === 'wind'
-                ? 'border-emerald-500/80 bg-emerald-500/15 text-emerald-300 ring-2 ring-emerald-500/30'
-                : 'border-white/10 bg-black/40 hover:bg-white/5 text-white/70'
+                ? 'bg-[#a0a0a0] border-2 border-t-[#404040] border-l-[#404040] border-b-white border-r-white text-[#006000]'
+                : 'bg-[#c0c0c0] border-2 border-t-white border-l-white border-b-[#404040] border-r-[#404040] text-black hover:bg-[#d0d0d0]'
             }`}
           >
-            <Wind className="size-5 text-emerald-400" />
-            <span className="text-[11px] font-medium">林间清风</span>
+            <Wind className={`w-5 h-5 ${activeSound === 'wind' ? 'text-emerald-700' : 'text-[#555]'}`} />
+            <span className="text-xs">林间清风</span>
+            <span className="text-[9px] font-mono font-normal">
+              {activeSound === 'wind' ? '[PLAYING]' : '[STOPPED]'}
+            </span>
           </button>
         </div>
 
-        {/* Volume Slider */}
-        <div className="space-y-1.5 pt-2">
-          <div className="flex items-center justify-between text-[10px] text-white/50">
-            <span className="flex items-center gap-1">
-              {soundVolume === 0 ? <VolumeX className="size-3" /> : <Volume2 className="size-3" />}
-              音量调节
+        {/* Volume Slider - Retro Windows Volume Control Style */}
+        <div className="space-y-1.5 pt-2 border-t border-[#808080]">
+          <div className="flex items-center justify-between text-xs text-black font-bold">
+            <span className="flex items-center gap-1.5">
+              {soundVolume === 0 ? <VolumeX className="w-4 h-4 text-red-600" /> : <Volume2 className="w-4 h-4 text-black" />}
+              主音量调节 (Volume Level)
             </span>
-            <span>{Math.round(soundVolume * 100)}%</span>
+            <span className="font-mono">{Math.round(soundVolume * 100)}%</span>
           </div>
-          <input
-            type="range"
-            min="0"
-            max="1"
-            step="0.05"
-            value={soundVolume}
-            onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-            className="w-full accent-[hsl(28_85%_62%)] h-1.5 bg-white/10 rounded-lg cursor-pointer"
-          />
+
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] text-[#555]">MIN</span>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.05"
+              value={soundVolume}
+              onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
+              className="w-full h-3 bg-white border border-[#808080] appearance-none cursor-pointer accent-[#000080]"
+            />
+            <span className="text-[10px] text-[#555]">MAX</span>
+          </div>
         </div>
 
+        {/* Stop Button */}
         {activeSound && (
-          <div className="flex justify-center pt-1">
+          <div className="pt-2 flex justify-end">
             <button
               onClick={handleStop}
-              className="text-[10px] text-red-400 hover:text-red-300 bg-red-400/10 border border-red-400/20 px-3 py-1 rounded-full transition-colors"
+              className="px-4 py-1.5 bg-[#c0c0c0] text-red-700 border-2 border-t-white border-l-white border-b-[#404040] border-r-[#404040] active:border-t-[#404040] active:border-l-[#404040] active:border-b-white active:border-r-white font-bold text-xs hover:bg-[#d0d0d0] cursor-pointer flex items-center gap-1"
             >
-              关闭环境音效
+              <span>[X] 关闭所有环境音效</span>
             </button>
           </div>
         )}
-      </div>
+      </fieldset>
     </div>
   );
 }

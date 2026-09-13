@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react95/fonts": "^1.0.1",
     "docx": "^9.7.1",
     "jszip": "^3.10.1",
     "lucide-react": "^1.28.0",

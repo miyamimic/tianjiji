@@ -1,1178 +1,790 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Sparkles,
+  Upload,
   RotateCcw,
-  X,
-  History,
-  Info,
-  HelpCircle,
-  Settings,
+  Sparkles,
+  Check,
   Send,
-  Sparkle,
-  Layers,
-  Flame,
-  CheckCircle2,
-  ChevronLeft,
   Sliders,
-  Volume2,
-  VolumeX,
-  Maximize2,
+  MessageSquare,
+  Eye,
+  EyeOff,
+  Trash2,
+  Plus,
 } from 'lucide-react';
-import {
-  type GachaPoolConfig,
-  type GachaCard,
-  type GachaButton,
-  type GachaPullItem,
-  type ClickHabitProfile,
-  DEFAULT_GACHA_POOL,
-  loadGachaPoolConfig,
-  saveGachaPoolConfig,
-  executeGachaPull,
-  parseClickRhythm,
-  playGachaButtonSound,
-  playCardFlipSound,
-  playSsrSparkleSound,
-  playBubblePopSound,
-} from '../../lib/gachaEngine';
-import {
-  generateGachaOpening,
-  generateGachaDecision,
-  generateGachaResultProfile,
-  generateGachaUserResponse,
-  generateGachaEnding,
-  loadLlmConfig,
-  isLlmConfigured,
-  type GachaClickTarget,
-} from '../../lib/llm';
-import {
-  idbSaveGameMatch,
-  type DBGameMatchRecord,
-} from '../../lib/idb';
-import { saveGameEmotionImpact } from '../../lib/gameStore';
-import type { Character, EmotionVector, EmotionKey } from '../../data/types';
-import { EMOTION_NAMES } from '../../data/types';
-import GachaEditor from './GachaEditor';
+
+export interface CircleButtonArea {
+  cx: number; // percentage 0-100
+  cy: number; // percentage 0-100
+  r: number;  // radius percentage 0-100
+}
+
+export interface GachaCardItem {
+  id: string;
+  name: string;
+  rarity: 'SSR' | 'SR' | 'R';
+  image: string;
+  description?: string;
+}
+
+export interface LayeredGachaConfig {
+  bgImage: string;        // Layer 1: 底图
+  characterImage: string; // Layer 2: 卡池人物图
+  frameImage: string;     // Layer 3: 免扣边框图 (最上层)
+
+  // 3 calibrated button circles based on frame layer
+  exitCircle: CircleButtonArea;     // 退出抽卡
+  pullOnceCircle: CircleButtonArea; // 抽一次
+  pullTenCircle: CircleButtonArea;  // 抽十次
+
+  rates: {
+    SSR: number;
+    SR: number;
+    R: number;
+  };
+  cards: GachaCardItem[];
+}
+
+interface ChatMessage {
+  id: string;
+  sender: 'user' | 'character';
+  text: string;
+  timestamp: number;
+}
+
+// Built-in default preset with layered greeting-card effect
+const DEFAULT_FRAME_SVG = `data:image/svg+xml;utf8,${encodeURIComponent(`
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 450 800" width="450" height="800">
+  <defs>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fef08a" />
+      <stop offset="50%" stop-color="#eab308" />
+      <stop offset="100%" stop-color="#ca8a04" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#000" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+
+  <!-- Ornate Outer Frame Border with cutout center -->
+  <rect x="8" y="8" width="434" height="784" rx="28" fill="none" stroke="url(#gold)" stroke-width="5" filter="url(#shadow)" />
+  <rect x="16" y="16" width="418" height="768" rx="24" fill="none" stroke="#fef08a" stroke-width="1.5" stroke-opacity="0.7" />
+
+  <!-- Top Vignette Header Overlay -->
+  <path d="M 16 16 L 434 16 L 434 80 C 350 90, 280 110, 225 110 C 170 110, 100 90, 16 80 Z" fill="#0c0a09" fill-opacity="0.85" />
+  
+  <!-- Exit Button Placeholder on Frame (Top Left) -->
+  <g id="frame-exit" filter="url(#shadow)">
+    <circle cx="55" cy="55" r="24" fill="#1c1917" stroke="url(#gold)" stroke-width="2.5" />
+    <path d="M 45 45 L 65 65 M 65 45 L 45 65" stroke="#fef08a" stroke-width="3" stroke-linecap="round" />
+  </g>
+
+  <!-- Top Title Banner -->
+  <text x="225" y="58" fill="#fef08a" font-size="18" font-weight="bold" font-family="sans-serif" text-anchor="middle" letter-spacing="3">✦ 限定共鸣卡池 ✦</text>
+
+  <!-- Bottom Console Panel Overlay -->
+  <path d="M 16 670 C 120 650, 330 650, 434 670 L 434 784 L 16 784 Z" fill="#0c0a09" fill-opacity="0.9" filter="url(#shadow)" />
+  <line x1="20" y1="675" x2="430" y2="675" stroke="url(#gold)" stroke-width="2" />
+
+  <!-- Pull 1 Button Circle Placeholder on Frame (Bottom Left) -->
+  <g id="frame-pull-once" filter="url(#shadow)">
+    <circle cx="130" cy="728" r="36" fill="#1c1917" stroke="url(#gold)" stroke-width="3" />
+    <circle cx="130" cy="728" r="31" fill="#292524" />
+    <text x="130" y="725" fill="#fef08a" font-size="13" font-weight="bold" font-family="sans-serif" text-anchor="middle">单抽</text>
+    <text x="130" y="742" fill="#a8a29e" font-size="10" font-family="sans-serif" text-anchor="middle">1 抽</text>
+  </g>
+
+  <!-- Pull 10 Button Circle Placeholder on Frame (Bottom Right) -->
+  <g id="frame-pull-ten" filter="url(#shadow)">
+    <circle cx="320" cy="728" r="38" fill="url(#gold)" stroke="#fef08a" stroke-width="3" />
+    <circle cx="320" cy="728" r="33" fill="#ca8a04" />
+    <text x="320" y="725" fill="#0c0a09" font-size="14" font-weight="900" font-family="sans-serif" text-anchor="middle">十连</text>
+    <text x="320" y="742" fill="#451a03" font-size="10" font-weight="bold" font-family="sans-serif" text-anchor="middle">必得 SR</text>
+  </g>
+</svg>
+`)}`;
+
+const DEFAULT_CONFIG: LayeredGachaConfig = {
+  // Layer 1: 底图
+  bgImage: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?q=80&w=1000&auto=format&fit=crop',
+  // Layer 2: 卡池人物图
+  characterImage: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=800&auto=format&fit=crop',
+  // Layer 3: 免扣边框图 (最上层)
+  frameImage: DEFAULT_FRAME_SVG,
+
+  // Initial calibrated buttons on frame
+  exitCircle: { cx: 12.2, cy: 6.9, r: 6.5 },
+  pullOnceCircle: { cx: 28.9, cy: 91.0, r: 9.0 },
+  pullTenCircle: { cx: 71.1, cy: 91.0, r: 9.5 },
+
+  rates: {
+    SSR: 0.03,
+    SR: 0.15,
+    R: 0.82,
+  },
+  cards: [
+    {
+      id: 'card_ssr_1',
+      name: '夜蔷薇 · 莉莉丝',
+      rarity: 'SSR',
+      image: 'https://images.unsplash.com/photo-1578632767115-351597cf2477?q=80&w=800&auto=format&fit=crop',
+      description: '限定UP角色 · 绝美魅影',
+    },
+    {
+      id: 'card_ssr_2',
+      name: '极光巡礼 · 艾尔温',
+      rarity: 'SSR',
+      image: 'https://images.unsplash.com/photo-1534447677768-be436bb09401?q=80&w=800&auto=format&fit=crop',
+      description: '限定UP角色 · 星穹之剑',
+    },
+    {
+      id: 'card_sr_1',
+      name: '月影秘术师',
+      rarity: 'SR',
+      image: 'https://images.unsplash.com/photo-1563089145-599997674d42?q=80&w=600&auto=format&fit=crop',
+      description: '秘银法杖之影',
+    },
+    {
+      id: 'card_sr_2',
+      name: '狂岚猎手',
+      rarity: 'SR',
+      image: 'https://images.unsplash.com/photo-1607604276583-eef5d076aa5f?q=80&w=600&auto=format&fit=crop',
+      description: '疾风破空之矢',
+    },
+    {
+      id: 'card_r_1',
+      name: '见习骑士 · 铜剑',
+      rarity: 'R',
+      image: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&auto=format&fit=crop',
+      description: '基础共鸣之源',
+    },
+    {
+      id: 'card_r_2',
+      name: '魔导晶石',
+      rarity: 'R',
+      image: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?q=80&w=600&auto=format&fit=crop',
+      description: '基础材料之源',
+    },
+  ],
+};
+
+const STORAGE_KEY = 'tiancuji_layered_gacha_v1';
 
 interface Props {
-  currentCharacterId: string;
-  characterName: string;
-  character?: Character;
-  currentEmotionSnapshot?: EmotionVector;
-  initialUserInstruction?: string;
-  onGameFinished?: (
-    summary: string,
-    rawRecord: DBGameMatchRecord,
-    applyEmotionDelta?: boolean,
-    customDelta?: Partial<EmotionVector>
-  ) => void;
-  onApplyGameEmotionDelta?: (delta: Partial<EmotionVector>, summary: string) => void;
   onExit?: () => void;
+  currentCharacterId?: string;
+  characterName?: string;
+  character?: any;
+  currentEmotionSnapshot?: any;
+  onGameFinished?: (...args: any[]) => void;
+  onApplyGameEmotionDelta?: (...args: any[]) => void;
+  onInGameChat?: (
+    text: string,
+    context?: any,
+    history?: any[]
+  ) => Promise<string | { reply: string; tactic?: string } | null | void>;
 }
 
 export default function GachaApp({
-  currentCharacterId,
-  characterName,
-  character,
-  currentEmotionSnapshot,
-  initialUserInstruction = '帮我抽几发试试手气！',
-  onGameFinished,
-  onApplyGameEmotionDelta,
   onExit,
+  characterName = '陆沉',
+  character,
+  onInGameChat,
 }: Props) {
-  // 1. Config & Pool State
-  const [poolConfig, setPoolConfig] = useState<GachaPoolConfig>(() => loadGachaPoolConfig());
-  const [sparkCount, setSparkCount] = useState<number>(0);
-  const [totalPulls, setTotalPulls] = useState<number>(0);
-  const [ssrObtainedList, setSsrObtainedList] = useState<string[]>([]);
-  const [pullHistory, setPullHistory] = useState<GachaPullItem[]>([]);
-  const [userInstruction, setUserInstruction] = useState<string>(initialUserInstruction);
-
-  // 2. Cursor State (0-100 percentage inside gacha container)
-  const [cursorPos, setCursorPos] = useState<{ x: number; y: number }>({ x: 50, y: 80 });
-  const [cursorTransition, setCursorTransition] = useState<string>('all 0.6s cubic-bezier(0.25, 0.1, 0.25, 1)');
-  const [isClicking, setIsClicking] = useState<boolean>(false);
-
-  // 3. Bubble System State
-  const [activeBubble, setActiveBubble] = useState<{
-    text: string;
-    type: 'bubble_to_user' | 'bubble_self' | 'bubble_evaluation';
-    thumbnail?: string;
-  } | null>(null);
-
-  // 4. Screen & Flow State
-  const [currentScreen, setCurrentScreen] = useState<
-    'pool_main' | 'pool_detail' | 'rate_info' | 'pull_history' | 'summon_anim' | 'result_flipping' | 'result_done'
-  >('pool_main');
-
-  const [currentBatchPulls, setCurrentBatchPulls] = useState<GachaPullItem[]>([]);
-  const [currentFlipIdx, setCurrentFlipIdx] = useState<number>(-1);
-  const [isWaitingUserReply, setIsWaitingUserReply] = useState<boolean>(false);
-  const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
-  const [isSsrFlashActive, setIsSsrFlashActive] = useState<boolean>(false);
-
-  // 5. Modals State
-  const [showDetailModal, setShowDetailModal] = useState<boolean>(false);
-  const [showRateModal, setShowRateModal] = useState<boolean>(false);
-  const [showHistoryModal, setShowHistoryModal] = useState<boolean>(false);
-  const [showEditorModal, setShowEditorModal] = useState<boolean>(false);
-  const [showSettlementModal, setShowSettlementModal] = useState<boolean>(false);
-  const [showRulesModal, setShowRulesModal] = useState<boolean>(false);
-
-  // 6. Dialogue / Settlement / Emotion Accumulation
-  const [gameTotalDelta, setGameTotalDelta] = useState<Partial<EmotionVector>>({
-    joy: 0.1,
-    warmth: 0.1,
-  });
-  const [endingSummaryText, setEndingSummaryText] = useState<string>('');
-  const [inGameChatInput, setInGameChatInput] = useState<string>('');
-  const [inGameChatLogs, setInGameChatLogs] = useState<Array<{ sender: 'user' | 'agent' | 'system'; text: string; time: number }>>([]);
-  const [behaviorLogs, setBehaviorLogs] = useState<string[]>([]);
-  const [isAgentThinking, setIsAgentThinking] = useState<boolean>(false);
-
-  // References for async loops & concurrency safety
-  const containerRef = useRef<HTMLDivElement>(null);
-  const bubbleTimerRef = useRef<any>(null);
-  const llmPendingProfileRef = useRef<any>(null);
-  const abortCurrentActionRef = useRef<boolean>(false);
-  const waitingUserReplyResolverRef = useRef<(() => void) | null>(null);
-
-  // Critical State Machine Locks & Timers (Fix for Stuck State & Animation Race Conditions)
-  const isPullingInProgressRef = useRef<boolean>(false);
-  const pullSessionIdRef = useRef<number>(0);
-  const decisionTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const modalAutoCloseTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const isAgentActingRef = useRef<boolean>(false);
-
-  const fallbackCharacter: Character = character || {
-    id: currentCharacterId || 'char_001',
-    name: characterName || '风铃',
-    core: {
-      values: ['灵动', '温柔', '玄学调侃'],
-      speech_filter: '亲昵活泼',
-      taboos: [],
-    },
-    emotion: {
-      current: currentEmotionSnapshot || { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 },
-      base: { anger: 0.1, fear: 0.1, joy: 0.5, sadness: 0.1, desire: 0.3, warmth: 0.6 },
-    },
-  } as any;
-
-  // Show Bubble Helper
-  const showBubble = useCallback((
-    text: string,
-    type: 'bubble_to_user' | 'bubble_self' | 'bubble_evaluation' = 'bubble_to_user',
-    durationMs: number = 4500,
-    thumbnail?: string
-  ) => {
-    if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current);
-    if (!text || text.trim() === '') {
-      setActiveBubble(null);
-      return;
-    }
-    if (soundEnabled) playBubblePopSound();
-    setActiveBubble({ text, type, thumbnail });
-
-    // Append to in-game chat stream
-    setInGameChatLogs((prev) => [
-      ...prev.slice(-40),
-      {
-        sender: 'agent',
-        text: type === 'bubble_self' ? `（独白）${text}` : text,
-        time: Date.now(),
-      },
-    ]);
-
-    if (durationMs > 0) {
-      bubbleTimerRef.current = setTimeout(() => {
-        setActiveBubble(null);
-      }, durationMs);
-    }
-  }, [soundEnabled]);
-
-  // Smooth Move Virtual Cursor
-  const moveCursorTo = useCallback((x: number, y: number, transitionSec: number = 0.6) => {
-    setCursorTransition(`all ${transitionSec}s cubic-bezier(0.25, 0.1, 0.25, 1)`);
-    setCursorPos({ x: Math.max(5, Math.min(95, x)), y: Math.max(5, Math.min(95, y)) });
-  }, []);
-
-  // Perform Click Action
-  const triggerCursorClick = useCallback(async (callback?: () => void) => {
-    setIsClicking(true);
-    if (soundEnabled) playGachaButtonSound();
-    await new Promise((r) => setTimeout(r, 200));
-    setIsClicking(false);
-    if (callback) callback();
-    await new Promise((r) => setTimeout(r, 150));
-  }, [soundEnabled]);
-
-  // Forward declarations for mutual recursion
-  const triggerAgentDecisionLoopRef = useRef<(() => Promise<void>) | undefined>(undefined);
-  const executePullFlowRef = useRef<((count: number) => Promise<void>) | undefined>(undefined);
-
-  // Button Click Handler
-  const handleButtonClick = useCallback((buttonId: string) => {
-    if (buttonId === 'pull_once') {
-      if (executePullFlowRef.current) executePullFlowRef.current(1);
-    } else if (buttonId === 'pull_ten') {
-      if (executePullFlowRef.current) executePullFlowRef.current(10);
-    } else if (buttonId === 'pool_detail') {
-      setShowDetailModal(true);
-      setCurrentScreen('pool_detail');
-    } else if (buttonId === 'rate_info') {
-      setShowRateModal(true);
-      setCurrentScreen('rate_info');
-    } else if (buttonId === 'pull_history') {
-      setShowHistoryModal(true);
-      setCurrentScreen('pull_history');
-    } else if (buttonId === 'custom') {
-      setShowEditorModal(true);
-    }
-  }, []);
-
-  // Execute Agent Action from Endpoint ② or ①
-  const executeAgentDecisionAction = useCallback(async (
-    target: GachaClickTarget,
-    rhythmText: string,
-    hesitationMs: number,
-    bubbleUser: string,
-    bubbleSelf: string,
-    onComplete?: () => void
-  ) => {
-    const rhythm = parseClickRhythm(rhythmText);
-
-    // 1. Show pre-movement or thinking bubble
-    if (bubbleSelf) {
-      showBubble(bubbleSelf, 'bubble_self', 3000);
-    } else if (bubbleUser) {
-      showBubble(bubbleUser, 'bubble_to_user', 4000);
-    }
-
-    // 2. Resolve coordinates
-    let targetX = 50;
-    let targetY = 80;
-    let targetButton: GachaButton | undefined;
-
-    if (target.type === 'button' && target.button_id) {
-      targetButton = poolConfig.buttons.find((b) => b.id === target.button_id);
-      if (targetButton) {
-        targetX = targetButton.position.x;
-        targetY = targetButton.position.y;
-      }
-    } else if (target.type === 'blank' && target.position) {
-      targetX = target.position.x * 100;
-      targetY = target.position.y * 100;
-    }
-
-    // 3. Move cursor with parsed rhythm transition
-    moveCursorTo(targetX, targetY, rhythm.moveDurationSec);
-    await new Promise((r) => setTimeout(r, rhythm.moveDurationSec * 1000));
-
-    // 4. Hover hesitation
-    if (hesitationMs > 0) {
-      await new Promise((r) => setTimeout(r, hesitationMs));
-    }
-
-    // 5. Speak bubble_to_user before or while clicking
-    if (bubbleUser && bubbleUser !== bubbleSelf) {
-      showBubble(bubbleUser, 'bubble_to_user', 4000);
-    }
-
-    const isPullAction = targetButton && (targetButton.id === 'pull_once' || targetButton.id === 'pull_ten');
-
-    // 6. Click trigger
-    await triggerCursorClick(() => {
-      if (targetButton) {
-        handleButtonClick(targetButton.id);
-      }
-    });
-
-    if (onComplete) onComplete();
-
-    // 7. Auto-continue state machine if not pulling (prevents agent getting stuck!)
-    if (!isPullAction && !isPullingInProgressRef.current) {
-      if (targetButton && (targetButton.id === 'pool_detail' || targetButton.id === 'rate_info' || targetButton.id === 'pull_history')) {
-        // Modal viewing auto-resume after 2.8s
-        if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
-        modalAutoCloseTimerRef.current = setTimeout(() => {
-          setShowDetailModal(false);
-          setShowRateModal(false);
-          setShowHistoryModal(false);
-          setCurrentScreen('pool_main');
-          if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
-          decisionTimerRef.current = setTimeout(() => {
-            if (triggerAgentDecisionLoopRef.current) {
-              triggerAgentDecisionLoopRef.current();
-            }
-          }, 1200);
-        }, 2800);
-      } else {
-        if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
-        decisionTimerRef.current = setTimeout(() => {
-          if (triggerAgentDecisionLoopRef.current) {
-            triggerAgentDecisionLoopRef.current();
-          }
-        }, 2500);
-      }
-    }
-  }, [poolConfig.buttons, moveCursorTo, triggerCursorClick, showBubble, handleButtonClick]);
-
-  // Start Gacha Pull Execution (1-pull or 10-pull)
-  const executePullFlow = useCallback(async (pullCount: number) => {
-    // ⚠️ Critical Safety: Ignore duplicate/concurrent pull calls while already pulling
-    if (isPullingInProgressRef.current) {
-      return;
-    }
-
-    isPullingInProgressRef.current = true;
-    const currentSessionId = ++pullSessionIdRef.current;
-    abortCurrentActionRef.current = false;
-
-    // Clear pending decision & modal timers
-    if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
-    if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
-    setShowDetailModal(false);
-    setShowRateModal(false);
-    setShowHistoryModal(false);
-
-    setIsAgentThinking(true);
-
-    // 1. Generate Pull Results (Mechanical Layer)
-    const pullResult = executeGachaPull(poolConfig, pullCount, sparkCount, totalPulls);
-    setSparkCount(pullResult.newSparkCount);
-    const newTotal = totalPulls + pullCount;
-    setTotalPulls(newTotal);
-    setPullHistory((prev) => [...prev, ...pullResult.items]);
-    setCurrentBatchPulls(pullResult.items.map((item) => ({ ...item, flipped: false })));
-    setCurrentFlipIdx(-1);
-
-    const newSsrNames = pullResult.items
-      .filter((p) => p.card.rarity === 'SSR')
-      .map((p) => p.card.name);
-
-    if (newSsrNames.length > 0) {
-      setSsrObtainedList((prev) => [...prev, ...newSsrNames]);
-      setGameTotalDelta((prev) => ({
-        ...prev,
-        joy: Math.min(0.6, (prev.joy || 0) + 0.25),
-        warmth: Math.min(0.6, (prev.warmth || 0) + 0.2),
-      }));
-    }
-
-    // 2. Enter Summon Animation Screen
-    setCurrentScreen('summon_anim');
-    setBehaviorLogs((prev) => [
-      ...prev,
-      `执行了${pullCount === 10 ? '十连共鸣' : '单抽共鸣'}，产生结果并播放召唤动画。`,
-    ]);
-
-    // 3. Immediately auto-request LLM for reaction & card flipping habit during summon animation
-    const llmConfig = loadLlmConfig();
-    const resultProfilePromise = generateGachaResultProfile(
-      llmConfig,
-      fallbackCharacter,
-      pullResult.items,
-      newTotal,
-      [...ssrObtainedList, ...newSsrNames],
-      pullResult.newSparkCount,
-      poolConfig.spark_count,
-      poolConfig
-    );
-
-    llmPendingProfileRef.current = resultProfilePromise;
-
-    // 4. Play Summon Animation (with Agent Skip Click)
-    const animDurationMs = 2600;
-    await new Promise((r) => setTimeout(r, animDurationMs));
-    if (pullSessionIdRef.current !== currentSessionId) return;
-
-    // Agent awaits LLM reaction profile
-    let profileResult: any;
+  // Config state
+  const [config, setConfig] = useState<LayeredGachaConfig>(() => {
     try {
-      profileResult = await Promise.race([
-        resultProfilePromise,
-        new Promise((r) => setTimeout(r, 2000)), // fallback timeout
-      ]);
-    } catch (e) {
-      // fallback
-    }
-
-    if (!profileResult) {
-      profileResult = {
-        click_habit_profile: {
-          skip_click_position: { x: 0.85, y: 0.12 },
-          click_rhythm: '利落迅速',
-          random_tap: false,
-          wait_for_user_reply: false,
-          tap_while_talking: true,
-          evaluation_timing: 'after_all',
-        },
-        evaluations: [],
-        summary_bubble: newSsrNames.length > 0 ? '哇！金光降临！限定SSR拿下！' : '共鸣完成，让我们揭晓这次的成果！',
-      };
-    }
-
-    // Move cursor to skip position and click to proceed to results
-    const skipX = (profileResult.click_habit_profile?.skip_click_position?.x || 0.85) * 100;
-    const skipY = (profileResult.click_habit_profile?.skip_click_position?.y || 0.12) * 100;
-
-    moveCursorTo(skipX, skipY, 0.3);
-    await new Promise((r) => setTimeout(r, 350));
-    if (pullSessionIdRef.current !== currentSessionId) return;
-    await triggerCursorClick();
-
-    // 5. Transition to Card Flipping Screen (v4: clean flipping without individual card evaluations)
-    setCurrentScreen('result_flipping');
-    setIsAgentThinking(false);
-
-    // 6. Execute Card Flipping Driver via Agent Virtual Cursor
-    await runAgentCardFlippingSequence(pullResult.items, profileResult, currentSessionId);
-  }, [
-    poolConfig,
-    sparkCount,
-    totalPulls,
-    ssrObtainedList,
-    fallbackCharacter,
-    moveCursorTo,
-    triggerCursorClick,
-  ]);
-
-  executePullFlowRef.current = executePullFlow;
-
-  // Agent Virtual Cursor Card Flipping Sequence (Streamlined, No Individual Card Bubble Spam)
-  const runAgentCardFlippingSequence = async (
-    items: GachaPullItem[],
-    profileResult: any,
-    sessionId: number
-  ) => {
-    const habit: ClickHabitProfile = profileResult.click_habit_profile || {
-      skip_click_position: { x: 0.85, y: 0.12 },
-      click_rhythm: '利落迅速',
-      random_tap: false,
-      wait_for_user_reply: false,
-      tap_while_talking: true,
-      evaluation_timing: 'after_all',
-    };
-
-    const rhythm = parseClickRhythm(habit.click_rhythm);
-
-    // Calculate grid positions for 10 cards (2 rows x 5 columns) or 1 card
-    const cardPositions: Array<{ x: number; y: number }> = [];
-    if (items.length === 1) {
-      cardPositions.push({ x: 50, y: 48 });
-    } else {
-      // 10 cards arranged in 2 rows of 5
-      const colX = [16, 33, 50, 67, 84];
-      const rowY = [38, 62];
-      for (let r = 0; r < 2; r++) {
-        for (let c = 0; c < 5; c++) {
-          cardPositions.push({ x: colX[c], y: rowY[r] });
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.bgImage && parsed.frameImage && parsed.rates) {
+          return { ...DEFAULT_CONFIG, ...parsed };
         }
       }
+    } catch (e) {
+      console.warn('Failed to load gacha config:', e);
     }
+    return DEFAULT_CONFIG;
+  });
 
-    // Agent flips cards cleanly one by one
-    for (let i = 0; i < items.length; i++) {
-      if (pullSessionIdRef.current !== sessionId || abortCurrentActionRef.current) break;
-      setCurrentFlipIdx(i);
-
-      const targetPos = cardPositions[i] || { x: 50, y: 50 };
-      const currentCardItem = items[i];
-
-      // a. Random Tap feature (occasional tap)
-      if (habit.random_tap && Math.random() < 0.2) {
-        const randX = Math.max(10, Math.min(90, targetPos.x + (Math.random() * 16 - 8)));
-        const randY = Math.max(15, Math.min(85, targetPos.y + (Math.random() * 16 - 8)));
-        moveCursorTo(randX, randY, 0.2);
-        await new Promise((r) => setTimeout(r, 220));
-        if (pullSessionIdRef.current !== sessionId) break;
-        await triggerCursorClick();
-      }
-
-      // b. Move cursor to card center
-      const moveSec = Math.min(0.26, Math.max(0.16, rhythm.moveDurationSec * 0.6));
-      moveCursorTo(targetPos.x, targetPos.y, moveSec);
-      await new Promise((r) => setTimeout(r, moveSec * 1000 + 30));
-      if (pullSessionIdRef.current !== sessionId) break;
-
-      // c. Click card -> 3D flip
-      await triggerCursorClick(() => {
-        setCurrentBatchPulls((prev) =>
-          prev.map((item, idx) => (idx === i ? { ...item, flipped: true } : item))
-        );
-        if (soundEnabled) playCardFlipSound(currentCardItem.card.rarity);
-      });
-
-      // d. SSR special burst FX
-      if (currentCardItem.card.rarity === 'SSR') {
-        setIsSsrFlashActive(true);
-        if (soundEnabled) playSsrSparkleSound();
-        setTimeout(() => setIsSsrFlashActive(false), 900);
-        await new Promise((r) => setTimeout(r, 450));
-      } else {
-        await new Promise((r) => setTimeout(r, 120));
-      }
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(config));
+    } catch (e) {
+      console.warn('Failed to save gacha config:', e);
     }
+  }, [config]);
 
-    if (pullSessionIdRef.current !== sessionId) return;
+  // Pull Results State
+  const [pullResults, setPullResults] = useState<GachaCardItem[] | null>(null);
 
-    // Summary bubble after all cards are flipped (One single overall evaluation!)
-    if (profileResult.summary_bubble) {
-      showBubble(profileResult.summary_bubble, 'bubble_to_user', 5000);
+  // Right Side View: 'chat' (聊天地方) or 'settings' (卡池与图层定制)
+  const [rightView, setRightView] = useState<'chat' | 'settings'>('chat');
+  const [settingsTab, setSettingsTab] = useState<'layers' | 'brush' | 'cards'>('layers');
+
+  // Chat State
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(() => [
+    {
+      id: 'init_1',
+      sender: 'character',
+      text: `${characterName || '我'}已在卡池旁守候。点击左侧的卡池，看看今天的共鸣契机。`,
+      timestamp: Date.now(),
+    },
+  ]);
+  const [chatInput, setChatInput] = useState('');
+  const [isSending, setIsSending] = useState(false);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
+
+  // Brush Circle Calibration State
+  const [activeBrushTarget, setActiveBrushTarget] = useState<'exit' | 'pull_once' | 'pull_ten'>('exit');
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [drawnPoints, setDrawnPoints] = useState<Array<{ x: number; y: number }>>([]);
+  const [confirmationNotice, setConfirmationNotice] = useState<string | null>(null);
+  const [showHotZoneOutline, setShowHotZoneOutline] = useState(true);
+
+  // New Card Form State
+  const [newCardName, setNewCardName] = useState('');
+  const [newCardRarity, setNewCardRarity] = useState<'SSR' | 'SR' | 'R'>('SSR');
+  const [newCardImage, setNewCardImage] = useState('');
+
+  // Canvas Refs for Brush Circle Calibration
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Auto-scroll chat to bottom
+  useEffect(() => {
+    if (rightView === 'chat') {
+      chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
+  }, [chatMessages, rightView]);
 
-    setCurrentScreen('result_done');
-    setCurrentFlipIdx(-1);
-    isPullingInProgressRef.current = false;
+  // Send Chat Message
+  const handleSendMessage = async (textToSend?: string) => {
+    const text = (textToSend || chatInput).trim();
+    if (!text || isSending) return;
 
-    // Trigger next Agent Decision Cycle (Endpoint ②) after 3.2s
-    if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
-    decisionTimerRef.current = setTimeout(() => {
-      if (triggerAgentDecisionLoopRef.current) {
-        triggerAgentDecisionLoopRef.current();
-      }
-    }, 3200);
-  };
+    const userMsg: ChatMessage = {
+      id: `user_${Date.now()}`,
+      sender: 'user',
+      text,
+      timestamp: Date.now(),
+    };
 
-  // Trigger Endpoint ②: Decision Loop
-  const triggerAgentDecisionLoop = useCallback(async () => {
-    if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
-    if (isPullingInProgressRef.current) return;
-    if (showSettlementModal || showEditorModal) return;
-
-    setIsAgentThinking(true);
-    isAgentActingRef.current = true;
-
-    const availableBtns = poolConfig.buttons;
-    const llmConfig = loadLlmConfig();
+    setChatMessages((prev) => [...prev, userMsg]);
+    if (!textToSend) setChatInput('');
+    setIsSending(true);
 
     try {
-      const decision = await generateGachaDecision(llmConfig, fallbackCharacter, poolConfig, {
-        currentScreen,
-        cursorPosition: { x: cursorPos.x / 100, y: cursorPos.y / 100 },
-        availableButtons: availableBtns,
-        sparkCurrent: sparkCount,
-        sparkCount: poolConfig.spark_count,
-        totalPulls,
-        ssrList: ssrObtainedList,
-        userInstruction,
-        userLatestMessage: inGameChatLogs[inGameChatLogs.length - 1]?.text,
-        behaviorSummary: behaviorLogs.slice(-3).join('; ') || '正在浏览卡池',
-      });
-
-      setIsAgentThinking(false);
-
-      if (decision.action === 'stop') {
-        isAgentActingRef.current = false;
-        handleEndGachaSession();
-        return;
+      let charReply = '';
+      if (onInGameChat) {
+        const res = await onInGameChat(
+          text,
+          {
+            scene: 'gacha_pool',
+            characterName,
+            rates: config.rates,
+          },
+          [...chatMessages, userMsg]
+        );
+        if (typeof res === 'object' && res !== null && 'reply' in res) {
+          charReply = res.reply;
+        } else if (typeof res === 'string') {
+          charReply = res;
+        }
       }
 
-      await executeAgentDecisionAction(
-        decision.click_target,
-        decision.click_rhythm,
-        decision.hesitation_ms,
-        decision.bubble_to_user,
-        decision.bubble_self
-      );
+      if (!charReply) {
+        // Natural contextual fallback replies
+        const fallbacks = [
+          `无论抽到什么，都由我陪着你。`,
+          `深呼吸，把手交给我，再试一次。`,
+          `命运的罗盘在转动，你想要的那张卡，随时都会显现。`,
+          `我在看着你，不必焦虑，放松享受当下的共鸣。`,
+        ];
+        charReply = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+      }
+
+      setChatMessages((prev) => [
+        ...prev,
+        {
+          id: `char_${Date.now()}`,
+          sender: 'character',
+          text: charReply,
+          timestamp: Date.now(),
+        },
+      ]);
     } catch (err) {
-      console.warn('Agent decision loop error:', err);
-      setIsAgentThinking(false);
+      console.warn('Chat error:', err);
     } finally {
-      isAgentActingRef.current = false;
+      setIsSending(false);
     }
-  }, [
-    showSettlementModal,
-    showEditorModal,
-    poolConfig,
-    fallbackCharacter,
-    currentScreen,
-    cursorPos,
-    sparkCount,
-    totalPulls,
-    ssrObtainedList,
-    userInstruction,
-    inGameChatLogs,
-    behaviorLogs,
-    executeAgentDecisionAction,
-  ]);
+  };
 
-  triggerAgentDecisionLoopRef.current = triggerAgentDecisionLoop;
+  // Perform Gacha Pull
+  const doPull = useCallback((count: number) => {
+    const ssrCards = config.cards.filter((c) => c.rarity === 'SSR');
+    const srCards = config.cards.filter((c) => c.rarity === 'SR');
+    const rCards = config.cards.filter((c) => c.rarity === 'R');
 
-  // User In-Game Chat Submission (Endpoint ④)
-  const handleSendUserChatMessage = async (customText?: string) => {
-    const text = (customText || inGameChatInput).trim();
-    if (!text) return;
+    const results: GachaCardItem[] = [];
 
-    setInGameChatInput('');
-    setInGameChatLogs((prev) => [...prev, { sender: 'user', text, time: Date.now() }]);
+    for (let i = 0; i < count; i++) {
+      const rand = Math.random();
+      let pickedRarity: 'SSR' | 'SR' | 'R' = 'R';
 
-    // If agent was waiting for user reply during card flipping, unlock it!
-    if (waitingUserReplyResolverRef.current) {
-      waitingUserReplyResolverRef.current();
-      waitingUserReplyResolverRef.current = null;
-      setIsWaitingUserReply(false);
+      if (rand < config.rates.SSR && ssrCards.length > 0) {
+        pickedRarity = 'SSR';
+      } else if (rand < config.rates.SSR + config.rates.SR && srCards.length > 0) {
+        pickedRarity = 'SR';
+      } else {
+        pickedRarity = 'R';
+      }
+
+      // 10-pull guarantee: at least one SR or above
+      if (count === 10 && i === 9 && !results.some((c) => c.rarity === 'SSR' || c.rarity === 'SR')) {
+        pickedRarity = srCards.length > 0 ? 'SR' : 'SSR';
+      }
+
+      const poolOfRarity =
+        pickedRarity === 'SSR' ? ssrCards : pickedRarity === 'SR' ? srCards : rCards;
+
+      const chosen = poolOfRarity.length > 0
+        ? poolOfRarity[Math.floor(Math.random() * poolOfRarity.length)]
+        : config.cards[0] || {
+            id: 'fallback',
+            name: '神秘记忆碎片',
+            rarity: 'R',
+            image: config.characterImage,
+          };
+
+      results.push(chosen);
     }
 
-    // If currently actively pulling/flipping, reply with a quick reaction without aborting the batch
-    if (isPullingInProgressRef.current) {
-      showBubble(`正在揭晓这一轮卡牌呢，马上就好！`, 'bubble_to_user', 3000);
+    setPullResults(results);
+
+    // Contextual reaction in chat
+    const hasSSR = results.some((r) => r.rarity === 'SSR');
+    const hasSR = results.some((r) => r.rarity === 'SR');
+
+    const reactionText = hasSSR
+      ? `【金光闪烁】抽到了SSR「${results.find((r) => r.rarity === 'SSR')?.name}」！恭喜，愿望在此刻实现了。`
+      : hasSR
+      ? `【紫辉共鸣】获得SR「${results.find((r) => r.rarity === 'SR')?.name}」，光芒正在汇聚。`
+      : count === 10
+      ? `十连共鸣完成。所有的积蓄，都是为了下一次更耀眼的邂逅。`
+      : `单抽轻响。心愿沉淀在指尖，继续前行吧。`;
+
+    setChatMessages((prev) => [
+      ...prev,
+      {
+        id: `char_pull_${Date.now()}`,
+        sender: 'character',
+        text: reactionText,
+        timestamp: Date.now(),
+      },
+    ]);
+  }, [config, characterName]);
+
+  // File Upload Helper
+  const handleFileUpload = (
+    e: React.ChangeEvent<HTMLInputElement>,
+    callback: (dataUrl: string) => void
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        callback(reader.result);
+      }
+    };
+    reader.readAsDataURL(file);
+    e.target.value = '';
+  };
+
+  // ============================================================================
+  // Brush Canvas Drawing & Circle Auto-Detection
+  // ============================================================================
+  const redrawCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = canvas.width;
+    const height = canvas.height;
+    ctx.clearRect(0, 0, width, height);
+
+    if (config.frameImage) {
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        drawCirclesAndStrokes(ctx, width, height);
+      };
+      img.src = config.frameImage;
+      if (img.complete) {
+        ctx.drawImage(img, 0, 0, width, height);
+        drawCirclesAndStrokes(ctx, width, height);
+      }
+    } else {
+      drawCirclesAndStrokes(ctx, width, height);
+    }
+  }, [config.frameImage, config.exitCircle, config.pullOnceCircle, config.pullTenCircle, drawnPoints, activeBrushTarget]);
+
+  const drawCirclesAndStrokes = (ctx: CanvasRenderingContext2D, width: number, height: number) => {
+    const targets = [
+      { key: 'exit', circle: config.exitCircle, color: '#ef4444', label: '退出' },
+      { key: 'pull_once', circle: config.pullOnceCircle, color: '#3b82f6', label: '单抽' },
+      { key: 'pull_ten', circle: config.pullTenCircle, color: '#eab308', label: '十连' },
+    ];
+
+    targets.forEach((t) => {
+      const px = (t.circle.cx / 100) * width;
+      const py = (t.circle.cy / 100) * height;
+      const pr = (t.circle.r / 100) * width;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(px, py, pr, 0, Math.PI * 2);
+      ctx.fillStyle = `${t.color}33`;
+      ctx.fill();
+      ctx.lineWidth = activeBrushTarget === t.key ? 3 : 2;
+      ctx.strokeStyle = t.color;
+      ctx.setLineDash(activeBrushTarget === t.key ? [] : [4, 4]);
+      ctx.stroke();
+
+      ctx.font = 'bold 11px sans-serif';
+      ctx.fillStyle = '#ffffff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(t.label, px, py);
+      ctx.restore();
+    });
+
+    if (drawnPoints.length > 1) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle =
+        activeBrushTarget === 'exit'
+          ? '#ef4444'
+          : activeBrushTarget === 'pull_once'
+          ? '#3b82f6'
+          : '#eab308';
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      const first = drawnPoints[0];
+      ctx.moveTo((first.x / 100) * width, (first.y / 100) * height);
+      for (let i = 1; i < drawnPoints.length; i++) {
+        const pt = drawnPoints[i];
+        ctx.lineTo((pt.x / 100) * width, (pt.y / 100) * height);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+  };
+
+  useEffect(() => {
+    redrawCanvas();
+  }, [redrawCanvas]);
+
+  const getCanvasCoords = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.clientX;
+    const clientY = e.clientY;
+    const x = Math.max(0, Math.min(100, ((clientX - rect.left) / rect.width) * 100));
+    const y = Math.max(0, Math.min(100, ((clientY - rect.top) / rect.height) * 100));
+    return { x, y };
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setIsDrawing(true);
+    const pt = getCanvasCoords(e);
+    setDrawnPoints([pt]);
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return;
+    const pt = getCanvasCoords(e);
+    setDrawnPoints((prev) => [...prev, pt]);
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!isDrawing) return;
+    setIsDrawing(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch (err) {
+      // ignore
+    }
+
+    if (drawnPoints.length < 5) {
+      setDrawnPoints([]);
       return;
     }
 
-    // Clear timers & close modals
-    if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
-    if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
-    if (showDetailModal) setShowDetailModal(false);
-    if (showRateModal) setShowRateModal(false);
-    if (showHistoryModal) setShowHistoryModal(false);
-
-    // Call Endpoint ④ (Async user message & intent decision)
-    const progressSummary = `已累计抽 ${totalPulls} 发，已出SSR: ${ssrObtainedList.join('、') || '暂无'}，当前井进度 ${sparkCount}/${poolConfig.spark_count}`;
-    const llmConfig = loadLlmConfig();
-
-    try {
-      setIsAgentThinking(true);
-      const resp = await generateGachaUserResponse(llmConfig, fallbackCharacter, progressSummary, text, poolConfig);
-      setIsAgentThinking(false);
-
-      if (resp.bubble_self) {
-        showBubble(resp.bubble_self, 'bubble_self', 3000);
-      }
-      if (resp.response_bubble) {
-        showBubble(resp.response_bubble, 'bubble_to_user', 4000);
-      }
-
-      const rhythm = parseClickRhythm(resp.click_rhythm || '稳健从容');
-      const hesitation = resp.hesitation_ms || 600;
-
-      if (resp.action === 'pull_ten') {
-        const btn = poolConfig.buttons.find((b) => b.id === 'pull_ten');
-        const targetX = btn ? btn.position.x : 75;
-        const targetY = btn ? btn.position.y : 86;
-        moveCursorTo(targetX, targetY, rhythm.moveDurationSec);
-        await new Promise((r) => setTimeout(r, rhythm.moveDurationSec * 1000 + hesitation));
-        await triggerCursorClick();
-        await executePullFlow(10);
-      } else if (resp.action === 'pull_once') {
-        const btn = poolConfig.buttons.find((b) => b.id === 'pull_once');
-        const targetX = btn ? btn.position.x : 25;
-        const targetY = btn ? btn.position.y : 86;
-        moveCursorTo(targetX, targetY, rhythm.moveDurationSec);
-        await new Promise((r) => setTimeout(r, rhythm.moveDurationSec * 1000 + hesitation));
-        await triggerCursorClick();
-        await executePullFlow(1);
-      } else if (resp.action === 'pool_detail') {
-        const btn = poolConfig.buttons.find((b) => b.id === 'pool_detail');
-        const targetX = btn ? btn.position.x : 20;
-        const targetY = btn ? btn.position.y : 15;
-        moveCursorTo(targetX, targetY, rhythm.moveDurationSec);
-        await new Promise((r) => setTimeout(r, rhythm.moveDurationSec * 1000 + hesitation));
-        await triggerCursorClick();
-        setShowDetailModal(true);
-        setCurrentScreen('pool_detail');
-        if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
-        modalAutoCloseTimerRef.current = setTimeout(() => {
-          setShowDetailModal(false);
-          setCurrentScreen('pool_main');
-          if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
-          decisionTimerRef.current = setTimeout(() => triggerAgentDecisionLoop(), 1200);
-        }, 2800);
-      } else if (resp.action === 'rate_info') {
-        const btn = poolConfig.buttons.find((b) => b.id === 'rate_info');
-        const targetX = btn ? btn.position.x : 50;
-        const targetY = btn ? btn.position.y : 15;
-        moveCursorTo(targetX, targetY, rhythm.moveDurationSec);
-        await new Promise((r) => setTimeout(r, rhythm.moveDurationSec * 1000 + hesitation));
-        await triggerCursorClick();
-        setShowRateModal(true);
-        setCurrentScreen('rate_info');
-        if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
-        modalAutoCloseTimerRef.current = setTimeout(() => {
-          setShowRateModal(false);
-          setCurrentScreen('pool_main');
-          if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
-          decisionTimerRef.current = setTimeout(() => triggerAgentDecisionLoop(), 1200);
-        }, 2800);
-      } else if (resp.action === 'pull_history') {
-        const btn = poolConfig.buttons.find((b) => b.id === 'pull_history');
-        const targetX = btn ? btn.position.x : 80;
-        const targetY = btn ? btn.position.y : 15;
-        moveCursorTo(targetX, targetY, rhythm.moveDurationSec);
-        await new Promise((r) => setTimeout(r, rhythm.moveDurationSec * 1000 + hesitation));
-        await triggerCursorClick();
-        setShowHistoryModal(true);
-        setCurrentScreen('pull_history');
-        if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
-        modalAutoCloseTimerRef.current = setTimeout(() => {
-          setShowHistoryModal(false);
-          setCurrentScreen('pool_main');
-          if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
-          decisionTimerRef.current = setTimeout(() => triggerAgentDecisionLoop(), 1200);
-        }, 2800);
-      } else if (resp.action === 'stop') {
-        setTimeout(() => handleEndGachaSession(), 1500);
-      } else {
-        // Chat only: schedule decision loop after chatting
-        if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
-        decisionTimerRef.current = setTimeout(() => triggerAgentDecisionLoop(), 2500);
-      }
-    } catch (err) {
-      console.warn('User chat response failed:', err);
-      setIsAgentThinking(false);
-    }
-  };
-
-  // Endpoint ⑤: Session Finish & Emotion Settlement
-  const handleEndGachaSession = async () => {
-    setIsAgentThinking(true);
-    const llmConfig = loadLlmConfig();
-
-    try {
-      const ending = await generateGachaEnding(llmConfig, fallbackCharacter, {
-        totalPulls,
-        userInstruction,
-        goalAchieved: ssrObtainedList.length > 0 || (sparkCount === 0 && totalPulls >= poolConfig.spark_count),
-        ssrList: ssrObtainedList,
-        sparkUsed: sparkCount === 0 && totalPulls >= poolConfig.spark_count,
-      });
-
-      setEndingSummaryText(ending.ending_bubble);
-      if (ending.gameTotalDelta) {
-        setGameTotalDelta(ending.gameTotalDelta);
-      }
-    } catch (e) {
-      setEndingSummaryText(`总共抽了 ${totalPulls} 发，收获满满！感谢你的陪伴～`);
-    }
-
-    setIsAgentThinking(false);
-    setShowSettlementModal(true);
-  };
-
-  // Apply Emotion Delta to World
-  const handleApplyEmotion = () => {
-    const rawRecord: DBGameMatchRecord = {
-      id: `gacha_${Date.now()}`,
-      gameType: 'ai_gacha' as any,
-      characterId: currentCharacterId,
-      characterName: fallbackCharacter.name,
-      winner: ssrObtainedList.length > 0 ? 'player' : 'character',
-      totalMoves: totalPulls,
-      totalRounds: totalPulls,
-      summary: endingSummaryText || `与${fallbackCharacter.name}共同进行了${totalPulls}发抽卡共鸣。`,
-      timestamp: Date.now(),
-      gameTotalDelta: gameTotalDelta as Record<string, number>,
-      emotionApplied: true,
-      chats: inGameChatLogs.map((c) => ({
-        id: `chat_${c.time}`,
-        sender: c.sender === 'agent' ? 'character' : 'user',
-        text: c.text,
-        timestamp: c.time,
-      })),
-    };
-
-    idbSaveGameMatch(rawRecord);
-    saveGameEmotionImpact({
-      id: rawRecord.id,
-      matchId: rawRecord.id,
-      characterId: currentCharacterId,
-      characterName: fallbackCharacter.name,
-      gameType: 'ai_gacha' as any,
-      timestamp: Date.now(),
-      winner: rawRecord.winner,
-      totalMoves: totalPulls,
-      totalDelta: gameTotalDelta,
-      applied: true,
-      appliedTimestamp: Date.now(),
-      summary: rawRecord.summary,
+    let minX = 100, maxX = 0, minY = 100, maxY = 0;
+    drawnPoints.forEach((p) => {
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
     });
 
-    if (onApplyGameEmotionDelta) {
-      onApplyGameEmotionDelta(gameTotalDelta, rawRecord.summary);
-    }
-    if (onGameFinished) {
-      onGameFinished(rawRecord.summary, rawRecord, true, gameTotalDelta);
+    const cx = Number(((minX + maxX) / 2).toFixed(1));
+    const cy = Number(((minY + maxY) / 2).toFixed(1));
+    const r = Number(Math.max(3.5, ((maxX - minX) / 2)).toFixed(1));
+
+    const confirmedCircle: CircleButtonArea = { cx, cy, r };
+
+    let targetName = '退出抽卡';
+    if (activeBrushTarget === 'exit') {
+      targetName = '退出抽卡';
+      setConfig((prev) => ({ ...prev, exitCircle: confirmedCircle }));
+      setActiveBrushTarget('pull_once');
+    } else if (activeBrushTarget === 'pull_once') {
+      targetName = '抽一次';
+      setConfig((prev) => ({ ...prev, pullOnceCircle: confirmedCircle }));
+      setActiveBrushTarget('pull_ten');
+    } else {
+      targetName = '抽十次';
+      setConfig((prev) => ({ ...prev, pullTenCircle: confirmedCircle }));
     }
 
-    setShowSettlementModal(false);
-    if (onExit) onExit();
+    setConfirmationNotice(`✓ 已自动确认「${targetName}」位置: 中心 (${cx}%, ${cy}%), 半径: ${r}%`);
+    setTimeout(() => {
+      setConfirmationNotice(null);
+    }, 3500);
+
+    setDrawnPoints([]);
   };
 
-  // Ignore Emotion Delta
-  const handleIgnoreEmotion = () => {
-    const rawRecord: DBGameMatchRecord = {
-      id: `gacha_${Date.now()}`,
-      gameType: 'ai_gacha' as any,
-      characterId: currentCharacterId,
-      characterName: fallbackCharacter.name,
-      winner: ssrObtainedList.length > 0 ? 'player' : 'character',
-      totalMoves: totalPulls,
-      totalRounds: totalPulls,
-      summary: endingSummaryText || `与${fallbackCharacter.name}完成了抽卡体验（忽略情绪）。`,
-      timestamp: Date.now(),
-      gameTotalDelta: gameTotalDelta as Record<string, number>,
-      emotionApplied: false,
-      chats: inGameChatLogs.map((c) => ({
-        id: `chat_${c.time}`,
-        sender: c.sender === 'agent' ? 'character' : 'user',
-        text: c.text,
-        timestamp: c.time,
-      })),
+  const handleAddCard = () => {
+    if (!newCardName.trim()) return;
+    const newCard: GachaCardItem = {
+      id: `card_${Date.now()}`,
+      name: newCardName.trim(),
+      rarity: newCardRarity,
+      image: newCardImage || config.characterImage,
     };
-
-    idbSaveGameMatch(rawRecord);
-
-    if (onGameFinished) {
-      onGameFinished(rawRecord.summary, rawRecord, false, undefined);
-    }
-
-    setShowSettlementModal(false);
-    if (onExit) onExit();
+    setConfig((prev) => ({
+      ...prev,
+      cards: [newCard, ...prev.cards],
+    }));
+    setNewCardName('');
+    setNewCardImage('');
   };
 
-  // First Turn Endpoint ① on mount
-  useEffect(() => {
-    let isMounted = true;
-    const runOpening = async () => {
-      setIsAgentThinking(true);
-      const llmConfig = loadLlmConfig();
-      try {
-        const opening = await generateGachaOpening(
-          llmConfig,
-          fallbackCharacter,
-          poolConfig,
-          userInstruction
-        );
-
-        if (!isMounted) return;
-        setIsAgentThinking(false);
-
-        // Execute first action
-        await executeAgentDecisionAction(
-          opening.click_target,
-          '稳健从容',
-          1200,
-          opening.bubble_to_user,
-          opening.opening_bubble
-        );
-      } catch (err) {
-        if (!isMounted) return;
-        setIsAgentThinking(false);
-        showBubble(`既然你让我抽，那我今天可要大展身手了！`, 'bubble_to_user', 4000);
-      }
-    };
-
-    runOpening();
-
-    return () => {
-      isMounted = false;
-      if (bubbleTimerRef.current) clearTimeout(bubbleTimerRef.current);
-      if (decisionTimerRef.current) clearTimeout(decisionTimerRef.current);
-      if (modalAutoCloseTimerRef.current) clearTimeout(modalAutoCloseTimerRef.current);
-    };
-  }, []);
+  const handleDeleteCard = (cardId: string) => {
+    if (config.cards.length <= 1) return;
+    setConfig((prev) => ({
+      ...prev,
+      cards: prev.cards.filter((c) => c.id !== cardId),
+    }));
+  };
 
   return (
-    <div className="w-full h-full flex flex-col bg-stone-950 text-white relative select-none overflow-hidden font-sans">
-      
-      {/* 1. TOP STATUS BAR & CONTROLS */}
-      <div className="flex items-center justify-between px-3 py-2 bg-stone-950/90 border-b border-stone-800/80 shrink-0 z-40 relative">
-        <div className="flex items-center gap-2">
-          {onExit && (
-            <button
-              onClick={handleEndGachaSession}
-              className="flex items-center gap-1 text-xs font-semibold text-amber-400 hover:text-amber-300 py-1 px-2 rounded-xl bg-white/5 hover:bg-white/10 transition cursor-pointer pointer-events-auto"
-            >
-              <ChevronLeft className="size-4" />
-              <span>退出/结算</span>
-            </button>
-          )}
-          <div className="flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
-            <Sparkles className="size-3 text-amber-400 animate-pulse" />
-            <span className="text-[11px] font-bold text-amber-300">
-              {fallbackCharacter.name} 正在执掌抽卡
-            </span>
-          </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Spark Pity Indicator */}
-          <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-black/60 border border-amber-500/30 text-[10px]">
-            <span className="text-stone-400">井保底:</span>
-            <span className="font-mono font-bold text-amber-400">
-              {sparkCount}/{poolConfig.spark_count}
-            </span>
-          </div>
-
-          {/* Sound Toggle */}
-          <button
-            onClick={() => setSoundEnabled(!soundEnabled)}
-            className="p-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 transition cursor-pointer pointer-events-auto"
-            title={soundEnabled ? '音效开启' : '音效静音'}
-          >
-            {soundEnabled ? <Volume2 className="size-3.5" /> : <VolumeX className="size-3.5" />}
-          </button>
-
-          {/* Rules Button */}
-          <button
-            onClick={() => setShowRulesModal(true)}
-            className="p-1 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 transition cursor-pointer pointer-events-auto"
-            title="查看玩法说明"
-          >
-            <HelpCircle className="size-3.5" />
-          </button>
-
-          {/* Visual Editor Button */}
-          <button
-            onClick={() => setShowEditorModal(true)}
-            className="p-1 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 transition cursor-pointer pointer-events-auto"
-            title="打开卡池可视化编辑器"
-          >
-            <Sliders className="size-3.5" />
-          </button>
-        </div>
-      </div>
-
-      {/* 2. MAIN GACHA CONTAINER & CANVAS (v4 Vertical Screen layout) */}
-      <div className="flex-1 flex flex-col items-center justify-center p-1 sm:p-2 relative overflow-hidden bg-black/95">
-        
+    // TRUE FULLSCREEN CONTAINER: 绝对全屏覆盖，无任何外挂顶栏或外部多余边框
+    <div
+      id="gacha-fullscreen-root"
+      className="fixed inset-0 z-[99999] w-screen h-screen bg-black text-neutral-100 flex flex-row select-none font-sans overflow-hidden"
+    >
+      {/* ========================================================================= */}
+      {/* LEFT SIDE: 卡池 (占大头 3/5 ~ 2/3，根据9:16留出充足地方，无任何顶栏挡位置) */}
+      {/* ========================================================================= */}
+      <div
+        id="gacha-left-pool"
+        className="w-[62%] h-full flex items-center justify-center p-2 sm:p-4 bg-neutral-950 relative overflow-hidden shrink-0 border-r border-neutral-800/80"
+      >
+        {/* 9:16 VERTICAL GACHA SCREEN CONTAINER */}
         <div
-          ref={containerRef}
-          className="w-full max-w-[450px] h-[640px] sm:h-[700px] max-h-[82vh] relative overflow-hidden rounded-2xl border border-stone-800 bg-black shadow-2xl gacha-container"
-          style={{ perspective: '1000px' }}
+          id="gacha-vertical-screen"
+          className="h-full max-h-full aspect-[9/16] relative overflow-hidden rounded-2xl border border-neutral-800 shadow-2xl bg-neutral-950 flex flex-col justify-between"
+          style={{ perspective: '1200px' }}
         >
-          
-          {/* A. Banner Background Layer */}
-          <img
-            src={poolConfig.banner_image}
-            alt="Gacha Banner"
-            className={`w-full h-full object-cover absolute inset-0 transition-transform duration-700 gacha-banner ${
-              currentScreen === 'summon_anim' ? 'scale-110 filter brightness-125' : 'scale-100'
-            }`}
-            referrerPolicy="no-referrer"
-          />
-
-          {/* Optional Frame Overlay Layer */}
-          {poolConfig.frame_overlay && (
+          {/* ================= MULTI-LAYER GREETING CARD STACK ================= */}
+          {/* Layer 1: 底图 (最底层) */}
+          {config.bgImage && (
             <img
-              src={poolConfig.frame_overlay}
-              alt="Gacha Frame Overlay"
-              className="w-full h-full object-contain absolute inset-0 pointer-events-none z-[1] gacha-frame"
+              src={config.bgImage}
+              alt="底图"
+              className="absolute inset-0 w-full h-full object-cover z-[1] pointer-events-none"
               referrerPolicy="no-referrer"
             />
           )}
 
-          {/* Banner Gradient Scrim */}
-          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-black/40 pointer-events-none" />
-
-          {/* Pool Title & Spark Reward Header */}
-          <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none z-10">
-            <div className="bg-black/60 backdrop-blur-md px-2.5 py-1 rounded-xl border border-white/10 shadow">
-              <h2 className="text-xs font-black text-amber-300 tracking-wider flex items-center gap-1.5">
-                <span>✦ {poolConfig.pool_name}</span>
-              </h2>
+          {/* Layer 2: 卡池人物图 (中间层，双层贺卡立体夹层) */}
+          {config.characterImage && (
+            <div className="absolute inset-0 z-[2] pointer-events-none flex items-center justify-center overflow-hidden">
+              <img
+                src={config.characterImage}
+                alt="卡池人物"
+                className="w-full h-full object-contain filter drop-shadow-[0_15px_30px_rgba(0,0,0,0.85)] scale-95"
+                referrerPolicy="no-referrer"
+              />
             </div>
-            <div className="bg-amber-500/20 backdrop-blur-md px-2 py-0.5 rounded-xl border border-amber-400/30 text-[9.5px] text-amber-200 font-medium">
-              累计共鸣: {totalPulls} 发
-            </div>
-          </div>
+          )}
 
-          {/* B. MAIN INTERACTIVE BUTTONS LAYER */}
-          {currentScreen !== 'summon_anim' && currentScreen !== 'result_flipping' && (
-            <div className="absolute inset-0 pointer-events-none z-10">
-              {poolConfig.buttons.map((btn) => {
-                const isTen = btn.id === 'pull_ten';
-                const isOnce = btn.id === 'pull_once';
-                return (
-                  <button
-                    key={btn.id}
-                    type="button"
-                    onClick={() => handleButtonClick(btn.id)}
-                    style={{ left: `${btn.position.x}%`, top: `${btn.position.y}%` }}
-                    className={`absolute -translate-x-1/2 -translate-y-1/2 flex flex-col items-center justify-center transition-all pointer-events-auto cursor-pointer select-none active:scale-95 ${
-                      isTen
-                        ? 'px-4 py-2 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-stone-950 font-black text-xs shadow-lg shadow-amber-500/30 border border-amber-300 hover:brightness-110'
-                        : isOnce
-                        ? 'px-3.5 py-1.5 rounded-2xl bg-gradient-to-r from-stone-800 to-stone-900 text-amber-300 font-bold text-xs shadow border border-amber-500/40 hover:border-amber-400'
-                        : 'px-2.5 py-1 rounded-xl bg-black/70 backdrop-blur-sm text-stone-200 font-medium text-[10px] border border-white/20 hover:border-amber-400/60 hover:text-amber-300'
-                    }`}
-                  >
-                    <span>{btn.label}</span>
-                    {btn.cost && (
-                      <span className="text-[8px] opacity-75 font-mono">
-                        {btn.cost} 抽共鸣
+          {/* Layer 3: 免扣边框图 (最上层) */}
+          {config.frameImage && (
+            <img
+              src={config.frameImage}
+              alt="免扣边框图"
+              className="absolute inset-0 w-full h-full object-contain pointer-events-none z-[3]"
+              referrerPolicy="no-referrer"
+            />
+          )}
+
+          {/* ================= THREE HOT-ZONE BUTTONS (以用户免扣边框图层为准) ================= */}
+          {/* 1. 退出抽卡按键热区 */}
+          <button
+            type="button"
+            onClick={() => {
+              if (onExit) onExit();
+            }}
+            title="退出抽卡"
+            style={{
+              left: `${config.exitCircle.cx}%`,
+              top: `${config.exitCircle.cy}%`,
+              width: `${config.exitCircle.r * 2}%`,
+              height: `${config.exitCircle.r * 2}%`,
+              transform: 'translate(-50%, -50%)',
+            }}
+            className={`absolute z-10 rounded-full cursor-pointer transition active:scale-90 flex items-center justify-center ${
+              showHotZoneOutline
+                ? 'border-2 border-red-500/70 bg-red-500/20 hover:bg-red-500/40'
+                : 'opacity-0 hover:opacity-100 bg-red-500/20'
+            }`}
+          >
+            {showHotZoneOutline && (
+              <span className="text-[9px] font-bold text-red-300 drop-shadow">退出</span>
+            )}
+          </button>
+
+          {/* 2. 抽一次按键热区 */}
+          <button
+            type="button"
+            onClick={() => doPull(1)}
+            title="抽一次"
+            style={{
+              left: `${config.pullOnceCircle.cx}%`,
+              top: `${config.pullOnceCircle.cy}%`,
+              width: `${config.pullOnceCircle.r * 2}%`,
+              height: `${config.pullOnceCircle.r * 2}%`,
+              transform: 'translate(-50%, -50%)',
+            }}
+            className={`absolute z-10 rounded-full cursor-pointer transition active:scale-90 flex items-center justify-center ${
+              showHotZoneOutline
+                ? 'border-2 border-blue-500/70 bg-blue-500/20 hover:bg-blue-500/40'
+                : 'opacity-0 hover:opacity-100 bg-blue-500/20'
+            }`}
+          >
+            {showHotZoneOutline && (
+              <span className="text-[9px] font-bold text-blue-200 drop-shadow">单抽</span>
+            )}
+          </button>
+
+          {/* 3. 抽十次按键热区 */}
+          <button
+            type="button"
+            onClick={() => doPull(10)}
+            title="抽十次"
+            style={{
+              left: `${config.pullTenCircle.cx}%`,
+              top: `${config.pullTenCircle.cy}%`,
+              width: `${config.pullTenCircle.r * 2}%`,
+              height: `${config.pullTenCircle.r * 2}%`,
+              transform: 'translate(-50%, -50%)',
+            }}
+            className={`absolute z-10 rounded-full cursor-pointer transition active:scale-90 flex items-center justify-center ${
+              showHotZoneOutline
+                ? 'border-2 border-amber-400/80 bg-amber-400/25 hover:bg-amber-400/45 ring-2 ring-amber-400/30'
+                : 'opacity-0 hover:opacity-100 bg-amber-400/25'
+            }`}
+          >
+            {showHotZoneOutline && (
+              <span className="text-[10px] font-black text-amber-200 drop-shadow">十连</span>
+            )}
+          </button>
+
+          {/* ================= PULL RESULTS OVERLAY (卡片展示) ================= */}
+          {pullResults && (
+            <div
+              onClick={() => setPullResults(null)}
+              className="absolute inset-0 z-20 bg-black/90 backdrop-blur-md p-3 flex flex-col items-center justify-between cursor-pointer animate-fadeIn"
+            >
+              <div className="w-full flex items-center justify-between pb-2 border-b border-neutral-800 text-xs text-amber-300 font-bold">
+                <span>✦ 共鸣结果 ✦</span>
+                <span className="text-[10px] text-neutral-400">点击屏幕收起</span>
+              </div>
+
+              <div className="flex-1 w-full flex items-center justify-center py-2">
+                {pullResults.length === 1 ? (
+                  <div className="w-48 aspect-[3/4.2] rounded-2xl overflow-hidden bg-neutral-900 border-2 border-amber-400/80 shadow-2xl flex flex-col justify-between p-2 relative">
+                    <img
+                      src={pullResults[0].image}
+                      alt=""
+                      className="absolute inset-0 w-full h-full object-cover"
+                      referrerPolicy="no-referrer"
+                    />
+                    <div className="relative z-10 flex justify-between">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
+                        pullResults[0].rarity === 'SSR'
+                          ? 'bg-amber-400 text-neutral-950'
+                          : pullResults[0].rarity === 'SR'
+                          ? 'bg-purple-500 text-white'
+                          : 'bg-blue-600 text-white'
+                      }`}>
+                        {pullResults[0].rarity}
                       </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {/* C. SUMMONING ANIMATION FULLSCREEN OVERLAY */}
-          {currentScreen === 'summon_anim' && (
-            <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-black/90 animate-fadeIn">
-              {/* Magical Portal & Particles */}
-              <div className="relative size-64 flex items-center justify-center pointer-events-none">
-                <div className="absolute inset-0 rounded-full border-4 border-dashed border-amber-400/60 animate-spin" style={{ animationDuration: '6s' }} />
-                <div className="absolute inset-4 rounded-full border-2 border-dotted border-purple-400/80 animate-spin" style={{ animationDuration: '4s', animationDirection: 'reverse' }} />
-                <div className="absolute inset-10 rounded-full bg-gradient-to-tr from-amber-500/40 via-purple-600/40 to-pink-500/40 blur-xl animate-pulse" />
-                <div className="text-4xl animate-bounce">✨</div>
-              </div>
-
-              <div className="mt-4 text-center space-y-1 z-10 pointer-events-none">
-                <div className="text-sm font-bold text-amber-300 tracking-widest animate-pulse">
-                  ✦ 星轨共鸣召唤中 ✦
-                </div>
-                <div className="text-[10px] text-stone-400">
-                  {fallbackCharacter.name} 正在感知天命之牌……（光标点击跳过）
-                </div>
-              </div>
-
-              {/* Skip Badge Indicator */}
-              <div className="absolute top-4 right-4 px-2.5 py-1 rounded-full bg-stone-900/80 border border-white/20 text-[10px] text-stone-300 pointer-events-none">
-                <span>跳过 ⏭</span>
-              </div>
-            </div>
-          )}
-
-          {/* D. RESULT CARDS FLIPPING LAYER */}
-          {(currentScreen === 'result_flipping' || currentScreen === 'result_done') && (
-            <div className="absolute inset-0 z-20 bg-stone-950/95 backdrop-blur-md p-3 flex flex-col justify-between animate-fadeIn">
-              
-              {/* Header inside results */}
-              <div className="flex items-center justify-between px-1 shrink-0 pb-1 border-b border-stone-800">
-                <span className="text-xs font-bold text-amber-300 flex items-center gap-1">
-                  <Sparkles className="size-3.5" />
-                  <span>共鸣结果展示 · 由 {fallbackCharacter.name} 指尖逐张翻阅</span>
-                </span>
-                <span className="text-[10px] text-stone-400 font-mono">
-                  {currentBatchPulls.filter((p) => p.flipped).length}/{currentBatchPulls.length} 已揭开
-                </span>
-              </div>
-
-              {/* Cards Grid */}
-              <div className="flex-1 flex items-center justify-center py-2">
-                {currentBatchPulls.length === 1 ? (
-                  /* Single Card Display */
-                  <div className="w-40 h-56 relative perspective-1000">
-                    <div
-                      className={`w-full h-full rounded-2xl transition-transform duration-700 transform-style-3d border shadow-xl ${
-                        currentBatchPulls[0].flipped
-                          ? 'rotate-y-180 border-amber-400/80'
-                          : 'border-stone-700 bg-gradient-to-b from-stone-800 to-stone-900'
-                      }`}
-                      style={{
-                        transform: currentBatchPulls[0].flipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
-                        transformStyle: 'preserve-3d',
-                      }}
-                    >
-                      {/* Back Face */}
-                      <div
-                        className="absolute inset-0 rounded-2xl flex flex-col items-center justify-center p-3 bg-gradient-to-b from-stone-800 via-stone-900 to-black text-center"
-                        style={{ backfaceVisibility: 'hidden' }}
-                      >
-                        <div className="size-14 rounded-full border-2 border-dashed border-amber-400/50 flex items-center justify-center mb-2">
-                          <span className="text-xl">✦</span>
-                        </div>
-                        <span className="text-[11px] font-bold text-stone-400">星辉共鸣之牌</span>
-                      </div>
-
-                      {/* Front Face */}
-                      <div
-                        className="absolute inset-0 rounded-2xl overflow-hidden bg-black flex flex-col justify-between p-2"
-                        style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
-                      >
-                        <img
-                          src={currentBatchPulls[0].card.card_image}
-                          alt=""
-                          className="absolute inset-0 w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                        <div className="relative z-10 flex justify-between">
-                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500 text-stone-950">
-                            {currentBatchPulls[0].card.rarity}
-                          </span>
-                        </div>
-                        <div className="relative z-10 bg-black/80 backdrop-blur-sm p-1.5 rounded-xl border border-white/10">
-                          <div className="text-xs font-bold text-white truncate">{currentBatchPulls[0].card.name}</div>
-                          <div className="text-[9px] text-stone-300 truncate">{currentBatchPulls[0].card.description}</div>
-                        </div>
-                      </div>
+                    </div>
+                    <div className="relative z-10 bg-black/80 backdrop-blur-sm p-2 rounded-xl border border-white/10">
+                      <div className="text-sm font-bold text-white truncate">{pullResults[0].name}</div>
+                      {pullResults[0].description && (
+                        <div className="text-[10px] text-neutral-300 truncate">{pullResults[0].description}</div>
+                      )}
                     </div>
                   </div>
                 ) : (
-                  /* 10 Cards Grid (2 rows of 5) */
-                  <div className="grid grid-cols-5 gap-1.5 sm:gap-2 w-full max-w-sm">
-                    {currentBatchPulls.map((item, idx) => {
-                      const isFlipped = item.flipped;
-                      const isSSR = item.card.rarity === 'SSR';
-                      const isSR = item.card.rarity === 'SR';
-                      const isCurrentTarget = currentFlipIdx === idx;
-
+                  <div className="grid grid-cols-5 gap-1.5 w-full">
+                    {pullResults.map((item, idx) => {
+                      const isSSR = item.rarity === 'SSR';
+                      const isSR = item.rarity === 'SR';
                       return (
                         <div
-                          key={item.id}
-                          className={`aspect-[3/4.2] relative rounded-xl transition-all duration-300 ${
-                            isCurrentTarget ? 'scale-105 z-10' : ''
+                          key={idx}
+                          className={`aspect-[3/4.2] relative rounded-xl overflow-hidden bg-neutral-900 border flex flex-col justify-between p-1 ${
+                            isSSR
+                              ? 'border-amber-400 ring-2 ring-amber-400/60 shadow-lg shadow-amber-500/50'
+                              : isSR
+                              ? 'border-purple-400'
+                              : 'border-blue-400/50'
                           }`}
-                          style={{ perspective: '800px' }}
                         >
-                          <div
-                            className={`w-full h-full rounded-xl transition-transform duration-500 shadow-md ${
-                              isFlipped ? 'rotate-y-180' : ''
-                            }`}
-                            style={{
-                              transform: isFlipped ? 'rotateY(180deg)' : 'rotateY(0deg)',
-                              transformStyle: 'preserve-3d',
-                            }}
-                          >
-                            {/* Card Back */}
-                            <div
-                              className={`absolute inset-0 rounded-xl flex flex-col items-center justify-center p-1 border text-center transition-colors ${
-                                isCurrentTarget
-                                  ? 'border-amber-400 bg-amber-950/40 ring-1 ring-amber-400'
-                                  : 'border-stone-700 bg-gradient-to-b from-stone-800 to-stone-950'
-                              }`}
-                              style={{ backfaceVisibility: 'hidden' }}
-                            >
-                              <span className="text-xs sm:text-sm">✦</span>
-                              <span className="text-[7.5px] text-stone-400 font-mono scale-90">CARD</span>
-                            </div>
-
-                            {/* Card Front */}
-                            <div
-                              className={`absolute inset-0 rounded-xl overflow-hidden bg-black flex flex-col justify-between p-1 border ${
-                                isSSR
-                                  ? 'border-amber-400 ring-2 ring-amber-400/60 shadow-lg shadow-amber-500/40'
-                                  : isSR
-                                  ? 'border-purple-400'
-                                  : 'border-blue-400/40'
-                              }`}
-                              style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}
-                            >
-                              <img
-                                src={item.card.card_image}
-                                alt=""
-                                className="absolute inset-0 w-full h-full object-cover"
-                                referrerPolicy="no-referrer"
-                              />
-                              <div className="relative z-10 flex justify-between">
-                                <span
-                                  className={`px-1 rounded text-[8px] font-bold ${
-                                    isSSR
-                                      ? 'bg-amber-400 text-stone-950 font-black'
-                                      : isSR
-                                      ? 'bg-purple-500 text-white'
-                                      : 'bg-blue-600 text-white'
-                                  }`}
-                                >
-                                  {item.card.rarity}
-                                </span>
-                              </div>
-                              <div className="relative z-10 bg-black/85 backdrop-blur-sm px-1 py-0.5 rounded text-[8px] font-bold text-white truncate text-center">
-                                {item.card.name.split('·')[0]}
-                              </div>
-                            </div>
+                          <img
+                            src={item.image}
+                            alt=""
+                            className="absolute inset-0 w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="relative z-10 flex justify-between">
+                            <span className={`px-1 rounded text-[8px] font-bold ${
+                              isSSR
+                                ? 'bg-amber-400 text-neutral-950'
+                                : isSR
+                                ? 'bg-purple-500 text-white'
+                                : 'bg-blue-600 text-white'
+                            }`}>
+                              {item.rarity}
+                            </span>
+                          </div>
+                          <div className="relative z-10 bg-black/85 backdrop-blur-sm px-1 py-0.5 rounded text-[8px] font-bold text-white truncate text-center">
+                            {item.name.split('·')[0]}
                           </div>
                         </div>
                       );
@@ -1181,380 +793,481 @@ export default function GachaApp({
                 )}
               </div>
 
-              {/* Bottom Quick Return Button */}
-              {currentScreen === 'result_done' && (
-                <div className="flex items-center justify-between pt-1 border-t border-stone-800 shrink-0">
-                  <span className="text-[10px] text-stone-400">
-                    本轮抽卡已由 Agent 翻阅完成
-                  </span>
-                  <button
-                    onClick={() => setCurrentScreen('pool_main')}
-                    className="px-3 py-1 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs shadow transition cursor-pointer pointer-events-auto"
-                  >
-                    返回卡池
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* E. SSR FULL SCREEN FLASH OVERLAY */}
-          {isSsrFlashActive && (
-            <div className="absolute inset-0 z-35 bg-gradient-to-r from-amber-400/40 via-yellow-200/50 to-amber-500/40 pointer-events-none animate-ping" />
-          )}
-
-          {/* F. VIRTUAL CURSOR & FLOATING SPEECH BUBBLE LAYER (Pure visual, 100% pointer-events-none) */}
-          <div
-            className="absolute z-40 pointer-events-none select-none"
-            style={{
-              left: `${cursorPos.x}%`,
-              top: `${cursorPos.y}%`,
-              transition: cursorTransition,
-            }}
-          >
-            {/* Virtual Cursor Icon */}
-            <div
-              className={`-translate-x-1/2 -translate-y-1/2 pointer-events-none transition-transform duration-150 ${
-                isClicking ? 'scale-75' : 'scale-100 animate-bounce'
-              }`}
-              style={{
-                animationDuration: '2.5s',
-              }}
-            >
-              {poolConfig.cursor?.style === 'pointer' ? (
-                <span className="text-2xl filter drop-shadow pointer-events-none">👆</span>
-              ) : poolConfig.cursor?.style === 'wand' ? (
-                <span className="text-2xl filter drop-shadow pointer-events-none">🪄</span>
-              ) : poolConfig.cursor?.style === 'star' ? (
-                <span className="text-2xl filter drop-shadow pointer-events-none">✨</span>
-              ) : poolConfig.cursor?.style === 'crosshair' ? (
-                <span className="text-xl font-mono text-amber-400 filter drop-shadow pointer-events-none">✛</span>
-              ) : (
-                /* Classic Pointer Cursor */
-                <svg
-                  width={poolConfig.cursor?.size || 24}
-                  height={poolConfig.cursor?.size || 24}
-                  viewBox="0 0 24 24"
-                  fill={poolConfig.cursor?.color || '#F59E0B'}
-                  stroke="#000"
-                  strokeWidth="1.5"
-                  className="filter drop-shadow-md pointer-events-none"
-                >
-                  <path d="M3 3l7 18 3-7 7-3L3 3z" />
-                </svg>
-              )}
-            </div>
-
-            {/* Attached Speech Bubble */}
-            {activeBubble && (
-              <div
-                className={`absolute bottom-full left-1/2 -translate-x-1/2 mb-2 min-w-[140px] max-w-[220px] p-2.5 rounded-2xl text-xs shadow-2xl animate-fadeIn pointer-events-none select-none ${
-                  activeBubble.type === 'bubble_self'
-                    ? 'bg-black/75 backdrop-blur-md border border-white/20 text-stone-300 italic text-[11px]'
-                    : activeBubble.type === 'bubble_evaluation'
-                    ? 'bg-gradient-to-r from-amber-950 via-stone-900 to-amber-900 border border-amber-400 text-white font-medium'
-                    : 'bg-stone-900/95 border border-amber-500/40 text-stone-100 font-medium'
-                }`}
-              >
-                {/* Header label */}
-                <div className="flex items-center gap-1 text-[9px] text-amber-400 font-bold mb-0.5 pointer-events-none">
-                  <Sparkle className="size-2.5" />
-                  <span>
-                    {activeBubble.type === 'bubble_self'
-                      ? `${fallbackCharacter.name} 的内心独白`
-                      : `${fallbackCharacter.name} 的发言`}
-                  </span>
-                </div>
-                
-                <div className="leading-snug pointer-events-none">{activeBubble.text}</div>
-
-                {/* Speech Arrow for user bubbles */}
-                {activeBubble.type !== 'bubble_self' && (
-                  <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-stone-900 pointer-events-none" />
-                )}
+              <div className="text-center text-[11px] text-neutral-400 py-1">
+                点击屏幕任意处返回卡池
               </div>
-            )}
-          </div>
-
-          {/* G. Waiting for User Reply Badge */}
-          {isWaitingUserReply && (
-            <div className="absolute top-12 left-1/2 -translate-x-1/2 z-30 px-3 py-1 rounded-full bg-amber-500 text-stone-950 font-bold text-xs shadow-lg animate-pulse border border-white pointer-events-none">
-              <span>等待主控发言互动中……（在下方输入框说话）</span>
             </div>
           )}
-
         </div>
       </div>
 
-      {/* 3. BOTTOM LIVE CHAT & QUICK INSTRUCTIONS BAR */}
-      <div className="p-2 sm:p-3 bg-stone-950/95 border-t border-stone-800 shrink-0 space-y-2 z-30">
-        {/* Quick User Instruction Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar text-xs">
-          <span className="text-[10px] text-stone-400 shrink-0">快捷指令:</span>
-          {[
-            '来一发十连试试运气！',
-            '单抽一发试试手气',
-            '先看看卡池详情再决定',
-            '看一眼抽卡概率',
-            '看下刚才出了什么',
-            '别抽了，今天先收手',
-          ].map((pill) => (
+      {/* ========================================================================= */}
+      {/* RIGHT SIDE: 聊天地方 (所有设置按钮都在本全屏内部，无外挂菜单栏) */}
+      {/* ========================================================================= */}
+      <div
+        id="gacha-right-chat"
+        className="w-[38%] h-full flex flex-col bg-neutral-900 overflow-hidden relative"
+      >
+        {/* 内置无缝切换栏：在全屏内部随时在【聊天】与【卡池定制】之间切换 */}
+        <div className="flex items-center justify-between px-3 py-2 bg-neutral-950/90 border-b border-neutral-800 shrink-0">
+          <div className="flex items-center gap-1.5">
             <button
-              key={pill}
-              onClick={() => handleSendUserChatMessage(pill)}
-              className="px-2.5 py-1 rounded-xl bg-stone-900 hover:bg-stone-800 text-stone-300 hover:text-amber-300 border border-stone-800 text-[10.5px] whitespace-nowrap transition cursor-pointer"
+              onClick={() => setRightView('chat')}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
+                rightView === 'chat'
+                  ? 'bg-amber-500 text-neutral-950 shadow'
+                  : 'text-neutral-400 hover:text-white bg-neutral-800/80'
+              }`}
             >
-              {pill}
+              <MessageSquare className="size-3.5" />
+              <span>聊天互动</span>
             </button>
-          ))}
-        </div>
 
-        {/* Input Bar */}
-        <div className="flex items-center gap-2">
-          <input
-            type="text"
-            value={inGameChatInput}
-            onChange={(e) => setInGameChatInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleSendUserChatMessage();
-            }}
-            placeholder={`对 ${fallbackCharacter.name} 说点什么，如：“冲刺十连”、“先看卡池”...`}
-            className="flex-1 px-3 py-2 rounded-xl bg-stone-900 border border-stone-800 text-stone-100 text-xs focus:border-amber-500 focus:outline-none placeholder:text-stone-500"
-          />
+            <button
+              onClick={() => setRightView('settings')}
+              className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
+                rightView === 'settings'
+                  ? 'bg-amber-500 text-neutral-950 shadow'
+                  : 'text-neutral-400 hover:text-white bg-neutral-800/80'
+              }`}
+            >
+              <Sliders className="size-3.5" />
+              <span>卡池设置</span>
+            </button>
+          </div>
+
           <button
-            onClick={() => handleSendUserChatMessage()}
-            className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-xs flex items-center gap-1 shadow transition cursor-pointer shrink-0"
+            onClick={() => setShowHotZoneOutline(!showHotZoneOutline)}
+            className="px-2 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-[11px] flex items-center gap-1 cursor-pointer"
+            title="显示/隐藏卡池热区圆圈"
           >
-            <Send className="size-3.5" />
-            <span>发送</span>
+            {showHotZoneOutline ? <Eye className="size-3 text-amber-400" /> : <EyeOff className="size-3" />}
+            <span>{showHotZoneOutline ? '显圈' : '隐圈'}</span>
           </button>
         </div>
-      </div>
 
-      {/* ========================================================================= */}
-      {/* 4. MODALS (Pool Detail, Rate Info, History, Rules, Settlement, Editor) */}
-      {/* ========================================================================= */}
-
-      {/* POOL DETAIL MODAL */}
-      {showDetailModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-3 animate-fadeIn">
-          <div className="bg-stone-900 border border-stone-800 rounded-2xl w-full max-w-sm p-4 space-y-3 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-stone-800 pb-2">
-              <h3 className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                <Info className="size-4" />
-                <span>卡池详情 · {poolConfig.pool_name}</span>
-              </h3>
-              <button
-                onClick={() => {
-                  setShowDetailModal(false);
-                  setCurrentScreen('pool_main');
-                }}
-                className="text-stone-400 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-
-            <div className="space-y-2 text-xs text-stone-300 max-h-[60vh] overflow-y-auto pr-1">
-              <div className="p-2.5 rounded-xl bg-stone-950 border border-stone-800">
-                <span className="text-[11px] font-bold text-amber-400">当期保底井机制：</span>
-                <p className="text-[10px] text-stone-400 mt-1 leading-relaxed">
-                  {poolConfig.spark_reward?.description || `每共鸣1次累计1点，达到 ${poolConfig.spark_count} 抽必定获得限定角色。`}
-                </p>
-              </div>
-
-              <div className="space-y-1.5">
-                <span className="text-[11px] font-bold text-stone-200">收录角色图鉴：</span>
-                {poolConfig.cards.map((c) => (
-                  <div key={c.id} className="flex items-center gap-2 p-2 rounded-xl bg-stone-950 border border-stone-800">
-                    <img src={c.card_image} alt="" className="size-10 rounded-lg object-cover bg-black" referrerPolicy="no-referrer" />
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1">
-                        <span className="font-bold text-white text-xs">{c.name}</span>
-                        <span className={`text-[8px] font-mono px-1 py-0.2 rounded font-bold ${
-                          c.rarity === 'SSR' ? 'bg-amber-400 text-stone-950' : c.rarity === 'SR' ? 'bg-purple-500 text-white' : 'bg-blue-600 text-white'
-                        }`}>{c.rarity}</span>
-                      </div>
-                      <p className="text-[10px] text-stone-400 truncate">{c.description}</p>
-                    </div>
-                  </div>
-                ))}
+        {/* --------------------------------------------------------------------- */}
+        {/* VIEW A: 聊天地方 (用户与角色聊天沟通) */}
+        {/* --------------------------------------------------------------------- */}
+        {rightView === 'chat' && (
+          <div className="flex-1 flex flex-col h-full min-h-0 bg-neutral-900/60">
+            {/* Chat Header inside right view */}
+            <div className="px-3 py-2 bg-neutral-900/90 border-b border-neutral-800 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="font-bold text-white text-xs">{characterName || '陆沉'}</span>
+                <span className="text-[10px] text-neutral-400">卡池实时联络</span>
               </div>
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* RATE INFO MODAL */}
-      {showRateModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-3 animate-fadeIn">
-          <div className="bg-stone-900 border border-stone-800 rounded-2xl w-full max-w-xs p-4 space-y-3 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-stone-800 pb-2">
-              <h3 className="text-xs font-bold text-amber-300">共鸣概率说明</h3>
-              <button
-                onClick={() => {
-                  setShowRateModal(false);
-                  setCurrentScreen('pool_main');
-                }}
-                className="text-stone-400 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-            <div className="space-y-2 text-xs text-stone-300">
-              <div className="flex items-center justify-between p-2 rounded-lg bg-stone-950 border border-stone-800">
-                <span className="text-amber-400 font-bold">SSR 出现概率</span>
-                <span className="font-mono font-bold">{(poolConfig.rates.SSR * 100).toFixed(1)}%</span>
-              </div>
-              <div className="flex items-center justify-between p-2 rounded-lg bg-stone-950 border border-stone-800">
-                <span className="text-purple-400 font-bold">SR 出现概率</span>
-                <span className="font-mono font-bold">{(poolConfig.rates.SR * 100).toFixed(1)}%</span>
-              </div>
-              <div className="flex items-center justify-between p-2 rounded-lg bg-stone-950 border border-stone-800">
-                <span className="text-blue-400 font-bold">R 出现概率</span>
-                <span className="font-mono font-bold">{(poolConfig.rates.R * 100).toFixed(1)}%</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* PULL HISTORY MODAL */}
-      {showHistoryModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-3 animate-fadeIn">
-          <div className="bg-stone-900 border border-stone-800 rounded-2xl w-full max-w-sm p-4 space-y-3 shadow-2xl flex flex-col max-h-[75vh]">
-            <div className="flex items-center justify-between border-b border-stone-800 pb-2">
-              <h3 className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                <History className="size-4" />
-                <span>本次抽卡战绩日志 ({pullHistory.length} 发)</span>
-              </h3>
-              <button
-                onClick={() => {
-                  setShowHistoryModal(false);
-                  setCurrentScreen('pool_main');
-                }}
-                className="text-stone-400 hover:text-white p-1 cursor-pointer"
-              >
-                <X className="size-4" />
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto space-y-1.5 pr-1">
-              {pullHistory.length === 0 ? (
-                <div className="text-center text-xs text-stone-500 py-8">暂无抽卡记录</div>
-              ) : (
-                pullHistory.map((item, i) => (
-                  <div key={item.id} className="flex items-center justify-between p-2 rounded-xl bg-stone-950 border border-stone-800 text-xs">
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-[10px] text-stone-500">#{item.pull_number}</span>
-                      <span className="font-bold text-white">{item.card.name}</span>
-                    </div>
-                    <span className={`px-1.5 py-0.2 rounded text-[9px] font-mono font-bold ${
-                      item.card.rarity === 'SSR' ? 'bg-amber-400 text-stone-950' : item.card.rarity === 'SR' ? 'bg-purple-500 text-white' : 'bg-blue-600 text-white'
-                    }`}>
-                      {item.card.rarity} {item.is_spark ? '· 井' : ''}
+            {/* Chat Messages Stream */}
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              {chatMessages.map((msg) => {
+                const isChar = msg.sender === 'character';
+                return (
+                  <div
+                    key={msg.id}
+                    className={`flex flex-col ${isChar ? 'items-start' : 'items-end'}`}
+                  >
+                    <span className="text-[9px] text-neutral-500 mb-0.5 px-1 font-mono">
+                      {isChar ? characterName || '陆沉' : '我'}
                     </span>
+                    <div
+                      className={`max-w-[85%] px-3 py-2 rounded-2xl text-xs leading-relaxed break-words shadow ${
+                        isChar
+                          ? 'bg-neutral-800 text-neutral-100 rounded-tl-sm border border-neutral-700/60'
+                          : 'bg-amber-500 text-neutral-950 font-medium rounded-tr-sm'
+                      }`}
+                    >
+                      {msg.text}
+                    </div>
                   </div>
-                ))
+                );
+              })}
+              {isSending && (
+                <div className="flex items-center gap-1 text-[10px] text-neutral-400 px-1 italic">
+                  <span>{characterName || '陆沉'} 正在回应...</span>
+                </div>
+              )}
+              <div ref={chatBottomRef} />
+            </div>
+
+            {/* Chat Input Bar */}
+            <div className="p-2.5 bg-neutral-950 border-t border-neutral-800 shrink-0">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder={`和${characterName || '角色'}聊天...`}
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleSendMessage();
+                  }}
+                  className="flex-1 px-3 py-2 rounded-xl bg-neutral-900 border border-neutral-800 text-xs text-white placeholder:text-neutral-500 focus:outline-none focus:border-amber-500"
+                />
+                <button
+                  onClick={() => handleSendMessage()}
+                  disabled={!chatInput.trim() || isSending}
+                  className="p-2 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-neutral-950 font-bold transition cursor-pointer"
+                >
+                  <Send className="size-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* --------------------------------------------------------------------- */}
+        {/* VIEW B: 所有设置都在全屏内 (图层上传、画笔圈选三个按键、卡片与概率) */}
+        {/* --------------------------------------------------------------------- */}
+        {rightView === 'settings' && (
+          <div className="flex-1 flex flex-col h-full min-h-0 bg-neutral-900">
+            {/* Sub Tabs */}
+            <div className="flex items-center gap-1 px-3 py-2 bg-neutral-950/60 border-b border-neutral-800 shrink-0">
+              <button
+                onClick={() => setSettingsTab('layers')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  settingsTab === 'layers'
+                    ? 'bg-neutral-800 text-amber-400 border border-amber-500/30'
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                三大图层
+              </button>
+              <button
+                onClick={() => setSettingsTab('brush')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  settingsTab === 'brush'
+                    ? 'bg-neutral-800 text-amber-400 border border-amber-500/30'
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                画笔圈选按键
+              </button>
+              <button
+                onClick={() => setSettingsTab('cards')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  settingsTab === 'cards'
+                    ? 'bg-neutral-800 text-amber-400 border border-amber-500/30'
+                    : 'text-neutral-400 hover:text-white'
+                }`}
+              >
+                卡片与概率
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-3 space-y-4">
+              {/* TAB 1: 三大图层 (从左往右依次图层往上：底图 -> 卡池人物图 -> 免扣边框图) */}
+              {settingsTab === 'layers' && (
+                <div className="space-y-4">
+                  <div className="p-2.5 rounded-xl bg-neutral-950 border border-neutral-800 text-neutral-400 text-[11px] leading-relaxed">
+                    从左往右（从底到顶）图层依次往上：
+                    <span className="text-amber-400 font-bold"> ① 底图 </span>➔ 
+                    <span className="text-amber-400 font-bold"> ② 卡池人物图 </span>➔ 
+                    <span className="text-amber-400 font-bold"> ③ 免扣边框图 </span>。
+                    双层贺卡立体感，退出与抽卡键以免扣边框为准。
+                  </div>
+
+                  {/* 1. 底图 */}
+                  <div className="p-3 rounded-xl bg-neutral-950/80 border border-neutral-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-300 text-xs">① 底图 (最底层)</span>
+                      <label className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10.5px] cursor-pointer flex items-center gap-1">
+                        <Upload className="size-3" />
+                        <span>上传底图</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => handleFileUpload(e, (url) => setConfig((p) => ({ ...p, bgImage: url })))}
+                        />
+                      </label>
+                    </div>
+                    {config.bgImage && (
+                      <div className="w-full h-20 rounded-lg overflow-hidden border border-neutral-800">
+                        <img src={config.bgImage} alt="" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 2. 卡池人物图 */}
+                  <div className="p-3 rounded-xl bg-neutral-950/80 border border-neutral-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-amber-300 text-xs">② 卡池人物图 (中间层)</span>
+                      <label className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10.5px] cursor-pointer flex items-center gap-1">
+                        <Upload className="size-3" />
+                        <span>上传人物图</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => handleFileUpload(e, (url) => setConfig((p) => ({ ...p, characterImage: url })))}
+                        />
+                      </label>
+                    </div>
+                    {config.characterImage && (
+                      <div className="w-full h-20 rounded-lg overflow-hidden border border-neutral-800 bg-neutral-950 flex items-center justify-center">
+                        <img src={config.characterImage} alt="" className="h-full object-contain" referrerPolicy="no-referrer" />
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 3. 免扣边框图 */}
+                  <div className="p-3 rounded-xl bg-neutral-950/80 border border-neutral-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-bold text-amber-300 text-xs">③ 免扣边框图 (最上层)</span>
+                        <p className="text-[10px] text-neutral-400">退出/单抽/十连按钮以此图层为基准</p>
+                      </div>
+                      <label className="px-2.5 py-1 rounded-lg bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-[10.5px] cursor-pointer flex items-center gap-1">
+                        <Upload className="size-3" />
+                        <span>上传免扣边框</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => handleFileUpload(e, (url) => {
+                            setConfig((p) => ({ ...p, frameImage: url }));
+                            setSettingsTab('brush');
+                          })}
+                        />
+                      </label>
+                    </div>
+                    {config.frameImage && (
+                      <div className="w-full h-20 rounded-lg overflow-hidden border border-neutral-800 bg-black flex items-center justify-center">
+                        <img src={config.frameImage} alt="" className="h-full object-contain" referrerPolicy="no-referrer" />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2 flex justify-end">
+                    <button
+                      onClick={() => setConfig(DEFAULT_CONFIG)}
+                      className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 hover:text-white text-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <RotateCcw className="size-3.5" />
+                      <span>恢复默认贺卡预设</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 2: 画笔圈选三大按键 */}
+              {settingsTab === 'brush' && (
+                <div className="space-y-3">
+                  <div className="p-2.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-1">
+                    <div className="text-amber-300 font-bold text-xs flex items-center gap-1">
+                      <Sparkles className="size-3.5" />
+                      <span>画笔画圈自动确认位置</span>
+                    </div>
+                    <p className="text-[10.5px] text-neutral-400 leading-relaxed">
+                      请在下方边框画布上画一个圈。松手后系统将自动算出中心和大小，并绑定为对应的点击热区！
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <button
+                      onClick={() => setActiveBrushTarget('exit')}
+                      className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition cursor-pointer flex flex-col items-center ${
+                        activeBrushTarget === 'exit'
+                          ? 'bg-red-500/20 border-red-500 text-red-300 shadow'
+                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <span>🔴 退出抽卡</span>
+                      <span className="text-[9px] opacity-75 font-mono">
+                        ({config.exitCircle.cx}%, {config.exitCircle.cy}%)
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => setActiveBrushTarget('pull_once')}
+                      className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition cursor-pointer flex flex-col items-center ${
+                        activeBrushTarget === 'pull_once'
+                          ? 'bg-blue-500/20 border-blue-500 text-blue-300 shadow'
+                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <span>🔵 抽一次</span>
+                      <span className="text-[9px] opacity-75 font-mono">
+                        ({config.pullOnceCircle.cx}%, {config.pullOnceCircle.cy}%)
+                      </span>
+                    </button>
+
+                    <button
+                      onClick={() => setActiveBrushTarget('pull_ten')}
+                      className={`py-1.5 px-2 rounded-xl text-xs font-bold border transition cursor-pointer flex flex-col items-center ${
+                        activeBrushTarget === 'pull_ten'
+                          ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow'
+                          : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'
+                      }`}
+                    >
+                      <span>🟡 抽十次</span>
+                      <span className="text-[9px] opacity-75 font-mono">
+                        ({config.pullTenCircle.cx}%, {config.pullTenCircle.cy}%)
+                      </span>
+                    </button>
+                  </div>
+
+                  {confirmationNotice && (
+                    <div className="p-2 rounded-lg bg-emerald-950/80 border border-emerald-500/50 text-emerald-300 text-xs flex items-center gap-1.5 animate-fadeIn">
+                      <Check className="size-4 shrink-0 text-emerald-400" />
+                      <span>{confirmationNotice}</span>
+                    </div>
+                  )}
+
+                  <div className="w-full aspect-[9/16] max-h-[360px] mx-auto bg-black rounded-xl overflow-hidden border-2 border-dashed border-amber-500/40 relative shadow-inner touch-none cursor-crosshair flex items-center justify-center">
+                    <canvas
+                      ref={canvasRef}
+                      width={360}
+                      height={640}
+                      onPointerDown={handlePointerDown}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerUp}
+                      className="w-full h-full object-contain block"
+                    />
+                    <div className="absolute top-2 left-2 pointer-events-none bg-black/70 px-2 py-0.5 rounded text-[9.5px] text-amber-300 font-mono">
+                      当前画笔：画「{activeBrushTarget === 'exit' ? '退出' : activeBrushTarget === 'pull_once' ? '单抽' : '十连'}」圈
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* TAB 3: 卡片与概率配置 */}
+              {settingsTab === 'cards' && (
+                <div className="space-y-4">
+                  <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2">
+                    <span className="font-bold text-amber-300 text-xs">出货概率设置</span>
+                    <div className="grid grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-[10px] text-amber-400 mb-0.5 font-bold">SSR (%)</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          max="100"
+                          value={Number((config.rates.SSR * 100).toFixed(1))}
+                          onChange={(e) => {
+                            const val = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                            setConfig((p) => ({ ...p, rates: { ...p.rates, SSR: val / 100 } }));
+                          }}
+                          className="w-full px-2 py-1 rounded bg-neutral-900 border border-neutral-800 text-xs text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-purple-400 mb-0.5 font-bold">SR (%)</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          max="100"
+                          value={Number((config.rates.SR * 100).toFixed(1))}
+                          onChange={(e) => {
+                            const val = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                            setConfig((p) => ({ ...p, rates: { ...p.rates, SR: val / 100 } }));
+                          }}
+                          className="w-full px-2 py-1 rounded bg-neutral-900 border border-neutral-800 text-xs text-white"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] text-blue-400 mb-0.5 font-bold">R (%)</label>
+                        <input
+                          type="number"
+                          step="0.1"
+                          min="0"
+                          max="100"
+                          value={Number((config.rates.R * 100).toFixed(1))}
+                          onChange={(e) => {
+                            const val = Math.max(0, Math.min(100, parseFloat(e.target.value) || 0));
+                            setConfig((p) => ({ ...p, rates: { ...p.rates, R: val / 100 } }));
+                          }}
+                          className="w-full px-2 py-1 rounded bg-neutral-900 border border-neutral-800 text-xs text-white"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2">
+                    <span className="font-bold text-amber-300 text-xs">添加卡片</span>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="卡片名称..."
+                        value={newCardName}
+                        onChange={(e) => setNewCardName(e.target.value)}
+                        className="flex-1 px-2.5 py-1.5 rounded bg-neutral-900 border border-neutral-800 text-xs text-white"
+                      />
+                      <select
+                        value={newCardRarity}
+                        onChange={(e) => setNewCardRarity(e.target.value as any)}
+                        className="px-2 py-1.5 rounded bg-neutral-900 border border-neutral-800 text-xs text-white"
+                      >
+                        <option value="SSR">SSR</option>
+                        <option value="SR">SR</option>
+                        <option value="R">R</option>
+                      </select>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="px-2.5 py-1 rounded bg-neutral-800 hover:bg-neutral-700 text-[11px] text-neutral-300 cursor-pointer flex items-center gap-1">
+                        <Upload className="size-3" />
+                        <span>{newCardImage ? '已选图片' : '上传卡面图片'}</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => handleFileUpload(e, (url) => setNewCardImage(url))}
+                        />
+                      </label>
+
+                      <button
+                        onClick={handleAddCard}
+                        className="px-3 py-1 rounded bg-amber-500 hover:bg-amber-400 text-neutral-950 font-bold text-xs flex items-center gap-1 cursor-pointer"
+                      >
+                        <Plus className="size-3.5" />
+                        <span>添加</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <span className="font-bold text-neutral-300 text-xs">现有卡片 ({config.cards.length})</span>
+                    {config.cards.map((card) => (
+                      <div
+                        key={card.id}
+                        className="p-2 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-between gap-2"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <img
+                            src={card.image}
+                            alt=""
+                            className="size-8 rounded-lg object-cover bg-black shrink-0"
+                            referrerPolicy="no-referrer"
+                          />
+                          <div className="min-w-0">
+                            <span className="font-bold text-white text-xs truncate block">{card.name}</span>
+                            <span className={`text-[8px] font-bold px-1 rounded ${
+                              card.rarity === 'SSR' ? 'bg-amber-400 text-neutral-950' : card.rarity === 'SR' ? 'bg-purple-500 text-white' : 'bg-blue-600 text-white'
+                            }`}>{card.rarity}</span>
+                          </div>
+                        </div>
+                        {config.cards.length > 1 && (
+                          <button
+                            onClick={() => handleDeleteCard(card.id)}
+                            className="p-1 rounded text-neutral-500 hover:text-red-400 hover:bg-neutral-800 cursor-pointer"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           </div>
-        </div>
-      )}
-
-      {/* RULES MODAL */}
-      {showRulesModal && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-3 animate-fadeIn">
-          <div className="bg-stone-900 border border-stone-800 rounded-2xl w-full max-w-sm p-4 space-y-3 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-stone-800 pb-2">
-              <h3 className="text-xs font-bold text-stone-100 flex items-center gap-1.5">
-                <HelpCircle className="size-4 text-amber-400" />
-                <span>AI 抽卡模拟器（v2）体验规则</span>
-              </h3>
-              <button onClick={() => setShowRulesModal(false)} className="text-stone-400 hover:text-white p-1">
-                <X className="size-4" />
-              </button>
-            </div>
-            <div className="text-xs text-stone-300 space-y-2 leading-relaxed max-h-[60vh] overflow-y-auto">
-              <p>• <strong>看 AI 帮你抽卡</strong>：Agent 使用虚拟光标像真人一样移动、犹豫、点击抽卡按钮与卡池详情。</p>
-              <p>• <strong>真人化光标逐张翻卡 (v2)</strong>：翻卡不再是死板的动画播放，而是 Agent 用虚拟光标逐张点击卡牌翻面，节奏、犹豫与乱点均由性格画像驱动。</p>
-              <p>• <strong>异步局内互动</strong>：主控可随时在底部输入框与 Agent 交流，引导抽卡冲刺或喊停。</p>
-              <p>• <strong>情绪隔离结算</strong>：抽卡情绪仅在结束时由你确认是否写入主世界。</p>
-            </div>
-            <button
-              onClick={() => setShowRulesModal(false)}
-              className="w-full py-2 rounded-xl bg-amber-500 text-stone-950 font-bold text-xs mt-2"
-            >
-              我知道了
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* VISUAL EDITOR MODAL */}
-      {showEditorModal && (
-        <GachaEditor
-          initialConfig={poolConfig}
-          onSave={(newCfg) => setPoolConfig(newCfg)}
-          onClose={() => setShowEditorModal(false)}
-        />
-      )}
-
-      {/* EMOTION SETTLEMENT MODAL (Section X) */}
-      {showSettlementModal && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 animate-fadeIn">
-          <div className="bg-stone-900 border border-stone-800 rounded-2xl w-full max-w-sm p-4 space-y-3.5 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-stone-800 pb-2">
-              <h3 className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                <CheckCircle2 className="size-4" />
-                <span>本次抽卡情绪结算</span>
-              </h3>
-            </div>
-
-            <div className="p-2.5 rounded-xl bg-stone-950 border border-stone-800 text-xs text-stone-300 leading-relaxed italic">
-              “{endingSummaryText || '抽卡体验圆满结束啦！'}”
-            </div>
-
-            {/* Emotion Delta Grid */}
-            <div className="space-y-1.5">
-              <div className="text-[11px] font-semibold text-stone-400">
-                六维情绪影响结算（局内累计）
-              </div>
-              <div className="grid grid-cols-3 gap-1.5 bg-stone-950 p-2 rounded-xl border border-stone-800">
-                {(['joy', 'warmth', 'sadness', 'anger', 'fear', 'desire'] as EmotionKey[]).map((key) => {
-                  const val = gameTotalDelta[key] || 0;
-                  const isPos = val > 0;
-                  const isNeg = val < 0;
-                  return (
-                    <div key={key} className="flex items-center justify-between px-2 py-1 rounded bg-stone-900 text-[10.5px]">
-                      <span className="text-stone-400">{EMOTION_NAMES[key]}</span>
-                      <span className={`font-mono font-bold ${isPos ? 'text-emerald-400' : isNeg ? 'text-rose-400' : 'text-stone-500'}`}>
-                        {isPos ? `+${Math.round(val * 100)}%` : isNeg ? `${Math.round(val * 100)}%` : '0'}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Action Buttons */}
-            <div className="flex items-center gap-2 pt-2">
-              <button
-                onClick={handleApplyEmotion}
-                className="flex-1 py-2.5 px-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs font-bold transition shadow cursor-pointer"
-              >
-                应用情绪至主世界
-              </button>
-              <button
-                onClick={handleIgnoreEmotion}
-                className="flex-1 py-2.5 px-3 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs transition cursor-pointer"
-              >
-                忽略结算
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
+        )}
+      </div>
     </div>
   );
 }

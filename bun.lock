@@ -5,6 +5,7 @@
     "": {
       "name": "vite-react-typescript-starter",
       "dependencies": {
+        "@react95/fonts": "^1.0.1",
         "docx": "^9.7.1",
         "jszip": "^3.10.1",
         "lucide-react": "^1.28.0",
@@ -36,6 +37,8 @@
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
     "@oxc-project/types": ["@oxc-project/types@0.146.0", "", {}, "sha512-XC0QsnnhVe7sLIWmYmdPw7x5P0h4W8vUU3Nv1ySgWXtvCz8NizoAEpGXA0sOYoJQV2Rl13LgURAHQ5cI5ILCSA=="],
+
+    "@react95/fonts": ["@react95/fonts@1.0.1", "", {}, "sha512-4/0XCB+fz2uqL+7foWOcCYcodVfPzXbJTTBcvCSa6kf+C2U38Tz7y53CnbR22stt3+g0P78s0EgMQIn1s3FEfw=="],
 
     "@rolldown/binding-android-arm-eabi": ["@rolldown/binding-android-arm-eabi@1.2.5", "", { "os": "android", "cpu": "arm" }, "sha512-DLe/i+l8ynIBY7XEQ191TeZvCoowIGa18R+dIV30GW7DiOtp74i/xX8hs8GUjW5ARV7VZuie3d6AumSmCwbeRA=="],
 

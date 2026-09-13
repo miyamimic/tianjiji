@@ -28,9 +28,9 @@ export const ART_FONT_KEY = '__tianjiji_art_font_style';
 export const THEME_PRESETS: Record<ThemePalette, ThemeConfig> = {
   french_pastel: {
     id: 'french_pastel',
-    name: '轻法式浅粉',
-    subname: 'French Pastel Rose',
-    description: '星露谷浅色系、法式浮雕蕾丝与奶杏蔷薇粉',
+    name: '法式轻奢风',
+    subname: 'French Luxury Aesthetic',
+    description: '系统默认法式轻奢微美学：柔和奶杏粉与象牙浅色调，法式精致排版与气泡微质感。',
     isLight: true,
     grainIntensity: 0.28,
     flowerLaceStyle: true,

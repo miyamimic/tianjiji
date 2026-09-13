@@ -242,3 +242,16 @@ canvas {
 .font-qingkong {
   font-family: '晴空明朝', '晴空明朝体', 'Aozora Mincho', 'AozoraMincho', 'あおぞら明朝', 'Noto Serif SC', 'Songti SC', 'STSong', serif;
 }
+
+/* Windows 3.x Native UI 8pt Bitmap Font (.fon / System / Fixedsys) - Strict Bitmap Rendering, NO Microsoft Sans Serif */
+.win3x-bitmap-font {
+  font-family: 'System', 'Fixedsys', 'PixelFont', monospace !important;
+  font-size: 8pt !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+  -webkit-font-smoothing: none !important;
+  -moz-osx-font-smoothing: grayscale !important;
+  font-smooth: never !important;
+  text-rendering: pixelated !important;
+  image-rendering: pixelated !important;
+}

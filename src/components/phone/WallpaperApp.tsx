@@ -45,7 +45,6 @@ export default function WallpaperApp({ onBgChange, currentBg }: Props) {
   const [customUrl, setCustomUrl] = useState('');
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
   const [dragOver, setDragOver] = useState(false);
 
   const handleDrop = (e: React.DragEvent) => {
@@ -109,23 +108,25 @@ export default function WallpaperApp({ onBgChange, currentBg }: Props) {
   };
 
   return (
-    <div className="space-y-4 text-xs text-white/90 pb-6 animate-in fade-in-0 duration-200">
-      {/* Upload local image card */}
-      <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.03] space-y-3">
+    <div className="space-y-4 text-xs text-black font-sans select-none">
+      {/* 1. 自定义壁纸上传 */}
+      <fieldset className="border border-t-[#808080] border-l-[#808080] border-b-white border-r-white p-3 pt-2 bg-[#c0c0c0] space-y-3">
+        <legend className="px-1 text-black font-bold text-xs bg-[#c0c0c0] flex items-center justify-between gap-2">
+          <span>专属背景壁纸 (Custom Wallpaper)</span>
+        </legend>
+
         <div className="flex items-center justify-between">
-          <span className="font-semibold text-white flex items-center gap-1.5 text-xs">
-            <Upload className="size-3.5 text-pink-400" />
-            专属原画背景图 (chat_bg)
-          </span>
+          <span className="text-[11px] text-[#333]">上传本地图片或指定外链作为主背景：</span>
           <button
             onClick={handleReset}
-            className="flex items-center gap-1 text-[10px] text-white/40 hover:text-white transition-colors"
+            className="px-2 py-0.5 bg-[#c0c0c0] text-black border-2 border-t-white border-l-white border-b-[#404040] border-r-[#404040] active:border-t-[#404040] active:border-l-[#404040] active:border-b-white active:border-r-white font-bold text-[10px] flex items-center gap-1 hover:bg-[#d0d0d0] cursor-pointer"
           >
-            <RotateCcw className="size-3" />
-            还原默认壁纸
+            <RotateCcw className="w-3 h-3" />
+            <span>还原默认壁纸</span>
           </button>
         </div>
 
+        {/* Drop zone */}
         <div
           onClick={() => fileInputRef.current?.click()}
           onDragOver={(e) => {
@@ -134,17 +135,17 @@ export default function WallpaperApp({ onBgChange, currentBg }: Props) {
           }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
-          className={`border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition-all flex flex-col items-center justify-center gap-1.5 group ${
+          className={`border-2 p-3 text-center cursor-pointer transition-none flex flex-col items-center justify-center gap-1 bg-white ${
             dragOver
-              ? 'border-pink-400 bg-pink-500/10'
-              : 'border-white/20 hover:border-pink-400/60 bg-black/40'
+              ? 'border-black bg-[#ffffcc]'
+              : 'border-t-[#808080] border-l-[#808080] border-b-white border-r-white hover:bg-[#f5f5f5]'
           }`}
         >
-          <div className="p-2 rounded-full bg-white/5 group-hover:bg-pink-500/10 transition-colors">
-            <ImageIcon className="size-5 text-white/60 group-hover:text-pink-400" />
+          <div className="flex items-center gap-2">
+            <ImageIcon className="w-4 h-4 text-[#0000a8]" />
+            <span className="font-bold text-xs text-black">点击选择图片 或 拖放文件至此</span>
           </div>
-          <p className="text-[11px] text-white/90 font-medium">点击选择或直接将原图拖放至此</p>
-          <p className="text-[9px] text-pink-300/80">✨ 100% 完整无损保留原图细节 · 严禁任何 AI 重新生成</p>
+          <p className="text-[10px] text-[#666]">支持 PNG / JPG / WEBP 等高分辨率图像，原画质呈现</p>
           <input
             ref={fileInputRef}
             type="file"
@@ -160,36 +161,35 @@ export default function WallpaperApp({ onBgChange, currentBg }: Props) {
             type="url"
             value={customUrl}
             onChange={(e) => setCustomUrl(e.target.value)}
-            placeholder="或粘贴图片外链 URL (https://...)"
-            className="flex-1 px-3 py-1.5 text-xs rounded-xl border border-white/10 bg-black/50 text-white placeholder:text-white/30 focus:outline-none focus:border-pink-400/50"
+            placeholder="或输入图片网络外链 URL (https://...)"
+            className="flex-1 px-2.5 py-1 text-xs border-2 border-t-[#808080] border-l-[#808080] border-b-white border-r-white bg-white text-black placeholder:text-[#888] focus:outline-none"
           />
           <button
             type="submit"
             disabled={!customUrl.trim()}
-            className="px-3 py-1.5 text-xs rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium disabled:opacity-30 transition-colors"
+            className="px-3 py-1 bg-[#c0c0c0] text-black border-2 border-t-white border-l-white border-b-[#404040] border-r-[#404040] active:border-t-[#404040] active:border-l-[#404040] active:border-b-white active:border-r-white font-bold text-xs disabled:opacity-50 hover:bg-[#d0d0d0] cursor-pointer"
           >
-            应用
+            应用外链
           </button>
         </form>
 
         {uploadSuccess && (
-          <div className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium animate-in fade-in-0 duration-200">
-            <Check className="size-3.5" />
-            <span>背景装扮已实时同步更换！原图细节已完整就绪</span>
+          <div className="p-1.5 border-2 border-t-[#808080] border-l-[#808080] border-b-white border-r-white bg-[#ffffcc] text-green-900 font-bold font-mono text-[11px] flex items-center gap-1.5">
+            <Check className="w-3.5 h-3.5 text-green-700" />
+            <span>[OK] 壁纸设置已实时同步更新！</span>
           </div>
         )}
-      </div>
+      </fieldset>
 
-      {/* Atmospheric Wallpaper Presets */}
-      <div className="p-4 rounded-2xl border border-white/10 bg-white/[0.03] space-y-3">
-        <div className="flex items-center justify-between">
-          <span className="font-semibold text-white flex items-center gap-1.5 text-xs">
-            <Sparkles className="size-3.5 text-pink-400" />
-            精选氛围壁纸预设
-          </span>
-          <span className="text-[10px] text-white/40">点击直接生效</span>
-        </div>
-        <div className="grid grid-cols-2 gap-2.5">
+      {/* 2. 预设壁纸库 */}
+      <fieldset className="border border-t-[#808080] border-l-[#808080] border-b-white border-r-white p-3 pt-2 bg-[#c0c0c0] space-y-2.5">
+        <legend className="px-1 text-black font-bold text-xs bg-[#c0c0c0] flex items-center gap-1.5">
+          <span>精选预设壁纸库 (Preset Wallpapers)</span>
+        </legend>
+
+        <p className="text-[11px] text-[#333]">单击下列任意预设壁纸即可一键切换：</p>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {PRESET_BGS.map((preset) => {
             const isSelected =
               currentBg === preset.url ||
@@ -200,43 +200,33 @@ export default function WallpaperApp({ onBgChange, currentBg }: Props) {
               <button
                 key={preset.id}
                 onClick={() => handlePresetSelect(preset.url)}
-                className={`group relative rounded-xl overflow-hidden border text-left transition-all aspect-[16/10] ${
+                className={`group relative text-left transition-none aspect-[16/10] p-1 bg-[#c0c0c0] cursor-pointer ${
                   isSelected
-                    ? preset.isSpecial
-                      ? 'border-pink-400 ring-2 ring-pink-400/40 shadow-lg shadow-pink-500/10'
-                      : 'border-[hsl(28_85%_62%)] ring-2 ring-[hsl(28_85%_62%/0.4)] shadow-lg'
-                    : preset.isSpecial
-                    ? 'border-pink-500/40 hover:border-pink-400'
-                    : 'border-white/10 hover:border-white/30'
+                    ? 'border-2 border-t-black border-l-black border-b-white border-r-white ring-1 ring-blue-700'
+                    : 'border-2 border-t-white border-l-white border-b-[#404040] border-r-[#404040] hover:bg-[#d0d0d0]'
                 }`}
               >
-                <img
-                  src={preset.url}
-                  alt={preset.name}
-                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                />
-                {preset.isSpecial && (
-                  <div className="absolute top-1.5 right-1.5 px-1.5 py-0.5 rounded-full bg-pink-500/80 text-[8px] font-bold text-white tracking-wider backdrop-blur-sm shadow-sm">
-                    专属原图
+                <div className="w-full h-full relative overflow-hidden border border-[#808080]">
+                  <img
+                    src={preset.url}
+                    alt={preset.name}
+                    className="w-full h-full object-cover"
+                  />
+                  {preset.isSpecial && (
+                    <div className="absolute top-1 right-1 px-1 text-[8px] font-mono font-bold bg-[#000080] text-white">
+                      专属原图
+                    </div>
+                  )}
+                  <div className="absolute inset-x-0 bottom-0 bg-black/75 p-1 flex items-center justify-between text-[9px] font-bold text-white">
+                    <span className="truncate">{preset.name}</span>
+                    {isSelected && <Check className="w-3 h-3 text-yellow-300 shrink-0" />}
                   </div>
-                )}
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent flex items-end p-2">
-                  <span className="text-[10px] font-semibold text-white flex items-center justify-between w-full">
-                    {preset.name}
-                    {isSelected && (
-                      <Check
-                        className={`size-3 shrink-0 ${
-                          preset.isSpecial ? 'text-pink-400' : 'text-[hsl(28_85%_62%)]'
-                        }`}
-                      />
-                    )}
-                  </span>
                 </div>
               </button>
             );
           })}
         </div>
-      </div>
+      </fieldset>
     </div>
   );
 }

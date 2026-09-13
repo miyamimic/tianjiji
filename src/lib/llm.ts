@@ -2593,6 +2593,33 @@ export interface GachaClickTarget {
   position?: { x: number; y: number }; // 0-1 normalized
 }
 
+export interface GachaPuppetContext {
+  current_screen: string;
+  clickable_targets: Array<{ id: string; label: string; x: number; y: number }>;
+  user_message: string;
+  gacha_state: {
+    totalPulls: number;
+    sparkCount: number;
+    sparkMax: number;
+    ssrCount: number;
+    ssrList: string[];
+    lastPullRarities?: string[];
+    poolName: string;
+  };
+}
+
+export interface GachaPuppetOutput {
+  speech: string;
+  thought: string;
+  target_id: string;
+  custom_coordinate?: {
+    x: number;
+    y: number;
+  };
+  hesitation_ms: number;
+  next_intent: 'pull' | 'view' | 'stop' | 'idle';
+}
+
 export interface GachaOpeningOutput {
   first_action: 'move_to_button' | 'move_to_blank' | 'idle';
   click_target: GachaClickTarget;
@@ -2626,6 +2653,138 @@ export interface GachaUserResponseOutput {
 export interface GachaEndingOutput {
   ending_bubble: string;
   gameTotalDelta?: Partial<EmotionVector>;
+}
+
+/**
+ * 核心：LLM JSON 驱动木偶调度协议 (Gacha Puppet Protocol)
+ * 前端零业务意志，严格按 LLM 返回纯 JSON 执行台词、光标移动、悬停犹豫及目标意图
+ */
+export async function generateGachaPuppetDecision(
+  config: LlmConfig,
+  character: Character,
+  context: GachaPuppetContext
+): Promise<GachaPuppetOutput> {
+  const currentEmotion = character.emotion?.current || {
+    anger: 0.1,
+    fear: 0.1,
+    joy: 0.5,
+    sadness: 0.1,
+    desire: 0.3,
+    warmth: 0.6,
+  };
+
+  const targetsFormatted = context.clickable_targets
+    .map((t) => `  - id: "${t.id}" | 标签: "${t.label}" | 坐标: (x: ${t.x}%, y: ${t.y}%)`)
+    .join('\n');
+
+  const prompt = `你是角色「${character.name}」。
+核心人设性格：${character.core.values.join('、')}，台词口吻风格：${character.core.speech_filter}。
+当前六维情绪快照：温情${(currentEmotion.warmth * 100).toFixed(0)}%、喜悦${(currentEmotion.joy * 100).toFixed(0)}%、期待/欲望${(currentEmotion.desire * 100).toFixed(0)}%、悲伤${(currentEmotion.sadness * 100).toFixed(0)}%、怒意${(currentEmotion.anger * 100).toFixed(0)}%。
+
+你现在正像真人一样，在屏幕前使用虚拟光标帮主控操作一个二次元抽卡模拟器。
+前端系统是完全零自主业务意志的“提线木偶执行器”，前端绝不会擅自决定动作或自动循环。你输出的纯 JSON 将直接决定角色的动作意图、光标目标、悬停手癖及台词！
+
+【当前实时屏幕状态与上下文接口数据】：
+- 当前画面：${context.current_screen}
+- 当前画面所有可点击的有效元素（及其百分比中心坐标）：
+${targetsFormatted}
+- 底层真实抽卡状态：
+  - 卡池名称：${context.gacha_state.poolName}
+  - 累计已抽：${context.gacha_state.totalPulls} 发
+  - 井保底进度：${context.gacha_state.sparkCount}/${context.gacha_state.sparkMax}
+  - 累计已出SSR(${context.gacha_state.ssrCount}个)：${context.gacha_state.ssrList.length > 0 ? context.gacha_state.ssrList.join('、') : '暂无'}
+${context.gacha_state.lastPullRarities && context.gacha_state.lastPullRarities.length > 0 ? `  - 最近一轮出货品质：${context.gacha_state.lastPullRarities.join(', ')}` : ''}
+- 主控最新发送的指令/对话：
+  "${context.user_message || '（主控正在安静注视着你的操作）'}"
+
+【你的决策任务】：
+请结合你的性格、当前画面状态、主控的话以及抽卡战况，做出即时真实反应。
+- speech: 你对主控说的话（完全由你根据角色风格自由发挥，无预设，可调侃、撒娇、激动、叹气、自信作法、庆祝出货等）。
+- thought: 你的内心独白或心理小动作。
+- target_id: 必须对应上述 clickable_targets 列表中的某个 id。例如你想抽十连就选 pull_ten，想单抽就选 pull_once，想看详情选 pool_detail，想跳过动画选 skip_anim，想返回选 back_to_pool，想结束退出选 exit_btn，想乱点屏幕或晃动光标选 blank。
+- custom_coordinate: 若 target_id 为 blank（如跳过动画或真人闲来无事乱点屏幕），填写你的自定义坐标 { "x": 0~100, "y": 0~100 }；若点击特定按钮则默认使用该按钮坐标。
+- hesitation_ms: 点击前光标犹豫悬停的毫秒数（300~2000ms，展现真人手癖）。
+- next_intent: 动作意图，必须且仅可为以下四者之一：
+  - "pull": 触发抽卡共鸣
+  - "view": 触发查看信息或弹窗（卡池详情、概率、记录、规则、跳过动画、返回等）
+  - "stop": 停止抽卡，触发退出与情绪结算
+  - "idle": 仅说话或轻微晃动光标，不触发业务操作
+
+请严格输出纯 JSON，严禁输出任何多余解释说明：
+\`\`\`json
+{
+  "speech": "呼……这发看我的，必帮你把限定金光带回家！",
+  "thought": "深呼吸，求求天道眷顾，千万不要沉底呀……",
+  "target_id": "pull_ten",
+  "custom_coordinate": { "x": 50, "y": 50 },
+  "hesitation_ms": 750,
+  "next_intent": "pull"
+}
+\`\`\``;
+
+  try {
+    const raw = await callLlm(config, [
+      {
+        role: 'system',
+        content: `你是「${character.name}」，严格遵守抽卡模拟器提线木偶调度协议，输出符合规范的纯净 JSON。`,
+      },
+      { role: 'user', content: prompt },
+    ]);
+
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) {
+      const parsed = JSON.parse(match[0]);
+      let targetId = String(parsed.target_id || '').trim();
+      // Verify targetId in clickable targets
+      const validTarget = context.clickable_targets.find((t) => t.id === targetId);
+      if (!validTarget && targetId !== 'blank') {
+        // If not found, pick the best matching target or the first target
+        targetId = context.clickable_targets[0]?.id || 'blank';
+      }
+
+      const validIntents: Array<'pull' | 'view' | 'stop' | 'idle'> = ['pull', 'view', 'stop', 'idle'];
+      let intent: 'pull' | 'view' | 'stop' | 'idle' = validIntents.includes(parsed.next_intent)
+        ? parsed.next_intent
+        : targetId.includes('pull')
+        ? 'pull'
+        : targetId.includes('exit')
+        ? 'stop'
+        : 'view';
+
+      return {
+        speech: String(parsed.speech || '看我的吧！').trim(),
+        thought: String(parsed.thought || '').trim(),
+        target_id: targetId,
+        custom_coordinate:
+          parsed.custom_coordinate && typeof parsed.custom_coordinate.x === 'number'
+            ? {
+                x: Math.max(5, Math.min(95, parsed.custom_coordinate.x)),
+                y: Math.max(5, Math.min(95, parsed.custom_coordinate.y)),
+              }
+            : undefined,
+        hesitation_ms:
+          typeof parsed.hesitation_ms === 'number'
+            ? Math.max(200, Math.min(3000, parsed.hesitation_ms))
+            : 600,
+        next_intent: intent,
+      };
+    }
+  } catch (err) {
+    console.warn('generateGachaPuppetDecision LLM error:', err);
+  }
+
+  // Safe fallback adhering strictly to GachaPuppetOutput schema
+  const defaultTarget = context.clickable_targets[0]?.id || 'pull_ten';
+  const defaultIntent = defaultTarget.includes('pull') ? 'pull' : 'view';
+
+  return {
+    speech: '既然交给我，看我今天给你露一手！',
+    thought: '让我先来看看时机……',
+    target_id: defaultTarget,
+    custom_coordinate: { x: 50, y: 50 },
+    hesitation_ms: 600,
+    next_intent: defaultIntent,
+  };
 }
 
 /**

@@ -44,7 +44,7 @@ export const DOS_FILE_LIST: DosFileEntry[] = [
   { id: 'ghost_card', name: '捉鬼牌', category: '纸牌博弈', desc: '心理博弈·互抽手牌消对' },
   { id: 'gomoku', name: '五子棋', category: '棋艺对局', desc: '黑白落子·棋盘手谈交锋' },
   { id: 'draw_guess', name: '你画我猜', category: '趣味画技', desc: '笔锋还原时序·默契猜词' },
-  { id: 'ai_gacha', name: 'AI抽卡', category: '掌机模拟', desc: 'AI掌控光标·沉浸保底抽卡' },
+  { id: 'ai_gacha', name: '抽卡页面', category: '多图层定制', desc: '双层贺卡·画笔圈选·全屏抽卡' },
   { id: 'pixel_jumper', name: '像素跳跃', category: '单机街机', desc: '经典跑酷避障·极速跑酷' },
   { id: 'stickers', name: '表情图库', category: '表情管理', desc: '偷表情管理·表情包鉴赏' },
 ];
@@ -269,6 +269,7 @@ export default function GameLobbyApp({
             currentEmotionSnapshot={currentEmotionSnapshot}
             onGameFinished={onGameFinished}
             onApplyGameEmotionDelta={onApplyGameEmotionDelta}
+            onInGameChat={onInGameChat}
             onExit={() => setActiveSub('lobby')}
           />
         </div>
